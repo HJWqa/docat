@@ -1,0 +1,22 @@
+{
+  "name": "docat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source device orchestration and automation toolkit - Client-Server architecture for Dobot robots",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@11.1.2",
+  "dependencies": {
+    "turbo": "^2.9.16"
+  }
+}
