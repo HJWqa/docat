@@ -24,6 +24,8 @@ cjs/
 packages/docat-web/public/3d/static/*
 !packages/docat-web/public/3d/static/mg6/
 !packages/docat-web/public/3d/static/mg6/**
+!packages/docat-web/public/3d/static/js/
+!packages/docat-web/public/3d/static/js/**
 
 # TypeScript
 *.tsbuildinfo
