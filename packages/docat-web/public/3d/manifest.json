@@ -1,0 +1,9 @@
+{
+  "short_name": "Dobot 3D",
+  "name": "Dobot 3D Model Plugin",
+  "icons": [],
+  "start_url": "./index.html",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#202228"
+}

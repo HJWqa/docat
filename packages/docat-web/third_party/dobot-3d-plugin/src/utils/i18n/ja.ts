@@ -1,0 +1,6 @@
+const ja: { [key: string]: string } = {}
+
+ja.TR_WALL_START = '安全壁が作動しました'
+ja.TR_ZONE_START = 'セキュリティエリアが起動しました'
+
+export default ja
