@@ -7,7 +7,19 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "DOCAT_AUTO_CONNECT",
+        "DOCAT_DB_PATH",
+        "DOCAT_HOST",
+        "DOCAT_LOG_LEVEL",
+        "DOCAT_POLL_INTERVAL",
+        "DOCAT_PORT",
+        "DOCAT_SCAN_IPS",
+        "DOCAT_SERVER_URL",
+        "DOCAT_SESSION_EXPIRE_DAYS",
+        "VITE_DOCAT_SERVER_URL"
+      ]
     },
     "test": {
       "dependsOn": ["build"]

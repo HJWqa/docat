@@ -23,13 +23,18 @@ program
   .name('docat-server')
   .description('docat 设备编排服务端')
   .version('0.1.0')
-  .option('-p, --port <port>', '服务端口', '9100')
-  .option('-H, --host <host>', '监听地址', '0.0.0.0')
-  .option('--db <path>', '数据库文件路径', './data/docat.db')
+  .option('-p, --port <port>', '服务端口')
+  .option('-H, --host <host>', '监听地址')
+  .option('--db <path>', '数据库文件路径')
   .option('--no-auto-connect', '启动时不自动连接设备')
   .parse(process.argv)
 
-const opts = program.opts()
+const opts = program.opts<{
+  port?: string
+  host?: string
+  db?: string
+  autoConnect?: boolean
+}>()
 
 // ─── 初始化 ──────────────────────────────────────
 
@@ -41,10 +46,10 @@ async function main(): Promise<void> {
 
   // 1. 加载配置
   const config = loadConfig()
-  config.port = parseInt(opts.port, 10) || config.port
-  config.host = opts.host || config.host
-  config.dbPath = opts.db || config.dbPath
-  config.autoConnect = opts.autoConnect !== false
+  if (opts.port !== undefined) config.port = parseInt(opts.port, 10) || config.port
+  if (opts.host !== undefined) config.host = opts.host
+  if (opts.db !== undefined) config.dbPath = opts.db
+  if (opts.autoConnect === false) config.autoConnect = false
   console.log('[Config]', JSON.stringify(config, null, 2))
 
   // 2. 初始化数据库

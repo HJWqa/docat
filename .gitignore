@@ -42,6 +42,7 @@ pnpm-debug.log*
 .env.*
 .env.local
 *.local
+!.env.example
 settings.local.json
 
 # IDEs and editors

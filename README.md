@@ -54,7 +54,9 @@ pnpm install
 pnpm dev
 ```
 
-这会并行/串行启动各包的开发任务（如 server、web）。若只想启动某个包，使用 workspace 过滤器：
+`turbo` 的作用是统一调度 monorepo 里的脚本：它会按依赖关系并行启动能并行的任务、跳过缓存的重复工作，并保证 `dev / build / test` 在各包里用同一套入口跑起来。
+
+`pnpm dev` 会启动 `docat-server` 和 `docat-web` 的开发服务。若只想启动某个包，使用 workspace 过滤器：
 
 ```bash
 pnpm --filter ./packages/docat-server dev
@@ -75,11 +77,22 @@ pnpm lint
 pnpm typecheck
 ```
 
-## 运行细节
+## 配置与运行细节
 
-- 后端默认：`packages/docat-server` 启动 REST 与 WebSocket 服务，默认配置可通过环境变量或 `packages/docat-server/config` 加载。
-- 前端默认：`packages/docat-web` 在 `localhost:5173`（Vite 默认端口）提供管理界面。
-- CLI：`packages/docat-cli` 提供与后端交互的便捷命令，适合脚本化流程与 CI。
+- 后端默认监听 `0.0.0.0:9100`，可通过环境变量配置：
+  - `DOCAT_PORT`
+  - `DOCAT_HOST`
+  - `DOCAT_DB_PATH`
+  - `DOCAT_SCAN_IPS`
+  - `DOCAT_POLL_INTERVAL`
+  - `DOCAT_LOG_LEVEL`
+  - `DOCAT_AUTO_CONNECT`
+  - `DOCAT_SESSION_EXPIRE_DAYS`
+- 前端默认在 `http://localhost:5173` 提供界面，并通过 Vite dev proxy 把同源的 `/api` 和 `/ws` 转发到后端。默认代理目标是 `http://127.0.0.1:9100`；如果后端端口或地址变了，可以给前端 dev server 设置 `DOCAT_SERVER_URL`，例如 `DOCAT_SERVER_URL=http://127.0.0.1:9200 pnpm --filter ./packages/docat-web dev`。
+- `pnpm dev` 默认会把前端监听到 `0.0.0.0:5173`，局域网里其他设备访问 `http://你的电脑IP:5173` 即可；浏览器仍请求前端同源的 `/api` 和 `/ws`，不要在这种场景设置 `VITE_DOCAT_SERVER_URL=http://localhost:9100`。
+- 只有在前端静态文件被单独托管、且没有反向代理 `/api` 和 `/ws` 时，才设置浏览器侧的 `VITE_DOCAT_SERVER_URL`，值必须是访问者浏览器可达的后端地址，例如 `http://192.168.1.20:9100`。
+- `.env.example` 只是变量示例。根目录 `pnpm dev` 不会自动读取根 `.env`；需要覆盖配置时，把变量导出到 shell，或把前端专用变量放到 `packages/docat-web/.env.local`。
+- CLI 适合脚本化调用；构建后可作为单独命令使用。
 
 示例：在本地启动后端并访问前端
 
@@ -87,6 +100,20 @@ pnpm typecheck
 pnpm --filter ./packages/docat-server dev
 pnpm --filter ./packages/docat-web dev
 # 在浏览器打开 http://localhost:5173
+```
+
+## 构建产物如何使用
+
+```bash
+pnpm build
+
+# 后端：构建后直接运行 dist/server.js
+pnpm --filter ./packages/docat-server start
+
+# CLI：构建后运行 dist/index.js
+node packages/docat-cli/dist/index.js --help
+
+# 前端：构建后生成 packages/docat-web/dist/，可交给静态文件服务器托管
 ```
 
 ## 代码与扩展点说明
@@ -98,15 +125,17 @@ pnpm --filter ./packages/docat-web dev
 
 ## 配置与环境变量
 
-- 在开发环境中可使用根目录或包级别的 `.env` 文件（未加入仓库），常见变量示例：
+- 常见环境变量示例：
 
 ```
-PORT=3000
-DB_URL=file:./data/sqlite.db
-API_KEY=secret
+DOCAT_HOST=0.0.0.0
+DOCAT_PORT=9100
+DOCAT_DB_PATH=./data/docat.db
+DOCAT_SERVER_URL=http://127.0.0.1:9100
+# VITE_DOCAT_SERVER_URL=http://192.168.1.20:9100
 ```
 
-具体变量请查看 `packages/docat-server` 中的配置加载逻辑。
+后端变量由 `packages/docat-server` 的配置加载逻辑读取；`DOCAT_SERVER_URL` 只用于前端 dev server 代理；`VITE_DOCAT_SERVER_URL` 会暴露给浏览器，通常只用于没有反向代理的静态前端部署。
 
 ## 调试与日志
 
@@ -123,5 +152,3 @@ API_KEY=secret
 - 保持单一包管理器（本仓库推荐 `pnpm`）。
 - 在提交前运行 `pnpm lint` 与 `pnpm test`。
 - 新增驱动或 transport 时，添加单元测试并更新文档。
-
-

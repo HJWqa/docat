@@ -11,8 +11,9 @@ import type {
   ScriptLanguage,
   User,
 } from 'docat-shared/types'
+import { getApiBaseUrl } from './runtime'
 
-const BASE = ''
+const BASE = getApiBaseUrl()
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<ApiResponse<T>> {
   const headers: Record<string, string> = {}

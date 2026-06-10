@@ -3,6 +3,7 @@
  */
 import type { DeviceState, WSMessage } from 'docat-shared/types'
 import { getToken } from './api'
+import { getWsUrl } from './runtime'
 
 type StateHandler = (deviceId: string, state: DeviceState) => void
 type AlarmHandler = (deviceId: string, alarm: unknown) => void
@@ -30,10 +31,7 @@ class WsClient {
     const token = getToken()
     if (!token) return
 
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${location.host}/ws`
-
-    this.ws = new WebSocket(url)
+    this.ws = new WebSocket(getWsUrl())
 
     this.ws.onopen = () => {
       console.log('[WS] Connected')
