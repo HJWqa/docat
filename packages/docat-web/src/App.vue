@@ -6,6 +6,7 @@
       </KeepAlive>
     </Transition>
   </router-view>
+  <Toast ref="toastRef" />
 </template>
 
 <script setup lang="ts">
@@ -14,10 +15,12 @@ import { useRouter } from 'vue-router'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import { me, clearToken, getToken } from './services/api'
 import { wsClient } from './services/ws'
+import Toast from './components/Toast.vue'
 
 const router = useRouter()
 const transitionName = ref('workspace-forward')
 let lastDepth = Number(router.currentRoute.value.meta.workspaceDepth ?? 0)
+const toastRef = ref<InstanceType<typeof Toast> | null>(null)
 
 function getRouteKey(route: RouteLocationNormalizedLoaded): string {
   if (route.name === 'Programming' || route.name === 'DeviceProgramming') return 'ProgrammingView'
@@ -45,6 +48,12 @@ async function checkAuth() {
     if (res.success && res.data) {
       auth.value.username = res.data.username
       auth.value.role = res.data.role
+      wsClient.onDeviceError((deviceId, data) => {
+        const payload = data as { ip?: string; port?: number; error?: { message?: string } }
+        const address = payload.ip && payload.port ? `${payload.ip}:${payload.port}` : deviceId
+        const message = payload.error?.message || 'TCP connection error'
+        toastRef.value?.error(`${address} · ${message}`)
+      })
       wsClient.connect()
     } else {
       clearToken()

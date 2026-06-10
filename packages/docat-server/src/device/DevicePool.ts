@@ -186,6 +186,16 @@ export class DevicePool {
           })
         }
       })
+      tcp.on('error', ({ port, error }: { port: number; error: Error }) => {
+        console.error(`[DevicePool] TCP error on ${ip}:${port}:`, error.message)
+        eventBus.emit('device:error', {
+          deviceId: driverId,
+          ip,
+          port,
+          error,
+          timestamp: Date.now(),
+        })
+      })
       tcp.connectAll()
 
       // 创建传输层

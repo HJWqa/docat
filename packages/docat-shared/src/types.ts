@@ -247,6 +247,7 @@ export type WSEventType =
   | 'peer-action'
   | 'device-online'
   | 'device-offline'
+  | 'device-error'
   | 'alarm'
   | 'runtime-log'
   | 'runtime-cursor'

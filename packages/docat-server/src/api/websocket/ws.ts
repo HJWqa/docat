@@ -157,6 +157,11 @@ export function websocketRoutes(
     broadcast({ type: 'device-offline', deviceId })
   })
 
+  eventBus.on('device:error', (data: unknown) => {
+    const payload = data as { deviceId: string; [key: string]: unknown }
+    broadcast({ type: 'device-error', deviceId: payload.deviceId, data: payload })
+  })
+
   function broadcast(msg: WSMessage): void {
     const payload = JSON.stringify(msg)
     for (const [, client] of clients) {

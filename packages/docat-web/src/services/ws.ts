@@ -10,6 +10,7 @@ type OnlineHandler = (deviceId: string) => void
 type OfflineHandler = (deviceId: string) => void
 type RuntimeLogHandler = (deviceId: string, data: unknown) => void
 type RuntimeCursorHandler = (deviceId: string, data: unknown) => void
+type DeviceErrorHandler = (deviceId: string, data: unknown) => void
 
 class WsClient {
   private ws: WebSocket | null = null
@@ -22,6 +23,7 @@ class WsClient {
     onOffline?: OfflineHandler
     onRuntimeLog?: RuntimeLogHandler
     onRuntimeCursor?: RuntimeCursorHandler
+    onDeviceError?: DeviceErrorHandler
   } = {}
 
   connect() {
@@ -65,6 +67,9 @@ class WsClient {
           case 'runtime-cursor':
             this.handlers.onRuntimeCursor?.(msg.deviceId!, msg.data)
             break
+          case 'device-error':
+            this.handlers.onDeviceError?.(msg.deviceId!, msg.data)
+            break
           case 'peer-action':
             // 协同操作通知，后续处理
             break
@@ -102,6 +107,7 @@ class WsClient {
   onOffline(h: OfflineHandler) { this.handlers.onOffline = h }
   onRuntimeLog(h: RuntimeLogHandler) { this.handlers.onRuntimeLog = h }
   onRuntimeCursor(h: RuntimeCursorHandler) { this.handlers.onRuntimeCursor = h }
+  onDeviceError(h: DeviceErrorHandler) { this.handlers.onDeviceError = h }
 
   disconnect() {
     this.handlers = {}
