@@ -20,10 +20,14 @@ cjs/
 .vite/
 .vite_cache/
 
-# Ignore checked-in 3D static assets except mg6 (keep mg6 in repo)
+# Ignore checked-in 3D model assets except E6/MG6. Keep plugin runtime assets.
 packages/docat-web/public/3d/static/*
 !packages/docat-web/public/3d/static/mg6/
 !packages/docat-web/public/3d/static/mg6/**
+!packages/docat-web/public/3d/static/css/
+!packages/docat-web/public/3d/static/css/**
+!packages/docat-web/public/3d/static/draco/
+!packages/docat-web/public/3d/static/draco/**
 !packages/docat-web/public/3d/static/js/
 !packages/docat-web/public/3d/static/js/**
 
