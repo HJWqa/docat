@@ -52,7 +52,7 @@
       <!-- User Block -->
       <div class="user-block">
         <div class="user-divider" />
-        <div class="user-info">
+        <div class="user-info" @click="showUserMenu = !showUserMenu">
           <div class="user-avatar">
             <span>{{ username?.[0]?.toUpperCase() || '?' }}</span>
           </div>
@@ -60,11 +60,30 @@
             <span class="user-name">{{ username || 'Unknown' }}</span>
             <span class="user-role">{{ role?.toUpperCase() }}</span>
           </div>
+          <svg class="user-chevron" :class="{ 'user-chevron--open': showUserMenu }" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <button class="btn btn-secondary btn-sm w-full mt-1" @click="$emit('logout')">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          DISCONNECT
-        </button>
+        <!-- User Menu Dropdown -->
+        <Transition name="menu">
+          <div v-if="showUserMenu" class="user-menu">
+            <button class="user-menu-item" @click="$emit('changePassword'); showUserMenu = false">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="4" r="2" stroke="currentColor" stroke-width="1.2"/></svg>
+              CHANGE PASSWORD
+            </button>
+            <button class="user-menu-item" @click="$emit('switchUser'); showUserMenu = false">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/><circle cx="12" cy="6" r="2" stroke="currentColor" stroke-width="1.2"/><path d="M1 13c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M12 11a3 3 0 013 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              SWITCH USER
+            </button>
+            <router-link v-if="role === 'admin'" to="/users" class="user-menu-item" @click="showUserMenu = false">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              USER MANAGEMENT
+            </router-link>
+            <div class="user-menu-divider" />
+            <button class="user-menu-item user-menu-item--danger" @click="$emit('logout'); showUserMenu = false">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              LOGOUT
+            </button>
+          </div>
+        </Transition>
       </div>
     </aside>
 
@@ -76,13 +95,17 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 defineProps<{
   username: string
   role: string
   devices: Array<{ id: string; name?: string; ip?: string; type?: string; status: string }>
 }>()
 
-defineEmits<{ logout: [] }>()
+defineEmits<{ logout: []; changePassword: []; switchUser: [] }>()
+
+const showUserMenu = ref(false)
 </script>
 
 <style scoped>
@@ -189,7 +212,10 @@ defineEmits<{ logout: [] }>()
   height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent);
   margin-bottom: 14px;
 }
-.user-info { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.user-info { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; cursor: pointer; padding: 4px; border-radius: var(--radius); transition: background var(--duration-fast); }
+.user-info:hover { background: var(--surface-1); }
+.user-chevron { color: var(--text-muted); transition: transform var(--duration-fast); flex-shrink: 0; }
+.user-chevron--open { transform: rotate(180deg); }
 .user-avatar {
   width: 34px; height: 34px; border-radius: 3px;
   background: linear-gradient(135deg, var(--cyan-700), var(--cyan-900));
@@ -208,6 +234,31 @@ defineEmits<{ logout: [] }>()
   font-family: var(--font-display); font-size: 8px; font-weight: 700;
   letter-spacing: 0.15em; color: var(--text-muted);
 }
+
+/* User Menu Dropdown */
+.user-menu {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px; margin-top: 4px;
+  background: var(--surface-0); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+}
+.user-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: var(--radius);
+  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
+  letter-spacing: 0.1em; color: var(--text-secondary);
+  background: none; border: none; cursor: pointer; text-decoration: none;
+  transition: all var(--duration-fast);
+  width: 100%; text-align: left;
+}
+.user-menu-item:hover { background: var(--surface-1); color: var(--text-primary); }
+.user-menu-item--danger { color: var(--status-danger); }
+.user-menu-item--danger:hover { background: #ff174411; color: #ff6b6b; }
+.user-menu-divider { height: 1px; background: var(--border); margin: 4px 8px; }
+
+.menu-enter-active { transition: all 0.15s var(--ease-out); }
+.menu-leave-active { transition: all 0.1s var(--ease-in); }
+.menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(-4px); }
 
 /* Main */
 .main {

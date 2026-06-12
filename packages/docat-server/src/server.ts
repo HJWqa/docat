@@ -14,6 +14,7 @@ import { authRoutes } from './auth/routes.js'
 import { deviceRoutes } from './api/rest/devices.js'
 import { scriptRoutes } from './api/rest/scripts.js'
 import { systemRoutes } from './api/rest/system.js'
+import { userRoutes } from './api/rest/users.js'
 import { websocketRoutes } from './api/websocket/ws.js'
 
 // ─── CLI 参数 ────────────────────────────────────
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
   deviceRoutes(app, pool, scheduler)
   scriptRoutes(app, pool)
   systemRoutes(app, pool)
+  userRoutes(app)
   websocketRoutes(app, pool, scheduler)
 
   // 7. 健康检查

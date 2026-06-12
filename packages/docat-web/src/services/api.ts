@@ -10,6 +10,7 @@ import type {
   Script,
   ScriptLanguage,
   User,
+  UserRole,
 } from 'docat-shared/types'
 import { getApiBaseUrl } from './runtime'
 
@@ -35,8 +36,8 @@ export async function login(username: string, password: string): Promise<ApiResp
   return request('POST', '/api/auth/login', { username, password })
 }
 
-export async function register(username: string, password: string): Promise<ApiResponse<User>> {
-  return request('POST', '/api/auth/register', { username, password })
+export async function register(username: string, password: string, role?: UserRole): Promise<ApiResponse<User>> {
+  return request('POST', '/api/auth/register', { username, password, role })
 }
 
 export async function me(): Promise<ApiResponse<User>> {
@@ -45,6 +46,32 @@ export async function me(): Promise<ApiResponse<User>> {
 
 export async function logout(): Promise<ApiResponse<null>> {
   return request('POST', '/api/auth/logout')
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<ApiResponse<null>> {
+  return request('PUT', '/api/auth/password', { currentPassword, newPassword })
+}
+
+export async function switchUser(username: string, password: string): Promise<ApiResponse<AuthToken>> {
+  return request('POST', '/api/auth/switch', { username, password })
+}
+
+// ─── Users (admin) ───────────────────────────────
+
+export async function listUsers(): Promise<ApiResponse<User[]>> {
+  return request('GET', '/api/users')
+}
+
+export async function updateUser(id: string, params: { username?: string; role?: UserRole }): Promise<ApiResponse<User>> {
+  return request('PUT', `/api/users/${id}`, params)
+}
+
+export async function deleteUser(id: string): Promise<ApiResponse<null>> {
+  return request('DELETE', `/api/users/${id}`)
+}
+
+export async function resetUserPassword(id: string, password: string): Promise<ApiResponse<null>> {
+  return request('PUT', `/api/users/${id}/password`, { password })
 }
 
 // ─── Devices ────────────────────────────────────
@@ -61,12 +88,16 @@ export async function registerDevice(ip: string, name: string, autoConnect = tru
   return request('POST', '/api/devices', { ip, name, autoConnect })
 }
 
+export async function updateDevice(id: string, params: { ip?: string; name?: string; type?: string; autoConnect?: boolean }): Promise<ApiResponse<DeviceConfig>> {
+  return request('PUT', `/api/devices/${id}`, params)
+}
+
 export async function deleteDevice(id: string): Promise<ApiResponse<null>> {
   return request('DELETE', `/api/devices/${id}`)
 }
 
-export async function connectDevice(id: string): Promise<ApiResponse<unknown>> {
-  return request('POST', `/api/devices/${id}/connect`)
+export async function connectDevice(id: string, mode?: 'exclusive' | 'virtual'): Promise<ApiResponse<unknown>> {
+  return request('POST', `/api/devices/${id}/connect`, { mode: mode ?? 'exclusive' })
 }
 
 export async function getDeviceStatus(id: string): Promise<ApiResponse<{
@@ -82,6 +113,7 @@ export interface JointPreset {
   name: string
   joints: number[]
   system: boolean
+  sortOrder: number
 }
 
 export async function listJointPresets(id: string): Promise<ApiResponse<JointPreset[]>> {
@@ -92,12 +124,20 @@ export async function createJointPreset(id: string, name: string, joints: number
   return request('POST', `/api/devices/${id}/jointPresets`, { name, joints })
 }
 
-export async function updateJointPreset(id: string, presetId: string, name: string, joints: number[]): Promise<ApiResponse<JointPreset>> {
-  return request('PUT', `/api/devices/${id}/jointPresets/${presetId}`, { name, joints })
+export async function updateJointPreset(id: string, presetId: string, params: { name?: string; joints?: number[] }): Promise<ApiResponse<JointPreset>> {
+  return request('PUT', `/api/devices/${id}/jointPresets/${presetId}`, params)
 }
 
 export async function deleteJointPreset(id: string, presetId: string): Promise<ApiResponse<null>> {
   return request('DELETE', `/api/devices/${id}/jointPresets/${presetId}`)
+}
+
+export async function reorderJointPresets(id: string, presetIds: string[]): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/jointPresets/reorder`, { presetIds })
+}
+
+export async function forceReleaseDevice(id: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/forceRelease`)
 }
 
 export async function disconnectDevice(id: string): Promise<ApiResponse<null>> {
@@ -114,6 +154,14 @@ export async function releaseDevice(id: string): Promise<ApiResponse<null>> {
 
 export async function subscribeDevice(id: string): Promise<ApiResponse<unknown>> {
   return request('POST', `/api/devices/${id}/subscribe`)
+}
+
+export async function getDeviceSpeed(id: string): Promise<ApiResponse<{ ratio: number }>> {
+  return request('GET', `/api/devices/${id}/speed`)
+}
+
+export async function setDeviceSpeed(id: string, ratio: number): Promise<ApiResponse<{ ratio: number }>> {
+  return request('POST', `/api/devices/${id}/speed`, { ratio })
 }
 
 // ─── Motion Control ─────────────────────────────

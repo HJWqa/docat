@@ -19,6 +19,7 @@ export class TcpClient extends EventEmitter {
   private socket: net.Socket | null = null
   private _isConnected = false
   private isManual = false
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(host: string, port: number) {
     super()
@@ -59,11 +60,12 @@ export class TcpClient extends EventEmitter {
       this.emit('disconnected')
 
       // 自动重连（非手动断开时）
-      setTimeout(() => {
-        if (!this.isManual) {
+      if (!this.isManual) {
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null
           this.connect()
-        }
-      }, 1000)
+        }, 3000) // 3s 重连间隔，避免频繁重连
+      }
     })
 
     socket.on('data', (data: Buffer) => {
@@ -76,6 +78,10 @@ export class TcpClient extends EventEmitter {
   disconnect(): void {
     console.log(`[TCP] Manual disconnect ${this.host}:${this.port}`)
     this.isManual = true
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     this.socket?.destroy()
     this.socket = null
   }
@@ -93,6 +99,33 @@ export class TcpManager extends EventEmitter {
     this.host = host
   }
 
+  /** 已连接的 TCP 端口数 */
+  get connectedCount(): number {
+    let count = 0
+    for (const client of this.clients.values()) {
+      if (client.isConnected) count++
+    }
+    return count
+  }
+
+  /** 所有 TCP 端口都已连接 */
+  get isAllConnected(): boolean {
+    if (this.clients.size === 0) return false
+    for (const client of this.clients.values()) {
+      if (!client.isConnected) return false
+    }
+    return true
+  }
+
+  /** 所有 TCP 端口都已断开 */
+  get isAllDisconnected(): boolean {
+    if (this.clients.size === 0) return true
+    for (const client of this.clients.values()) {
+      if (client.isConnected) return false
+    }
+    return true
+  }
+
   /** 创建并连接所有 TCP 客户端 */
   connectAll(): void {
     for (const port of TcpManager.PORTS) {
@@ -106,6 +139,14 @@ export class TcpManager extends EventEmitter {
 
       client.on('error', (err: Error) => {
         this.emit('error', { port, error: err })
+      })
+
+      client.on('connected', () => {
+        this.emit('client-connected', { port })
+      })
+
+      client.on('disconnected', () => {
+        this.emit('client-disconnected', { port })
       })
 
       client.connect()

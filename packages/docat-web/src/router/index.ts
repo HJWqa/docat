@@ -3,6 +3,7 @@ import { getToken } from '../services/api'
 import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import DeviceView from '../views/DeviceView.vue'
+import UserManagementView from '../views/UserManagementView.vue'
 
 const ProgrammingView = () => import('../views/ProgrammingView.vue')
 
@@ -17,6 +18,12 @@ const routes = [
     path: '/',
     name: 'Dashboard',
     component: DashboardView,
+    meta: { auth: true, workspaceDepth: 0 },
+  },
+  {
+    path: '/users',
+    name: 'UserManagement',
+    component: UserManagementView,
     meta: { auth: true, workspaceDepth: 0 },
   },
   {

@@ -19,10 +19,38 @@
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" stroke-width="2"/><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="2"/></svg>
           ADD DEVICE
         </button>
-        <button class="btn btn-secondary" @click="doLogout">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          LOGOUT
-        </button>
+        <div class="user-menu-wrapper">
+          <button class="btn btn-secondary" @click="showUserDropdown = !showUserDropdown">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            {{ currentUser?.username?.toUpperCase() || 'USER' }}
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" :style="{ transform: showUserDropdown ? 'rotate(180deg)' : '' }" style="transition:transform 0.15s"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <Transition name="menu">
+            <div v-if="showUserDropdown" class="dropdown-menu">
+              <div class="dropdown-header">
+                <span class="dropdown-username">{{ currentUser?.username }}</span>
+                <span class="dropdown-role">{{ currentUser?.role?.toUpperCase() }}</span>
+              </div>
+              <button class="dropdown-item" @click="showChangePassword = true; showUserDropdown = false">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="4" r="2" stroke="currentColor" stroke-width="1.2"/></svg>
+                CHANGE PASSWORD
+              </button>
+              <button class="dropdown-item" @click="showSwitchUser = true; showUserDropdown = false">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/><circle cx="12" cy="6" r="2" stroke="currentColor" stroke-width="1.2"/><path d="M1 13c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M12 11a3 3 0 013 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                SWITCH USER
+              </button>
+              <router-link v-if="currentUser?.role === 'admin'" to="/users" class="dropdown-item" @click="showUserDropdown = false">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                USER MANAGEMENT
+              </router-link>
+              <div class="dropdown-divider" />
+              <button class="dropdown-item dropdown-item--danger" @click="doLogout">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                LOGOUT
+              </button>
+            </div>
+          </Transition>
+        </div>
       </div>
     </header>
 
@@ -92,7 +120,7 @@
               <div class="device-card-top">
                 <div class="device-model-badge">{{ d.type || '---' }}</div>
                 <span class="badge" :class="`badge-${getStatusClass(d.id)}`">
-                  <span class="status-dot" :class="`status-dot--${getStatusClass(d.id) === 'online' ? 'connected' : getStatusClass(d.id) === 'locked' ? 'locked' : 'disconnected'}`" />
+                  <span class="status-dot" :class="`status-dot--${getStatusClass(d.id) === 'online' ? 'connected' : getStatusClass(d.id) === 'virtual' ? 'virtual' : getStatusClass(d.id) === 'locked' ? 'locked' : 'disconnected'}`" />
                   {{ getStatusLabel(d.id) }}
                 </span>
               </div>
@@ -102,11 +130,19 @@
                 {{ d.ip }}
               </div>
               <div class="device-card-actions">
-                <button v-if="!deviceStore.isConnected(d.id)" class="btn btn-sm btn-success flex-1" @click.stop="doConnect(d.id)">
-                  CONNECT
-                </button>
+                <template v-if="!deviceStore.isConnected(d.id)">
+                  <button class="btn btn-sm btn-success flex-1" @click.stop="doConnect(d.id, 'exclusive')">
+                    CONNECT
+                  </button>
+                  <button class="btn btn-sm btn-secondary" @click.stop="doConnect(d.id, 'virtual')" title="Virtual connect: no device claim, HTTP only">
+                    vCONN
+                  </button>
+                </template>
                 <button v-else class="btn btn-sm btn-secondary flex-1" @click.stop="doDisconnect(d.id)">
                   DISCONNECT
+                </button>
+                <button class="btn btn-sm btn-secondary" @click.stop="doEdit(d)" title="Edit device">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
                 <button class="btn btn-sm btn-danger" @click.stop="doDelete(d)">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 5h10M6 5V3h4v2M5 5v8a1 1 0 001 1h4a1 1 0 001-1V5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -152,6 +188,10 @@
     <!-- Toast -->
     <Toast ref="toastRef" />
 
+    <!-- User Modals -->
+    <ChangePasswordModal :visible="showChangePassword" @close="showChangePassword = false" @changed="onPasswordChanged" />
+    <SwitchUserModal :visible="showSwitchUser" @close="showSwitchUser = false" @switched="onUserSwitched" />
+
     <!-- Add Device Modal -->
     <Transition name="fade">
       <div v-if="showAdd" class="modal-overlay" @click.self="showAdd = false">
@@ -174,6 +214,28 @@
         </div>
       </div>
     </Transition>
+
+    <!-- Edit Device Modal -->
+    <Transition name="fade">
+      <div v-if="editingDevice" class="modal-overlay" @click.self="editingDevice = null">
+        <div class="modal card">
+          <div class="modal-header"><h3>EDIT DEVICE</h3>
+            <button class="modal-close" @click="editingDevice = null">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
+            </button>
+          </div>
+          <form @submit.prevent="saveEdit" class="modal-form mt-1">
+            <div class="field-group"><label class="field-label">IP ADDRESS</label><input v-model="editIp" class="input" placeholder="192.168.5.1" /></div>
+            <div class="field-group mt-1"><label class="field-label">DEVICE NAME</label><input v-model="editName" class="input" placeholder="Production Line A — CR5" /></div>
+            <label class="checkbox-row mt-2"><input v-model="editAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">AUTO-CONNECT ON SERVER START</span></label>
+            <div class="modal-actions mt-2">
+              <button type="button" class="btn btn-secondary flex-1" @click="editingDevice = null">CANCEL</button>
+              <button type="submit" class="btn btn-primary flex-1" :disabled="!editIp || !editName">SAVE</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -181,10 +243,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import * as api from '../services/api'
-import { clearToken } from '../services/api'
+import { clearToken, setToken } from '../services/api'
 import { wsClient } from '../services/ws'
 import { deviceStore } from '../stores/deviceStore'
+import { userStore } from '../stores/userStore'
 import Toast from '../components/Toast.vue'
+import ChangePasswordModal from '../components/ChangePasswordModal.vue'
+import SwitchUserModal from '../components/SwitchUserModal.vue'
 import type { DeviceConfig, DeviceInfo } from 'docat-shared/types'
 
 const router = useRouter()
@@ -199,19 +264,50 @@ const newIp = ref('')
 const newName = ref('')
 const newType = ref('')
 const newAutoConnect = ref(true)
+const showUserDropdown = ref(false)
+const showChangePassword = ref(false)
+const showSwitchUser = ref(false)
+
+// Edit device state
+const editingDevice = ref<DeviceConfig | null>(null)
+const editIp = ref('')
+const editName = ref('')
+const editAutoConnect = ref(true)
+
+const currentUser = computed(() => userStore.currentUser)
+
+function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); userStore.reset(); router.push('/login') }
+
+async function onPasswordChanged() {
+  toastRef.value?.success('Password changed successfully')
+}
+
+async function onUserSwitched() {
+  showUserDropdown.value = false
+  // Reload user info
+  const res = await api.me()
+  if (res.success && res.data) {
+    userStore.setCurrentUser(res.data)
+    toastRef.value?.success(`Switched to ${res.data.username}`)
+  }
+}
 
 const offlineCount = computed(() => devices.value.length - deviceStore.connectedCount)
 const pct = (v: number) => devices.value.length ? `${(v / devices.value.length) * 100}%` : '0%'
 
-type StatusClass = 'online' | 'offline' | 'locked'
+type StatusClass = 'online' | 'offline' | 'locked' | 'virtual'
 
 function getStatusClass(deviceId: string): StatusClass {
   if (deviceStore.isLocked(deviceId)) return 'locked'
-  if (deviceStore.isConnected(deviceId)) return 'online'
+  if (deviceStore.isConnected(deviceId)) {
+    return deviceStore.isVirtual(deviceId) ? 'virtual' : 'online'
+  }
   return 'offline'
 }
 function getStatusLabel(deviceId: string): string {
-  return getStatusClass(deviceId).toUpperCase()
+  const cls = getStatusClass(deviceId)
+  if (cls === 'virtual') return 'vCONNECTED'
+  return cls.toUpperCase()
 }
 
 async function load() {
@@ -219,15 +315,6 @@ async function load() {
   if (res.success && res.data) {
     devices.value = res.data
     deviceStore.setDevices(res.data)
-  }
-  // 同步 deviceStore
-  for (const d of devices.value) {
-    try {
-      const s = await api.getDeviceStatus(d.id)
-      if (s.success && s.data) {
-        deviceStore.setConnected(d.id, s.data.connected)
-      }
-    } catch { /* ignore */ }
   }
 }
 
@@ -250,13 +337,28 @@ async function addFromScan(d: DeviceInfo) {
   await load()
 }
 
-async function doConnect(id: string) {
-  const res = await api.connectDevice(id)
+async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive') {
+  const res = await api.connectDevice(id, mode)
   if (res.success) {
-    deviceStore.setConnected(id, true)
-    toastRef.value?.success('Device connected')
+    deviceStore.setConnected(id, true, mode)
+    toastRef.value?.success(mode === 'virtual' ? 'Virtual connected (no claim)' : 'Device connected')
   } else {
-    toastRef.value?.error(`Connect failed: ${res.error?.message}`)
+    const msg = res.error?.message ?? ''
+    const code = res.error?.code
+    if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
+      toastRef.value?.error(`${msg}`, { action: { label: 'FORCE RELEASE', handler: () => doForceRelease(id) } })
+    } else {
+      toastRef.value?.error(`Connect failed: ${msg}`)
+    }
+  }
+}
+
+async function doForceRelease(id: string) {
+  const res = await api.forceReleaseDevice(id)
+  if (res.success) {
+    toastRef.value?.success('Ghost occupation released — try connecting again')
+  } else {
+    toastRef.value?.error(`Force release failed: ${res.error?.message ?? 'unknown'}`)
   }
 }
 
@@ -264,6 +366,29 @@ async function doDisconnect(id: string) {
   await api.disconnectDevice(id)
   deviceStore.setOffline(id)
   toastRef.value?.info('Device disconnected')
+}
+
+function doEdit(device: DeviceConfig) {
+  editingDevice.value = device
+  editIp.value = device.ip
+  editName.value = device.name
+  editAutoConnect.value = !!device.autoConnect
+}
+
+async function saveEdit() {
+  if (!editingDevice.value || !editIp.value || !editName.value) return
+  const res = await api.updateDevice(editingDevice.value.id, {
+    ip: editIp.value,
+    name: editName.value,
+    autoConnect: editAutoConnect.value,
+  })
+  if (res.success) {
+    editingDevice.value = null
+    toastRef.value?.success('Device updated')
+    await load()
+  } else {
+    toastRef.value?.error(`Update failed: ${res.error?.message}`)
+  }
 }
 
 function doDelete(device: DeviceConfig) { showDelete.value = device }
@@ -282,10 +407,9 @@ async function confirmDelete() {
   }
 }
 
-function doLogout() { clearToken(); wsClient.disconnect(); deviceStore.reset(); router.push('/login') }
-
 onMounted(() => {
   load()
+  // WS 驱动设备在线/离线状态
   wsClient.onOnline((id) => deviceStore.setConnected(id, true))
   wsClient.onOffline((id) => deviceStore.setOffline(id))
 })
@@ -325,6 +449,7 @@ onMounted(() => {
 .device-card:hover .device-accent { height: 3px; }
 .device-accent--online { background: var(--status-online); box-shadow: 0 0 8px var(--status-online); }
 .device-accent--locked { background: var(--status-locked); box-shadow: 0 0 8px var(--status-locked); }
+.device-accent--virtual { background: #a855f7; box-shadow: 0 0 8px #a855f7; }
 .device-accent--offline { background: var(--status-offline); }
 .device-card-body { padding: 20px; }
 .device-card-top { display: flex; justify-content: space-between; align-items: center; }
@@ -352,4 +477,35 @@ onMounted(() => {
 .checkbox:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid var(--cyan-300); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .checkbox-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-secondary); }
 h3 { margin: 0; }
+
+/* Virtual (purple) status */
+.status-dot--virtual { background: #a855f7; box-shadow: 0 0 4px #a855f7; }
+.badge-virtual { border-color: #a855f7; color: #a855f7; background: rgba(168, 85, 247, 0.08); }
+
+/* User Menu Dropdown */
+.user-menu-wrapper { position: relative; }
+.dropdown-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 6px;
+  min-width: 220px; padding: 6px; z-index: 80;
+  background: var(--surface-0); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+}
+.dropdown-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.dropdown-username { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.dropdown-role { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px; }
+.dropdown-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: var(--radius);
+  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
+  letter-spacing: 0.1em; color: var(--text-secondary);
+  background: none; border: none; cursor: pointer; text-decoration: none;
+  transition: all var(--duration-fast); width: 100%; text-align: left;
+}
+.dropdown-item:hover { background: var(--surface-1); color: var(--text-primary); }
+.dropdown-item--danger { color: var(--status-danger); }
+.dropdown-item--danger:hover { background: #ff174411; color: #ff6b6b; }
+.dropdown-divider { height: 1px; background: var(--border); margin: 4px 8px; }
+.menu-enter-active { transition: all 0.15s var(--ease-out); }
+.menu-leave-active { transition: all 0.1s var(--ease-in); }
+.menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(-4px); }
 </style>

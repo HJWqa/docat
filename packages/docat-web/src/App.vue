@@ -15,6 +15,7 @@ import { useRouter } from 'vue-router'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import { me, clearToken, getToken } from './services/api'
 import { wsClient } from './services/ws'
+import { userStore } from './stores/userStore'
 import Toast from './components/Toast.vue'
 
 const router = useRouter()
@@ -48,6 +49,7 @@ async function checkAuth() {
     if (res.success && res.data) {
       auth.value.username = res.data.username
       auth.value.role = res.data.role
+      userStore.setCurrentUser(res.data)
       wsClient.onDeviceError((deviceId, data) => {
         const payload = data as { ip?: string; port?: number; error?: { message?: string } }
         const address = payload.ip && payload.port ? `${payload.ip}:${payload.port}` : deviceId
@@ -57,21 +59,23 @@ async function checkAuth() {
       wsClient.connect()
     } else {
       clearToken()
+      userStore.reset()
     }
   } catch {
     clearToken()
+    userStore.reset()
   }
   auth.value.loaded = true
 }
 
 function doLogout() {
   clearToken()
-  wsClient.disconnect()
+  wsClient.destroy()
   auth.value.username = ''
+  userStore.reset()
   router.push('/login')
 }
 
-// Expose logout globally for layout components
 provide('logout', doLogout)
 
 onMounted(checkAuth)

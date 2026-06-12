@@ -37,10 +37,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         }
 
         // 验证参数
-        if (!username || !password || username.length < 3 || password.length < 6) {
+        if (!username || !password || username.length < 3 || password.length < 4) {
           return {
             success: false,
-            error: { code: 42200, message: '用户名至少 3 字符，密码至少 6 字符' },
+            error: { code: 42200, message: '用户名至少 3 字符，密码至少 4 字符' },
           }
         }
 
@@ -146,4 +146,83 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return { success: false, error: { code: 50000, message: (err as Error).message } }
     }
   })
+
+  /** 修改当前用户密码 */
+  app.put<{ Body: { currentPassword: string; newPassword: string } }>(
+    '/api/auth/password',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const { currentPassword, newPassword } = request.body
+        if (!currentPassword || !newPassword) {
+          return { success: false, error: { code: 42200, message: '缺少当前密码或新密码' } }
+        }
+        if (newPassword.length < 4) {
+          return { success: false, error: { code: 42200, message: '新密码至少 4 字符' } }
+        }
+
+        const db = getDb()
+        const user = db.prepare('SELECT id, passwordHash FROM users WHERE id = ?').get(request.auth!.userId) as
+          | { id: string; passwordHash: string }
+          | undefined
+
+        if (!user) {
+          return { success: false, error: { code: 40403, message: '用户不存在' } }
+        }
+
+        const valid = await verifyPassword(currentPassword, user.passwordHash)
+        if (!valid) {
+          return { success: false, error: { code: 40100, message: '当前密码错误' } }
+        }
+
+        const passwordHash = await hashPassword(newPassword)
+        db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?').run(passwordHash, user.id)
+
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 切换用户（用新凭据登录，返回新 token） */
+  app.post<{ Body: { username: string; password: string } }>(
+    '/api/auth/switch',
+    async (request, reply): Promise<ApiResponse<AuthToken>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const { username, password } = request.body
+        if (!username || !password) {
+          return { success: false, error: { code: 42200, message: '缺少用户名或密码' } }
+        }
+
+        const db = getDb()
+        const user = db.prepare('SELECT id, username, passwordHash, role FROM users WHERE username = ?').get(username) as
+          | { id: string; username: string; passwordHash: string; role: string }
+          | undefined
+
+        if (!user) {
+          return { success: false, error: { code: 40100, message: '用户名或密码错误' } }
+        }
+
+        const valid = await verifyPassword(password, user.passwordHash)
+        if (!valid) {
+          return { success: false, error: { code: 40100, message: '用户名或密码错误' } }
+        }
+
+        // 销毁旧会话，创建新会话
+        const oldToken = request.headers.authorization!.slice(7)
+        destroySession(oldToken)
+
+        const token = createSession(user.id)
+        return { success: true, data: token }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
 }

@@ -181,6 +181,16 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 004_recent_projects applied')
   }
 
+  // ─── 005: 关节预设排序字段 ─────────────────────
+  if (!applied.has('005_preset_sort_order')) {
+    db.exec(`
+      ALTER TABLE device_joint_presets ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0;
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('005_preset_sort_order')").run()
+    console.log('[DB] Migration 005_preset_sort_order applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 

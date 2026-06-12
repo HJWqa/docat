@@ -5,11 +5,14 @@
 import { reactive } from 'vue'
 import type { DeviceConfig } from 'docat-shared/types'
 
+export type ConnectionMode = 'exclusive' | 'virtual' | null
+
 interface DeviceStatusInfo {
   connected: boolean
   locked: boolean
   lockedBy: string
   enabled: boolean
+  connectionMode: ConnectionMode
   state: Record<string, unknown> | null
 }
 
@@ -30,16 +33,17 @@ export const deviceStore = reactive({
     return this.devices[id] ?? null
   },
 
-  setConnected(id: string, connected: boolean) {
+  setConnected(id: string, connected: boolean, mode?: ConnectionMode) {
     if (!this.statuses[id]) {
-      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, state: null }
+      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, connectionMode: null, state: null }
     }
     this.statuses[id].connected = connected
+    if (mode !== undefined) this.statuses[id].connectionMode = mode
   },
 
   setLocked(id: string, locked: boolean, lockedBy = '') {
     if (!this.statuses[id]) {
-      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, state: null }
+      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, connectionMode: null, state: null }
     }
     this.statuses[id].locked = locked
     this.statuses[id].lockedBy = lockedBy
@@ -47,14 +51,14 @@ export const deviceStore = reactive({
 
   setEnabled(id: string, enabled: boolean) {
     if (!this.statuses[id]) {
-      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, state: null }
+      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, connectionMode: null, state: null }
     }
     this.statuses[id].enabled = enabled
   },
 
   setState(id: string, state: Record<string, unknown>) {
     if (!this.statuses[id]) {
-      this.statuses[id] = { connected: true, locked: false, lockedBy: '', enabled: false, state: null }
+      this.statuses[id] = { connected: true, locked: false, lockedBy: '', enabled: false, connectionMode: null, state: null }
     }
     this.statuses[id].state = state
     this.statuses[id].connected = true
@@ -62,13 +66,18 @@ export const deviceStore = reactive({
 
   setOffline(id: string) {
     if (!this.statuses[id]) {
-      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, state: null }
+      this.statuses[id] = { connected: false, locked: false, lockedBy: '', enabled: false, connectionMode: null, state: null }
     }
     this.statuses[id].connected = false
+    this.statuses[id].connectionMode = null
   },
 
   isConnected(id: string): boolean {
     return this.statuses[id]?.connected ?? false
+  },
+
+  isVirtual(id: string): boolean {
+    return this.statuses[id]?.connectionMode === 'virtual'
   },
 
   isLocked(id: string): boolean {

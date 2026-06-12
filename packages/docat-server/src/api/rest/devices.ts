@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify'
 import { v4 as uuidv4 } from 'uuid'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
-import type { DevicePool } from '../../device/DevicePool.js'
+import type { DevicePool, ConnectionMode } from '../../device/DevicePool.js'
 import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
@@ -266,7 +266,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
   })
 
   /** 连接设备 */
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { mode?: ConnectionMode } }>(
     '/api/devices/:id/connect',
     async (request, reply): Promise<ApiResponse<unknown>> => {
       try {
@@ -275,6 +275,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         requireOperator(request, reply)
 
         const { id } = request.params
+        const mode: ConnectionMode = request.body?.mode === 'virtual' ? 'virtual' : 'exclusive'
         const db = getDb()
         const device = db.prepare('SELECT ip FROM devices WHERE id = ?').get(id) as { ip: string } | undefined
 
@@ -282,8 +283,8 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: false, error: { code: 40401, message: '设备不存在' } }
         }
 
-        // 传递 dbDeviceId 让 pool 用这个 ID 存储
-        const result = await pool.connect(device.ip, id)
+        // 传递 mode 让 pool 用这个模式连接
+        const result = await pool.connect(device.ip, id, mode)
         return { success: result.status, data: result.data, error: result.status ? undefined : { code: result.code, message: result.message ?? '' } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
@@ -319,6 +320,8 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           success: true,
           data: {
             connected: entry.driver.status.connected,
+            mode: entry.mode,
+            tcpConnected: entry.mode === 'exclusive' ? entry.tcp.isAllConnected : true,
             status: entry.driver.status,
             state: entry.driver.state,
             alarms: entry.driver.state.alarm,
@@ -343,6 +346,100 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         // 先断开 pool 中的连接，再用 dbDeviceId
         await pool.disconnect(request.params.id)
         return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 强制释放设备占用（解除幽灵占用） */
+  app.post<{ Params: { id: string } }>(
+    '/api/devices/:id/forceRelease',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const { id } = request.params
+        const ip = getDeviceIp(id)
+        if (!ip) {
+          return { success: false, error: { code: 40401, message: '设备不存在' } }
+        }
+
+        const result = await pool.forceRelease(ip)
+        if (!result.status) {
+          return { success: false, error: { code: result.code, message: result.message ?? '' } }
+        }
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 获取设备全局速度比 */
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/speed',
+    async (request, reply): Promise<ApiResponse<{ ratio: number }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        const res = await entry.http.main.send({
+          method: 'get',
+          url: '/settings/common',
+          portName: entry.driver.ip,
+          timeout: 3000,
+        })
+
+        if (res.status && res.data) {
+          const data = res.data as { ratio?: number }
+          return { success: true, data: { ratio: data.ratio ?? 100 } }
+        }
+        return { success: false, error: { code: 50000, message: `获取速度失败: ${res.message ?? ''}` } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 设置设备全局速度比 */
+  app.post<{ Params: { id: string }; Body: { ratio: number } }>(
+    '/api/devices/:id/speed',
+    async (request, reply): Promise<ApiResponse<{ ratio: number }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        const { ratio } = request.body
+        if (typeof ratio !== 'number' || ratio < 1 || ratio > 100) {
+          return { success: false, error: { code: 40001, message: 'ratio 必须是 1~100 的数字' } }
+        }
+
+        const res = await entry.http.main.send({
+          method: 'post',
+          url: '/settings/common',
+          portName: entry.driver.ip,
+          params: { ratio },
+          timeout: 3000,
+        })
+
+        if (res.status) {
+          return { success: true, data: { ratio } }
+        }
+        return { success: false, error: { code: 50000, message: `设置速度失败: ${res.message ?? ''}` } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
@@ -502,7 +599,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
   /** 设备级关节预设（所有用户可见） */
   app.get<{ Params: { id: string } }>(
     '/api/devices/:id/jointPresets',
-    async (request, reply): Promise<ApiResponse<Array<{ id: string; name: string; joints: number[]; system: boolean }>>> => {
+    async (request, reply): Promise<ApiResponse<Array<{ id: string; name: string; joints: number[]; system: boolean; sortOrder: number }>>> => {
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
@@ -513,15 +610,16 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: false, error: { code: 40401, message: '设备不存在' } }
         }
 
-        const rows = db.prepare('SELECT * FROM device_joint_presets WHERE deviceId = ? ORDER BY name ASC')
-          .all(request.params.id) as JointPresetRow[]
+        const rows = db.prepare('SELECT * FROM device_joint_presets WHERE deviceId = ? ORDER BY sortOrder ASC, name ASC')
+          .all(request.params.id) as (JointPresetRow & { sortOrder: number })[]
         const custom = rows.map(row => ({
           id: row.id,
           name: row.name,
           joints: JSON.parse(row.joints) as number[],
           system: false,
+          sortOrder: row.sortOrder,
         }))
-        const system = SYSTEM_JOINT_PRESETS.map(p => ({ ...p, joints: [...p.joints] }))
+        const system = SYSTEM_JOINT_PRESETS.map((p, i) => ({ ...p, joints: [...p.joints], sortOrder: -(SYSTEM_JOINT_PRESETS.length - i) }))
         return { success: true, data: [...system, ...custom] }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
@@ -531,7 +629,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
 
   app.post<{ Params: { id: string }; Body: { name: string; joints: number[] } }>(
     '/api/devices/:id/jointPresets',
-    async (request, reply): Promise<ApiResponse<{ id: string; name: string; joints: number[]; system: boolean }>> => {
+    async (request, reply): Promise<ApiResponse<{ id: string; name: string; joints: number[]; system: boolean; sortOrder: number }>> => {
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
@@ -555,48 +653,90 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: false, error: { code: 40401, message: '设备不存在' } }
         }
 
+        // 新预设排到最后
+        const maxOrder = db.prepare('SELECT COALESCE(MAX(sortOrder), 0) FROM device_joint_presets WHERE deviceId = ?')
+          .get(request.params.id) as Record<string, number>
+        const sortOrder = (Object.values(maxOrder)[0] ?? 0) + 1
+
         const id = uuidv4()
         const rounded = joints.map(j => Number(j.toFixed(6)))
-        db.prepare('INSERT INTO device_joint_presets (id, deviceId, name, joints) VALUES (?, ?, ?, ?)')
-          .run(id, request.params.id, trimmedName, JSON.stringify(rounded))
-        return { success: true, data: { id, name: trimmedName, joints: rounded, system: false } }
+        db.prepare('INSERT INTO device_joint_presets (id, deviceId, name, joints, sortOrder) VALUES (?, ?, ?, ?, ?)')
+          .run(id, request.params.id, trimmedName, JSON.stringify(rounded), sortOrder)
+        return { success: true, data: { id, name: trimmedName, joints: rounded, system: false, sortOrder } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
     }
   )
 
-  app.put<{ Params: { id: string; presetId: string }; Body: { name: string; joints: number[] } }>(
+  /** 更新预设（支持部分更新：name 和/或 joints） */
+  app.put<{ Params: { id: string; presetId: string }; Body: { name?: string; joints?: number[] } }>(
     '/api/devices/:id/jointPresets/:presetId',
-    async (request, reply): Promise<ApiResponse<{ id: string; name: string; joints: number[]; system: boolean }>> => {
+    async (request, reply): Promise<ApiResponse<{ id: string; name: string; joints: number[]; system: boolean; sortOrder: number }>> => {
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
         requireOperator(request, reply)
 
-        const { name, joints } = request.body
-        const trimmedName = String(name || '').trim()
-        if (!trimmedName) {
-          return { success: false, error: { code: 40001, message: '预设名称不能为空' } }
-        }
-        if (!Array.isArray(joints) || joints.length !== 6 || joints.some(j => !Number.isFinite(j))) {
-          return { success: false, error: { code: 40001, message: 'joints 必须是 6 个有效数字' } }
-        }
-        if (SYSTEM_JOINT_PRESETS.some(p => p.id === request.params.presetId || p.name.toLowerCase() === trimmedName.toLowerCase())) {
+        if (SYSTEM_JOINT_PRESETS.some(p => p.id === request.params.presetId)) {
           return { success: false, error: { code: 40901, message: '不能编辑系统预设' } }
         }
 
         const db = getDb()
-        const rounded = joints.map(j => Number(j.toFixed(6)))
-        const result = db.prepare(`
+        const existing = db.prepare('SELECT * FROM device_joint_presets WHERE id = ? AND deviceId = ?')
+          .get(request.params.presetId, request.params.id) as (JointPresetRow & { sortOrder: number }) | undefined
+        if (!existing) {
+          return { success: false, error: { code: 40401, message: '预设不存在' } }
+        }
+
+        const trimmedName = request.body.name != null ? String(request.body.name).trim() : existing.name
+        if (!trimmedName) {
+          return { success: false, error: { code: 40001, message: '预设名称不能为空' } }
+        }
+        if (SYSTEM_JOINT_PRESETS.some(p => p.name.toLowerCase() === trimmedName.toLowerCase())) {
+          return { success: false, error: { code: 40901, message: '不能使用系统预设名称' } }
+        }
+
+        const newJoints = request.body.joints ?? JSON.parse(existing.joints)
+        if (!Array.isArray(newJoints) || newJoints.length !== 6 || newJoints.some((j: number) => !Number.isFinite(j))) {
+          return { success: false, error: { code: 40001, message: 'joints 必须是 6 个有效数字' } }
+        }
+
+        const rounded = newJoints.map((j: number) => Number(j.toFixed(6)))
+        db.prepare(`
           UPDATE device_joint_presets
           SET name = ?, joints = ?, updatedAt = datetime('now')
           WHERE id = ? AND deviceId = ?
         `).run(trimmedName, JSON.stringify(rounded), request.params.presetId, request.params.id)
-        if (result.changes === 0) {
-          return { success: false, error: { code: 40401, message: '预设不存在' } }
+        return { success: true, data: { id: request.params.presetId, name: trimmedName, joints: rounded, system: false, sortOrder: existing.sortOrder } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 重排预设顺序 */
+  app.post<{ Params: { id: string }; Body: { presetIds: string[] } }>(
+    '/api/devices/:id/jointPresets/reorder',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const { presetIds } = request.body
+        if (!Array.isArray(presetIds)) {
+          return { success: false, error: { code: 40001, message: 'presetIds 必须是数组' } }
         }
-        return { success: true, data: { id: request.params.presetId, name: trimmedName, joints: rounded, system: false } }
+
+        const db = getDb()
+        const update = db.prepare('UPDATE device_joint_presets SET sortOrder = ? WHERE id = ? AND deviceId = ?')
+        db.transaction(() => {
+          for (let i = 0; i < presetIds.length; i++) {
+            update.run(i + 1, presetIds[i], request.params.id)
+          }
+        })()
+        return { success: true, data: null }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }

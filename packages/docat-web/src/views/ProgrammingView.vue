@@ -1,8 +1,8 @@
 <template>
-  <div class="programming-page">
+  <div class="programming-page" tabindex="0" @keydown="onKeyDown">
     <header class="workspace-header">
       <div class="workspace-header-left">
-        <router-link to="/" class="back-btn">
+        <router-link :to="{ path: '/', query: $route.query }" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           DASHBOARD
         </router-link>
@@ -15,10 +15,10 @@
       </div>
       <div class="workspace-header-center">
         <div class="workspace-switch">
-          <router-link :to="routeDeviceId ? `/device/${routeDeviceId}` : '/'" class="workspace-switch-btn">
+          <router-link :to="{ path: routeDeviceId ? `/device/${routeDeviceId}` : '/', query: $route.query }" class="workspace-switch-btn">
             {{ routeDeviceId ? 'CONTROL' : 'DASHBOARD' }}
           </router-link>
-          <router-link :to="routeDeviceId ? `/device/${routeDeviceId}/programming` : '/programming'" class="workspace-switch-btn workspace-switch-btn--active">
+          <router-link :to="{ path: routeDeviceId ? `/device/${routeDeviceId}/programming` : '/programming', query: $route.query }" class="workspace-switch-btn workspace-switch-btn--active">
             PROGRAMMING
           </router-link>
         </div>
@@ -319,6 +319,31 @@ workerScope.MonacoEnvironment = {
 }
 
 const route = useRoute()
+const isMock = route.query.mock === '1'
+const MOCK_PROJECTS = {
+  'robot_test': { language: 'lua' as ScriptLanguage, files: 2, modifiedAt: '2026-06-13T10:00:00Z' },
+  'demo_app': { language: 'lua' as ScriptLanguage, files: 1, modifiedAt: '2026-06-12T08:30:00Z' },
+  'vision_pick': { language: 'python' as ScriptLanguage, files: 3, modifiedAt: '2026-06-11T14:20:00Z' },
+  'calibrate': { language: 'python' as ScriptLanguage, files: 1, modifiedAt: '2026-06-10T09:00:00Z' },
+}
+
+/** Generate mock project detail when user 'opens' a mock project */
+function makeMockDetail(name: string, language: ScriptLanguage): api.ControllerProjectDetail {
+  const ext = language === 'python' ? '.py' : '.lua'
+  const sampleContent = language === 'python'
+    ? `# Mock ${name}\nimport Dobot\n\ndef main():\n    Dobot.MoveJoints(0, 0, 0, 0, 0, 0)\n    print("Running ${name}")\n\nif __name__ == "__main__":\n    main()\n`
+    : `-- Mock ${name}\nlocal Dobot = ...\n\nfunction main()\n    Dobot.MoveJoints(0, 0, 0, 0, 0, 0)\n    print("Running ${name}")\nend\n\nmain()\n`
+  return {
+    name, path: `/${name}${ext}`, language, size: sampleContent.length,
+    modifiedAt: '', files: 1, prj: {},
+    fileList: [{ name: `main${ext}`, path: `/${name}/main${ext}`, size: sampleContent.length, modifyTime: Date.now(), content: sampleContent, editable: true, language: language as 'lua' | 'python' | 'json' | 'xml' | 'text', rights: {} }],
+  }
+}
+
+if (isMock) {
+  console.log('[Mock] Programming debug mode active')
+  deviceStore.setDevices([{ id: 'mock-dev', ip: '0.0.0.0', name: 'MOCK DEVICE', type: 'MG6', autoConnect: false, createdAt: '' }])
+}
 const toastRef = ref<InstanceType<typeof Toast>>()
 const devices = ref<DeviceConfig[]>(Object.values(deviceStore.devices))
 const projects = ref<api.ControllerProjectSummary[]>([])
@@ -335,6 +360,8 @@ const editorContainer = ref<HTMLElement | null>(null)
 const runtimeLogContainer = ref<HTMLElement | null>(null)
 const runtimeLogs = ref<RuntimeLogEntry[]>([])
 const runtimeCursorText = ref('')
+let unsubRuntimeLog: () => void = () => {}
+let unsubRuntimeCursor: () => void = () => {}
 const loading = ref(false)
 const loadingProjects = ref(false)
 const opening = ref(false)
@@ -901,6 +928,18 @@ function handleRuntimeCursor(deviceId: string, payload: unknown) {
 async function loadAll() {
   loading.value = true
   try {
+    if (isMock) {
+      devices.value = Object.values(deviceStore.devices)
+      if (routeDeviceId.value) selectedDeviceId.value = routeDeviceId.value
+      else if (!selectedDeviceId.value && devices.value.length) selectedDeviceId.value = devices.value[0].id
+      // Populate mock projects
+      projects.value = Object.entries(MOCK_PROJECTS).map(([name, info]) => ({
+        name, path: `/${name}${info.language === 'python' ? '.py' : '.lua'}`, language: info.language, size: 1024, modifiedAt: info.modifiedAt, files: info.files,
+      }))
+      recentProjects.value = [{ projectName: 'robot_test', projectPath: '/robot_test.lua', language: 'lua', openedAt: '2026-06-13T10:00:00Z' }]
+      loading.value = false
+      return
+    }
     const deviceRes = await api.listDevices()
     if (deviceRes.success && deviceRes.data) {
       devices.value = deviceRes.data
@@ -916,6 +955,7 @@ async function loadAll() {
 
 async function loadProjects() {
   if (!selectedDeviceId.value) return
+  if (isMock) return
   loadingProjects.value = true
   try {
     const [projectRes, recentRes] = await Promise.all([
@@ -942,6 +982,18 @@ function chooseInitialFile(detail: api.ControllerProjectDetail) {
 
 async function openProject(projectName: string) {
   if (!selectedDeviceId.value) return
+  if (isMock) {
+    const lang = (MOCK_PROJECTS as Record<string, { language: ScriptLanguage }>)[projectName]?.language ?? 'lua'
+    activeProject.value = makeMockDetail(projectName, lang)
+    renameName.value = projectName
+    runtimeLogs.value = []
+    runtimeCursorText.value = ''
+    clearExecutionLine()
+    chooseInitialFile(activeProject.value)
+    syncEditor()
+    toastRef.value?.success(`[Mock] Opened ${projectName}`)
+    return
+  }
   opening.value = true
   openingProjectName.value = projectName
   try {
@@ -966,6 +1018,17 @@ async function openProject(projectName: string) {
 
 async function createProject() {
   if (!selectedDeviceId.value || !newProjectName.value) return
+  if (isMock) {
+    activeProject.value = makeMockDetail(newProjectName.value, newProjectLanguage.value)
+    // Add to mock project list so it appears in sidebar
+    projects.value = [{ name: newProjectName.value, path: `/${newProjectName.value}.${newProjectLanguage.value === 'python' ? 'py' : 'lua'}`, language: newProjectLanguage.value, size: 512, modifiedAt: new Date().toISOString(), files: 1 }, ...projects.value]
+    renameName.value = newProjectName.value
+    newProjectName.value = ''
+    chooseInitialFile(activeProject.value)
+    syncEditor()
+    toastRef.value?.success('[Mock] Project created')
+    return
+  }
   creating.value = true
   try {
     const res = await api.createDeviceProject(selectedDeviceId.value, newProjectName.value, newProjectLanguage.value)
@@ -993,6 +1056,7 @@ function updateActiveProject(detail: api.ControllerProjectDetail, preferredFile 
 
 async function saveActiveFile() {
   if (!selectedDeviceId.value || !activeProject.value || !activeFile.value) return
+  if (isMock) { toastRef.value?.info('[Mock] File saved'); return }
   if (!activeFile.value.editable) {
     toastRef.value?.error('Generated file is read-only')
     return
@@ -1015,6 +1079,7 @@ async function saveActiveFile() {
 }
 
 async function saveDirtyFiles() {
+  if (isMock) return true
   if (!selectedDeviceId.value || !activeProject.value) return false
   for (const file of activeProject.value.fileList) {
     if (!isDirty(file.name) || !file.editable) continue
@@ -1031,6 +1096,15 @@ async function saveDirtyFiles() {
 
 async function runProject() {
   if (!selectedDeviceId.value || !activeProject.value) return
+  if (isMock) {
+    running.value = true
+    runtimeLogs.value = []
+    runtimeCursorText.value = ''
+    clearExecutionLine()
+    appendRuntimeLog({ level: 'client', data: '[Mock] Running project...' })
+    toastRef.value?.success('[Mock] Started (press F6 to stop)')
+    return
+  }
   running.value = true
   try {
     if (!(await saveDirtyFiles())) return
@@ -1059,6 +1133,7 @@ async function runProject() {
 
 async function stopDebugger() {
   if (!selectedDeviceId.value) return
+  if (isMock) { running.value = false; clearExecutionLine(); runtimeCursorText.value = 'STOPPED'; toastRef.value?.info('[Mock] Stopped'); return }
   stopping.value = true
   try {
     const res = await api.debuggerStop(selectedDeviceId.value)
@@ -1259,17 +1334,32 @@ watch(routeDeviceId, id => {
 }, { immediate: true })
 
 onMounted(() => {
-  wsClient.onRuntimeLog(handleRuntimeLog)
-  wsClient.onRuntimeCursor(handleRuntimeCursor)
+  if (!isMock) {
+    unsubRuntimeLog = wsClient.onRuntimeLog(handleRuntimeLog)
+    unsubRuntimeCursor = wsClient.onRuntimeCursor(handleRuntimeCursor)
+  }
   loadAll()
+  ;(document.querySelector('.programming-page') as HTMLElement)?.focus()
 })
+
+function onKeyDown(e: KeyboardEvent) {
+  const mod = e.ctrlKey || e.metaKey
+  // Ctrl+S / Cmd+S: Save
+  if (mod && e.key === 's') { e.preventDefault(); saveActiveFile(); return }
+  // Escape: focus editor
+  if (e.key === 'Escape') { editor?.focus(); return }
+  if (e.key === 'F5') { e.preventDefault(); runProject(); return }
+  if (e.key === 'F6') { e.preventDefault(); stopDebugger(); return }
+  if (e.key === 'F7') { e.preventDefault(); pauseDebugger(); return }
+  if (e.key === 'F8') { e.preventDefault(); continueDebugger(); return }
+}
 onActivated(() => {
   nextTick(() => editor?.layout())
 })
 onDeactivated(() => undefined)
 onBeforeUnmount(() => {
-  wsClient.onRuntimeLog(() => undefined)
-  wsClient.onRuntimeCursor(() => undefined)
+  unsubRuntimeLog()
+  unsubRuntimeCursor()
   resizeObserver?.disconnect()
   cursorDecorations?.clear()
   breakpointDecorations?.clear()

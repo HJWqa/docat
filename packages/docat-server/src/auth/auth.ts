@@ -116,6 +116,14 @@ export function requireOperator(
   }
 }
 
+export function destroyAllUserSessions(userId: string): void {
+  const db = getDb()
+  const result = db.prepare('DELETE FROM sessions WHERE userId = ?').run(userId)
+  if (result.changes > 0) {
+    console.log(`[Auth] Destroyed ${result.changes} sessions for user ${userId}`)
+  }
+}
+
 /** 清理过期会话 */
 export function cleanupExpiredSessions(): void {
   const db = getDb()

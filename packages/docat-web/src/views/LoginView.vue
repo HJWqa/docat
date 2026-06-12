@@ -109,8 +109,8 @@ async function handleLogin() {
     error.value = 'Operator ID and access code required'
     return
   }
-  if (username.value.length < 3 || password.value.length < 6) {
-    error.value = 'ID: min 3 chars | Code: min 6 chars'
+  if (username.value.length < 3 || password.value.length < 4) {
+    error.value = 'ID: min 3 chars | Code: min 4 chars'
     return
   }
 

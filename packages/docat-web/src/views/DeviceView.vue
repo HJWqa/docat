@@ -1,5 +1,5 @@
 <template>
-  <div class="device-page" tabindex="0" @keydown="onKeyDown" @keyup="onKeyUp">
+  <div class="device-page" tabindex="0" @keydown="onKeyDown" @keyup="onKeyUp" @click="onPageClick">
     <!-- Top Bar -->
     <header class="workspace-header">
       <div class="workspace-header-left">
@@ -14,18 +14,18 @@
       </div>
       <div class="workspace-header-center">
         <div class="workspace-switch">
-          <router-link :to="`/device/${deviceId}`" class="workspace-switch-btn workspace-switch-btn--active">
+          <router-link :to="{ path: `/device/${deviceId}`, query: $route.query }" class="workspace-switch-btn workspace-switch-btn--active">
             CONTROL
           </router-link>
-          <router-link :to="`/device/${deviceId}/programming`" class="workspace-switch-btn">
+          <router-link :to="{ path: `/device/${deviceId}/programming`, query: $route.query }" class="workspace-switch-btn">
             PROGRAMMING
           </router-link>
         </div>
       </div>
       <div class="workspace-header-actions">
-        <span :class="['connection-badge', isLocked ? 'connection-badge--locked' : isConnected ? 'connection-badge--online' : 'connection-badge--offline']">
-          <span class="status-dot" :class="`status-dot--${isLocked ? 'locked' : isConnected ? 'connected' : 'disconnected'}`" />
-          {{ isLocked ? '🔒 LOCKED' : isConnected ? '🔗 ONLINE' : '⚫ OFFLINE' }}
+        <span :class="['connection-badge', isLocked ? 'connection-badge--locked' : isVirtualMode ? 'connection-badge--virtual' : isConnected ? (tcpDown ? 'connection-badge--warning' : 'connection-badge--online') : 'connection-badge--offline']">
+          <span class="status-dot" :class="`status-dot--${isLocked ? 'locked' : isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
+          {{ isLocked ? '🔒 LOCKED' : isVirtualMode ? '🔮 vCONNECTED' : isConnected ? (tcpDown ? '⚠ TCP DOWN' : '🔗 ONLINE') : '⚫ OFFLINE' }}
         </span>
         <!-- Enable Toggle Switch -->
         <label v-if="isConnected" class="toggle-switch" title="使能开关">
@@ -191,55 +191,21 @@
         </div>
 
         <div class="jog-body">
-          <!-- Keyboard shortcut hint -->
-          <div class="jog-shortcut-hint">
-            <span v-for="m in shortcutHints" :key="m.label" class="shortcut-chip">
-              <kbd>{{ m.pos }}</kbd><span class="shortcut-axis">{{ m.label }}</span><kbd>{{ m.neg }}</kbd>
-            </span>
-          </div>
-
-          <div class="jog-dpad">
-            <div class="jog-axis-tabs">
-              <button v-for="axis in ['j1','j2','j3','j4','j5','j6']" :key="axis" :class="['jog-axis-tab', { 'jog-axis-tab--active': jogAxis === axis }]" @click="jogAxis = axis">
-                {{ axis.toUpperCase() }}
-              </button>
-            </div>
-
-            <div class="jog-cross">
-              <button class="jog-btn jog-btn--up" :class="{ 'jog-btn--active': jogActive && jogDir === '+' }"
+          <div class="jog-grid">
+            <div v-for="axis in ['j1','j2','j3','j4','j5','j6']" :key="axis" class="jog-axis-col">
+              <span class="jog-axis-name">{{ axis.toUpperCase() }}</span>
+              <button class="jog-btn" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '+' }"
                 :disabled="!isConnected"
-                @mousedown.prevent="startJog('+')" @mouseup="stopJog" @mouseleave="stopJog"
-                @touchstart.prevent="startJog('+')" @touchend="stopJog">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                @mousedown.prevent="jogAxis = axis; startJog('+')" @mouseup="stopJog" @mouseleave="stopJog"
+                @touchstart.prevent="jogAxis = axis; startJog('+')" @touchend="stopJog">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
-
-              <div class="jog-cross-middle">
-                <button class="jog-btn jog-btn--left" :class="{ 'jog-btn--active': jogActive && jogDir === '-' }"
-                  :disabled="!isConnected"
-                  @mousedown.prevent="startJog('-')" @mouseup="stopJog" @mouseleave="stopJog"
-                  @touchstart.prevent="startJog('-')" @touchend="stopJog">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M5 12l6-6M5 12l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-
-                <div class="jog-center">
-                  <span class="jog-center-axis">{{ jogAxis.toUpperCase() }}</span>
-                  <span class="jog-center-dir" v-if="jogActive">{{ jogDir === '+' ? '▴' : '▾' }}</span>
-                  <span class="jog-center-amp" v-if="jogActive && ampTravel > 0">{{ ampTravel.toFixed(1) }}</span>
-                </div>
-
-                <button class="jog-btn jog-btn--right" :class="{ 'jog-btn--active': jogActive && jogDir === '+' }"
-                  :disabled="!isConnected"
-                  @mousedown.prevent="startJog('+')" @mouseup="stopJog" @mouseleave="stopJog"
-                  @touchstart.prevent="startJog('+')" @touchend="stopJog">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M19 12l-6-6M19 12l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-              </div>
-
-              <button class="jog-btn jog-btn--down" :class="{ 'jog-btn--active': jogActive && jogDir === '-' }"
+              <span class="jog-axis-val">{{ getJoint(Number(axis.slice(1))) }}°</span>
+              <button class="jog-btn jog-btn--down" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '-' }"
                 :disabled="!isConnected"
-                @mousedown.prevent="startJog('-')" @mouseup="stopJog" @mouseleave="stopJog"
-                @touchstart.prevent="startJog('-')" @touchend="stopJog">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 19l-6-6M12 19l6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                @mousedown.prevent="jogAxis = axis; startJog('-')" @mouseup="stopJog" @mouseleave="stopJog"
+                @touchstart.prevent="jogAxis = axis; startJog('-')" @touchend="stopJog">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 19l-6-6M12 19l6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
           </div>
@@ -250,17 +216,18 @@
       <div class="card move-panel">
         <div class="move-panel-header">
           <span class="hud-label" style="margin-bottom:0">MOVE TO JOINTS</span>
-          <div class="move-presets">
-            <button v-for="preset in jointPresets" :key="preset.id" :class="['btn btn-sm', selectedPresetId === preset.id ? 'btn-primary' : 'btn-secondary']" @click="applyJointPreset(preset)">
+          <div class="move-panel-actions">
+            <!-- Quick preset buttons: 3 system + 4 custom -->
+            <button v-for="preset in quickPresets" :key="preset.id"
+              :class="['btn btn-sm', selectedPresetId === preset.id ? 'btn-primary' : 'btn-secondary', preset.system ? 'btn-quick--sys' : '']"
+              @click="applyJointPreset(preset)" :title="preset.joints.map(v=>v.toFixed(1)).join(', ')+'°'">
               {{ preset.name }}
             </button>
+            <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentJoints" title="Read current joint values">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1010.9-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              READ
+            </button>
           </div>
-        </div>
-        <div class="preset-editor">
-          <input v-model.trim="presetName" class="preset-name-input" type="text" placeholder="Preset name" />
-          <button class="btn btn-secondary btn-sm" @click="saveJointPreset">SAVE</button>
-          <button class="btn btn-secondary btn-sm" :disabled="!selectedCustomPreset" @click="updateJointPreset">UPDATE</button>
-          <button class="btn btn-danger btn-sm" :disabled="!selectedCustomPreset" @click="deleteJointPreset">DELETE</button>
         </div>
         <div class="move-grid">
           <div v-for="j in 6" :key="j" class="move-field">
@@ -275,6 +242,88 @@
             STOP
           </button>
         </div>
+
+        <!-- Preset Management -->
+        <div class="preset-section mt-2">
+          <div class="preset-section-header" @click="presetListExpanded = !presetListExpanded" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="hud-label" style="margin-bottom:0">PRESETS</span>
+              <span class="preset-count-badge">{{ jointPresets.length }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px" @click.stop>
+              <input v-model.trim="presetName" class="preset-name-input" type="text" placeholder="New preset name"
+                @keyup.enter="saveJointPreset" />
+              <button class="btn btn-primary btn-sm" :disabled="!presetName" @click="saveJointPreset">SAVE</button>
+              <button class="btn-icon" :title="presetListExpanded ? 'Collapse' : 'Expand'"
+                @click="presetListExpanded = !presetListExpanded"
+                style="font-size:14px;color:var(--text-muted)">
+                {{ presetListExpanded ? '▲' : '▼' }}
+              </button>
+            </div>
+          </div>
+
+          <Transition name="preset-collapse">
+            <div v-if="presetListExpanded" class="preset-list">
+              <!-- Custom presets -->
+              <div v-for="(preset, idx) in customPresets" :key="preset.id"
+                class="preset-item" :class="{ 'preset-item--selected': selectedPresetId === preset.id, 'preset-item--dragging': dragIdx === idx, 'preset-item--dragover': dragOverIdx === idx && dragIdx !== idx }"
+                draggable="true"
+                @dragstart="onDragStart($event, idx)"
+                @dragover.prevent="onDragOver(idx)"
+                @dragleave="onDragLeave"
+                @drop="onDrop(idx)"
+                @dragend="onDragEnd">
+                <div class="preset-item-grip" title="Drag to reorder">⋮⋮</div>
+                <div class="preset-item-info" @click="applyJointPreset(preset)">
+                  <span class="preset-item-name">{{ preset.name }}</span>
+                  <span class="preset-item-joints">{{ preset.joints.map(v => v.toFixed(1)).join(', ') }}°</span>
+                </div>
+                <div class="preset-item-actions">
+                  <button class="btn-icon" title="Rename" @click="startRenamePreset(preset)">✎</button>
+                  <button class="btn-icon btn-icon--danger" title="Delete" @click="doDeletePreset(preset)">✕</button>
+                </div>
+              </div>
+              <!-- System presets -->
+              <div v-for="preset in systemPresets" :key="preset.id"
+                class="preset-item preset-item--system" :class="{ 'preset-item--selected': selectedPresetId === preset.id }"
+                @click="applyJointPreset(preset)">
+                <div class="preset-item-info">
+                  <span class="preset-item-name">{{ preset.name }}</span>
+                  <span class="preset-item-joints">{{ preset.joints.map(v => v.toFixed(1)).join(', ') }}°</span>
+                </div>
+                <span class="preset-item-badge">SYS</span>
+              </div>
+              <div v-if="!jointPresets.length" class="preset-empty">No presets — save current joints above</div>
+            </div>
+          </Transition>
+        </div>
+
+        <!-- Rename Modal -->
+        <Transition name="fade">
+          <div v-if="renamingPreset" class="modal-overlay" @click.self="renamingPreset = null">
+            <div class="modal card">
+              <div class="modal-header">
+                <h3>RENAME PRESET</h3>
+                <button class="modal-close" @click="renamingPreset = null">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
+                </button>
+              </div>
+              <p class="mt-1" style="font-size:12px;color:var(--text-secondary)">
+                Renaming <strong>{{ renamingPreset.name }}</strong>
+              </p>
+              <form @submit.prevent="confirmRenamePreset" class="modal-form mt-2">
+                <div class="field-group">
+                  <label class="field-label">NEW NAME</label>
+                  <input v-model.trim="renameValue" class="input" ref="renameInputRef" @keyup.escape="renamingPreset = null" />
+                </div>
+                <div class="modal-actions mt-3">
+                  <button type="button" class="btn btn-secondary" @click="renamingPreset = null">CANCEL</button>
+                  <button type="submit" class="btn btn-primary" :disabled="!renameValue || renameValue === renamingPreset.name">RENAME</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </Transition>
       </div>
     </div>
 
@@ -282,6 +331,17 @@
     <div class="action-bar mt-2">
       <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ POWER ON</button>
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ POWER OFF</button>
+      <span class="action-sep" />
+      <!-- Speed Slider -->
+      <div class="speed-control" :class="{ 'speed-control--disabled': !isConnected }">
+        <span class="speed-label">SPEED</span>
+        <input type="range" min="1" max="100" step="1" v-model.number="speedRatio"
+          class="speed-slider" :disabled="!isConnected"
+          @pointerdown="isDraggingSpeed = true"
+          @pointerup="onSpeedPointerUp"
+          @input="onSpeedInput" />
+        <span class="speed-value">{{ speedRatio }}%</span>
+      </div>
       <span class="action-sep" />
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 HOME</button>
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop">⏹ STOP</button>
@@ -379,8 +439,30 @@ const deviceId = route.params.id as string
 const toastRef = ref<InstanceType<typeof Toast>>()
 const modelIframeRef = ref<HTMLIFrameElement | null>(null)
 
+// ─── Mock 模式（URL ?mock=1 激活，无需设备即可调试 jog）───
+const isMock = route.query.mock === '1'
+if (isMock) {
+  console.log('[Mock] Jog debug mode active — API calls will be simulated')
+  // 伪装设备已连接 + 已使能
+  deviceStore.setConnected(deviceId, true, 'exclusive')
+  deviceStore.setEnabled(deviceId, true)
+  // 注入 mock 设备配置
+  deviceStore.setDevices([{ id: deviceId, ip: '0.0.0.0', name: 'MOCK DEVICE', type: 'MG6', autoConnect: false, createdAt: '' }])
+}
+
 const device = ref<DeviceConfig | null>(deviceStore.getDevice(deviceId))
-const state = ref<Record<string, unknown>>(deviceStore.statuses[deviceId]?.state ?? { pose: { x: 0, y: 0, z: 0, r: 0 }, joints: {} })
+
+// Mock 状态：包含关节和位姿数据，jog 时本地模拟变化
+const mockState = reactive({
+  pose: { x: 100, y: 200, z: 300, r: 0, rx: 0, ry: 0, rz: 0 },
+  joints: { j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 },
+})
+
+const state = ref<Record<string, unknown>>(
+  isMock
+    ? { ...mockState, io: {}, alarm: [], status: { connected: true, mode: 'auto' }, timestamp: Date.now() }
+    : (deviceStore.statuses[deviceId]?.state ?? { pose: { x: 0, y: 0, z: 0, r: 0 }, joints: {} })
+)
 const connecting = ref(false)
 const isLocked = ref(false)
 const enabled = ref(deviceStore.isEnabled(deviceId))
@@ -716,7 +798,13 @@ watch(robotModelType, () => {
 })
 
 const isConnected = computed(() => deviceStore.isConnected(deviceId))
+const isVirtualMode = computed(() => deviceStore.isVirtual(deviceId))
 const isSubscribed = ref(false)
+const tcpDown = ref(false)
+
+// ─── Speed Ratio ─────────────────────────────────
+const speedRatio = ref(100)
+let speedDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 // ─── Jog State ───────────────────────────────────
 
@@ -744,7 +832,7 @@ const keyMap: Record<string, { axis: string; dir: string }> = {
   i: { axis: 'j3', dir: '+' }, k: { axis: 'j3', dir: '-' },
   o: { axis: 'j4', dir: '+' }, l: { axis: 'j4', dir: '-' },
   p: { axis: 'j5', dir: '+' }, semicolon: { axis: 'j5', dir: '-' },
-  '[': { axis: 'j6', dir: '+' }, ']': { axis: 'j6', dir: '-' },
+  '[': { axis: 'j6', dir: '+' }, "'": { axis: 'j6', dir: '-' },
 }
 
 const shortcutHints = [
@@ -759,23 +847,43 @@ const shortcutHints = [
 const keysDown = new Set<string>()
 
 function onKeyDown(e: KeyboardEvent) {
+  // 跳过输入框/编辑器，避免打字触发 jog
+  const target = e.target as HTMLElement
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.closest('.monaco-editor')) return
   const key = e.key === ';' ? 'semicolon' : e.key.toLowerCase()
   const mapped = keyMap[key]
   if (!mapped) return
   if (keysDown.has(key)) return  // already held
   e.preventDefault()
   keysDown.add(key)
+  // 如果已经在 jog（可能是其他轴），先停
+  if (jogActive.value) stopJog()
   jogAxis.value = mapped.axis
   startJog(mapped.dir)
 }
 
+/** 点击页面时重新聚焦，解决 3D iframe 抢焦点后按键无效 */
+function onPageClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return
+  if (target.closest('.monaco-editor') || target.closest('iframe')) return
+  ;(e.currentTarget as HTMLElement)?.focus()
+}
+
 function onKeyUp(e: KeyboardEvent) {
   const key = e.key === ';' ? 'semicolon' : e.key.toLowerCase()
-  keysDown.delete(key)
-  if (keyMap[key]) {
-    e.preventDefault()
-    stopJog()
-  }
+  if (!keyMap[key]) return // 不是 jog 键，忽略
+  e.preventDefault()
+  // 清理：滑键时旧键可能残留，松手时全部清空
+  keysDown.clear()
+  stopJog()
+}
+
+/** 窗口失焦时强制停止所有 jog，防止 keyup 事件丢失导致失控 */
+function onWindowBlur() {
+  keysDown.clear()
+  if (jogActive.value) stopJog()
 }
 
 // ─── Helpers ─────────────────────────────────────
@@ -809,6 +917,11 @@ function getAxisValue(): number {
 // ─── Load / Connect ──────────────────────────────
 
 async function load() {
+  if (isMock) {
+    device.value = deviceStore.getDevice(deviceId)
+    enabled.value = true
+    return
+  }
   const res = await api.listDevices()
   if (res.success && res.data) {
     deviceStore.setDevices(res.data)
@@ -818,7 +931,8 @@ async function load() {
   try {
     const s = await api.getDeviceStatus(deviceId)
     if (s.success && s.data) {
-      deviceStore.setConnected(deviceId, s.data.connected)
+      const statusData = s.data as Record<string, unknown>
+      deviceStore.setConnected(deviceId, s.data.connected, (statusData.mode as 'exclusive' | 'virtual') ?? null)
       if (s.data.state) {
         state.value = s.data.state
         deviceStore.setState(deviceId, s.data.state)
@@ -828,14 +942,13 @@ async function load() {
       enabled.value = status?.mode === 'auto'
       deviceStore.setEnabled(deviceId, enabled.value)
       // Parse alarm info
-      const d = s.data as Record<string, unknown>
-      currentAlarms.value = ((d.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
+      currentAlarms.value = ((statusData.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
         .map(a => normalizeAlarmItem(a, 'Alarm'))
-      currentWarnings.value = ((d.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
+      currentWarnings.value = ((statusData.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
         .map(w => normalizeWarningItem(w))
-      isCollision.value = (d.isCollision as boolean) || false
-      protectiveStop.value = (d.protectiveStop as boolean) || false
-      emergencyStop.value = (d.emergencyStop as boolean) || false
+      isCollision.value = (statusData.isCollision as boolean) || false
+      protectiveStop.value = (statusData.protectiveStop as boolean) || false
+      emergencyStop.value = (statusData.emergencyStop as boolean) || false
       // Fetch device alarm descriptions on load
       if (currentAlarms.value.length > 0) fetchDeviceLogs()
     }
@@ -850,6 +963,12 @@ async function loadJointPresets() {
 }
 
 async function doConnect() {
+  if (isMock) {
+    deviceStore.setConnected(deviceId, true, 'exclusive')
+    enabled.value = true
+    toastRef.value?.success('[Mock] Device connected')
+    return
+  }
   connecting.value = true
   try {
     const res = await api.connectDevice(deviceId)
@@ -857,9 +976,54 @@ async function doConnect() {
       deviceStore.setConnected(deviceId, true)
       toastRef.value?.success('Device connected — power on then enable')
     } else {
-      toastRef.value?.error(`Connect failed: ${res.error?.message}`)
+      const msg = res.error?.message ?? ''
+      const code = res.error?.code
+      if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
+        toastRef.value?.error(msg, { action: { label: 'FORCE RELEASE', handler: () => doForceRelease() } })
+      } else {
+        toastRef.value?.error(`Connect failed: ${msg}`)
+      }
     }
   } finally { connecting.value = false }
+}
+
+async function doForceRelease() {
+  const res = await api.forceReleaseDevice(deviceId)
+  if (res.success) {
+    toastRef.value?.success('Ghost occupation released — try connecting again')
+  } else {
+    toastRef.value?.error(`Force release failed: ${res.error?.message ?? 'unknown'}`)
+  }
+}
+
+// ─── Speed ────────────────────────────────────────
+
+const isDraggingSpeed = ref(false)
+
+function onSpeedInput() {
+  // @input 实时更新本地值（v-model 已处理），不发请求
+}
+
+function onSpeedPointerUp() {
+  isDraggingSpeed.value = false
+  if (!isConnected.value) return
+  if (speedDebounceTimer) clearTimeout(speedDebounceTimer)
+  api.setDeviceSpeed(deviceId, speedRatio.value).then(res => {
+    if (!res.success) {
+      toastRef.value?.error(`Set speed failed: ${res.error?.message}`)
+    }
+  }).catch(() => {})
+}
+
+async function loadSpeed() {
+  if (isMock) return
+  if (!isConnected.value) return
+  try {
+    const res = await api.getDeviceSpeed(deviceId)
+    if (res.success && res.data) {
+      speedRatio.value = res.data.ratio
+    }
+  } catch { /* ignore */ }
 }
 
 // ─── Power / Enable ──────────────────────────────
@@ -901,6 +1065,7 @@ async function toggleEnable() {
 }
 
 function checkEnabled(): boolean {
+  if (isMock) return true
   if (!enabled.value) {
     toastRef.value?.error('请先使能设备 (Enable robot first)')
     return false
@@ -1010,6 +1175,7 @@ async function changeJogMode(mode: 'continuous' | 'step') {
 }
 
 async function applyJogMode(): Promise<boolean> {
+  if (isMock) { appliedJogMode.value = 'jog'; return true }
   if (appliedJogMode.value === 'jog') return true
   const res = await api.setJogMode(deviceId, 'jog')
   if (res.success) {
@@ -1021,6 +1187,7 @@ async function applyJogMode(): Promise<boolean> {
 }
 
 async function applyTeachInch(): Promise<boolean> {
+  if (isMock) { appliedJogMode.value = 'step'; appliedTeachInch.value = jogInch.value; return true }
   const distance = Number(jogInch.value)
   if (!Number.isFinite(distance) || distance <= 0) {
     toastRef.value?.error('Invalid inch distance')
@@ -1054,6 +1221,9 @@ async function startJog(dir: string) {
   if (!isConnected.value) { toastRef.value?.error('Device not connected'); return }
   if (!checkEnabled()) return
 
+  // 先停掉旧的 jog（防止重复启动）
+  if (jogActive.value) stopJog()
+
   jogDir.value = dir
   jogActive.value = true
 
@@ -1069,12 +1239,14 @@ async function startJog(dir: string) {
       jogActive.value = false
       return
     }
+    // await 期间用户可能已松手
     if (!jogActive.value) return
   } else {
     if (!await applyTeachInch()) {
       jogActive.value = false
       return
     }
+    if (!jogActive.value) return
   }
 
   sendJogCmd(dir)
@@ -1087,6 +1259,11 @@ async function startJog(dir: string) {
   } else {
     // Continuous: repeated jog commands every 150ms
     jogInterval.value = setInterval(() => {
+      // 每次发送前检查是否仍活跃（stopJog 可能已清掉标志）
+      if (!jogActive.value) {
+        if (jogInterval.value) { clearInterval(jogInterval.value); jogInterval.value = null }
+        return
+      }
       sendJogCmd(dir)
       checkAmplitude()
     }, 150)
@@ -1094,6 +1271,25 @@ async function startJog(dir: string) {
 }
 
 function sendJogCmd(dir: string) {
+  if (isMock) {
+    // Mock: 本地模拟关节值变化
+    const axis = jogAxis.value
+    const delta = dir === '+' ? 1.5 : -1.5
+    if (axis.startsWith('j')) {
+      const joints = state.value.joints as Record<string, number>
+      const prev = joints[axis] ?? 0
+      joints[axis] = prev + delta
+      console.log(`[Mock Jog] ${axis} ${dir}: ${prev} → ${joints[axis]}`)
+      state.value = { ...state.value, joints: { ...joints }, timestamp: Date.now() }
+    } else {
+      const pose = state.value.pose as Record<string, number>
+      const prev = pose[axis] ?? 0
+      pose[axis] = prev + delta
+      console.log(`[Mock Jog] ${axis} ${dir}: ${prev} → ${pose[axis]}`)
+      state.value = { ...state.value, pose: { ...pose }, timestamp: Date.now() }
+    }
+    return
+  }
   api.jogDevice(deviceId, jogAxis.value, dir, jogMode.value).catch(err => {
     console.error('[Jog] send failed:', err)
   })
@@ -1102,20 +1298,24 @@ function sendJogCmd(dir: string) {
 function stopJog() {
   if (stepTimer.value) { clearTimeout(stepTimer.value); stepTimer.value = null }
   if (jogInterval.value) { clearInterval(jogInterval.value); jogInterval.value = null }
-  if (jogActive.value && jogMode.value === 'continuous') {
-    sendJogStop()
-  }
+  const wasActive = jogActive.value
   jogActive.value = false
   ampTravel.value = 0
+  // 发送停止指令（仅 continuous 模式且之前在活跃状态）
+  if (wasActive && jogMode.value === 'continuous') {
+    sendJogStop()
+  }
 }
 
 function sendJogStop() {
+  if (isMock) return
   api.stopDevice(deviceId).catch(err => {
     console.error('[Jog] stop failed:', err)
   })
 }
 
 function checkAmplitude() {
+  if (!jogActive.value) return // 已停止，不再检查
   const current = getAxisValue()
   const start = jogStartPose.value[jogAxis.value]
   if (start == null) return
@@ -1145,52 +1345,123 @@ function applyJointPreset(preset: api.JointPreset) {
   presetName.value = preset.name
 }
 
+// ─── Preset Management ────────────────────────────
+
+const systemPresets = computed(() => jointPresets.value.filter(p => p.system))
+const customPresets = computed(() => jointPresets.value.filter(p => !p.system))
+/** 系统预设（前3）+ 自定义预设（前4）= 最多7个快速按钮 */
+const quickPresets = computed(() => [
+  ...systemPresets.value.slice(0, 3),
+  ...customPresets.value.slice(0, 4),
+])
+const presetListExpanded = ref(false)
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+/** 读取当前关节值到编辑框 */
+function readCurrentJoints() {
+  const joints = state.value.joints as Record<string, number> | undefined
+  if (!joints) return
+  for (let j = 1; j <= 6; j++) {
+    moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
+  }
+  toastRef.value?.info('Current joint values loaded')
+}
+
 async function saveJointPreset() {
   const name = presetName.value.trim()
   if (!name) {
     toastRef.value?.error('Preset name required')
     return
   }
+  if (jointPresets.value.some(p => !p.system && p.name.toLowerCase() === name.toLowerCase())) {
+    toastRef.value?.error('Preset name already exists')
+    return
+  }
   const res = await api.createJointPreset(deviceId, name, getMoveTargetJoints())
   if (res.success && res.data) {
     await loadJointPresets()
     selectedPresetId.value = res.data.id
+    presetName.value = ''
     toastRef.value?.success('Preset saved')
   } else {
     toastRef.value?.error(`Save preset failed: ${res.error?.message}`)
   }
 }
 
-async function updateJointPreset() {
-  const preset = selectedCustomPreset.value
-  if (!preset) return
-  const name = presetName.value.trim()
-  if (!name) {
-    toastRef.value?.error('Preset name required')
-    return
-  }
-  const res = await api.updateJointPreset(deviceId, preset.id, name, getMoveTargetJoints())
-  if (res.success && res.data) {
-    await loadJointPresets()
-    selectedPresetId.value = res.data.id
-    toastRef.value?.success('Preset updated')
-  } else {
-    toastRef.value?.error(`Update preset failed: ${res.error?.message}`)
-  }
-}
-
-async function deleteJointPreset() {
-  const preset = selectedCustomPreset.value
-  if (!preset) return
+async function doDeletePreset(preset: api.JointPreset) {
+  if (preset.system) return
   const res = await api.deleteJointPreset(deviceId, preset.id)
   if (res.success) {
-    selectedPresetId.value = ''
-    presetName.value = ''
+    if (selectedPresetId.value === preset.id) selectedPresetId.value = ''
     await loadJointPresets()
     toastRef.value?.success('Preset deleted')
   } else {
-    toastRef.value?.error(`Delete preset failed: ${res.error?.message}`)
+    toastRef.value?.error(`Delete failed: ${res.error?.message}`)
   }
+}
+
+// Rename
+const renamingPreset = ref<api.JointPreset | null>(null)
+const renameValue = ref('')
+
+function startRenamePreset(preset: api.JointPreset) {
+  renamingPreset.value = preset
+  renameValue.value = preset.name
+}
+
+async function confirmRenamePreset() {
+  if (!renamingPreset.value || !renameValue.value) return
+  if (jointPresets.value.some(p => !p.system && p.id !== renamingPreset.value!.id && p.name.toLowerCase() === renameValue.value.toLowerCase())) {
+    toastRef.value?.error('Preset name already exists')
+    return
+  }
+  const res = await api.updateJointPreset(deviceId, renamingPreset.value.id, { name: renameValue.value })
+  if (res.success) {
+    toastRef.value?.success('Preset renamed')
+    renamingPreset.value = null
+    await loadJointPresets()
+  } else {
+    toastRef.value?.error(`Rename failed: ${res.error?.message}`)
+  }
+}
+
+// ─── Drag & Drop Reorder ────────────────────────────
+
+const dragIdx = ref(-1)
+const dragOverIdx = ref(-1)
+
+function onDragStart(e: DragEvent, idx: number) {
+  dragIdx.value = idx
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(idx))
+  }
+}
+
+function onDragOver(idx: number) {
+  if (dragIdx.value < 0 || dragIdx.value === idx) return
+  dragOverIdx.value = idx
+}
+
+function onDragLeave() {
+  dragOverIdx.value = -1
+}
+
+async function onDrop(targetIdx: number) {
+  const srcIdx = dragIdx.value
+  dragIdx.value = -1
+  dragOverIdx.value = -1
+  if (srcIdx < 0 || srcIdx === targetIdx) return
+  const presets = [...customPresets.value]
+  const [moved] = presets.splice(srcIdx, 1)
+  presets.splice(targetIdx, 0, moved)
+  await api.reorderJointPresets(deviceId, presets.map(p => p.id))
+  await loadJointPresets()
+}
+
+function onDragEnd() {
+  dragIdx.value = -1
+  dragOverIdx.value = -1
 }
 
 async function doMove() {
@@ -1279,27 +1550,103 @@ async function doEstop() {
   }
 }
 
-function doLogout() { clearToken(); wsClient.disconnect(); deviceStore.reset(); router.push('/login') }
+function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); router.push('/login') }
 
 // ─── Lifecycle ──────────────────────────────────
 
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let fallbackTimer: ReturnType<typeof setInterval> | null = null
+let wsDisconnected = false
 
 onMounted(async () => {
   void import('./ProgrammingView.vue')
   window.addEventListener('message', handle3DModelMessage)
+  window.addEventListener('blur', onWindowBlur)
   await load()
-  if (!isConnected.value) await doConnect()
+  if (!isMock && !isConnected.value) await doConnect()
+  if (!isMock && isConnected.value) loadSpeed()
 
-  pollTimer = setInterval(async () => {
+  // Mock 模式跳过 WS 订阅和 REST 兜底轮询，避免覆盖 mock 状态
+  if (isMock) {
+    await loadJointPresets()
+    ;(document.querySelector('.device-page') as HTMLElement)?.focus()
+    return
+  }
+
+  // WS 主通道：订阅设备状态
+  wsClient.subscribe(deviceId)
+
+  wsClient.onState((devId, s) => {
+    if (devId !== deviceId || !s) return
+    const raw = s as unknown as Record<string, unknown>
+    if (isMock) { console.warn('[Mock] WS onState unexpectedly fired — ignoring'); return }
+    console.log('[State] WS onState update')
+    const ext = raw._ext as Record<string, unknown> | undefined
+    state.value = raw
+    deviceStore.setState(deviceId, raw)
+    // Init moveTarget from current joints (once)
+    if (!moveTargetInit.value) {
+      const joints = (raw as Record<string, unknown>).joints as Record<string, number> | undefined
+      if (joints) {
+        for (let j = 1; j <= 6; j++) moveTarget['j' + j] = Math.round((joints['j' + j] || 0) * 10) / 10
+        moveTargetInit.value = true
+      }
+    }
+    // Update enabled state
+    const status = raw.status as Record<string, unknown> | undefined
+    enabled.value = status?.mode === 'auto'
+    deviceStore.setEnabled(deviceId, enabled.value)
+    // Parse alarm info from WS ext payload
+    if (ext) {
+      // 只在控制器标记更新时才刷新 alarms/warnings
+      // 控制器的 raw.alarms 仅在 isAlarmUpdate=true 时包含有效数据
+      const isAlarmUpdate = (ext.isAlarmUpdate as boolean) || false
+      const isWarningUpdate = (ext.isWarningUpdate as boolean) || false
+      if (isAlarmUpdate) {
+        const newAlarms = ((raw.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
+          .map(a => normalizeAlarmItem(a, 'Alarm'))
+        const prevIds = currentAlarms.value.map(a => a.id)
+        const hasNew = newAlarms.some(a => !prevIds.includes(a.id))
+        currentAlarms.value = mergeAlarmDetails(newAlarms, currentAlarms.value)
+        if (hasNew) fetchDeviceLogs()
+      }
+      if (isWarningUpdate) {
+        const newWarnings = ((ext.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
+          .map(w => normalizeWarningItem(w))
+        const prevWarningIds = currentWarnings.value.map(w => w.id)
+        const hasNewWarning = newWarnings.some(w => !prevWarningIds.includes(w.id))
+        currentWarnings.value = mergeAlarmDetails(newWarnings, currentWarnings.value)
+        if (hasNewWarning) fetchDeviceLogs()
+      }
+      isCollision.value = (ext.isCollision as boolean) || false
+      protectiveStop.value = (ext.protectiveStop as boolean) || false
+      emergencyStop.value = (ext.emergencyStop as boolean) || false
+      // TCP 状态（exclusive 模式）
+      if (ext.mode === 'exclusive') {
+        tcpDown.value = !(ext.tcpConnected as boolean)
+      } else {
+        tcpDown.value = false
+      }
+    }
+  })
+  wsClient.onOnline((id) => { if (id === deviceId) deviceStore.setConnected(deviceId, true) })
+  wsClient.onOffline((id) => { if (id === deviceId) deviceStore.setOffline(deviceId) })
+
+  // WS 断线兜底：低频 REST 轮询
+  wsDisconnected = wsClient.isDisconnected
+  fallbackTimer = setInterval(async () => {
+    if (!wsClient.isDisconnected) {
+      wsDisconnected = false
+      return
+    }
+    wsDisconnected = true
     try {
       const s = await api.getDeviceStatus(deviceId)
       if (s.success && s.data) {
-        deviceStore.setConnected(deviceId, s.data.connected)
+        const fb = s.data as Record<string, unknown>
+        deviceStore.setConnected(deviceId, s.data.connected, (fb.mode as 'exclusive' | 'virtual') ?? null)
         if (s.data.state) {
-          state.value = s.data.state
-          deviceStore.setState(deviceId, s.data.state)
-          // Init moveTarget from current joints (once)
+          if (isMock) { console.warn('[Mock] REST fallback unexpectedly set state — skipping'); }
+          else { state.value = s.data.state; deviceStore.setState(deviceId, s.data.state) }
           if (!moveTargetInit.value) {
             const joints = s.data.state.joints as Record<string, number> | undefined
             if (joints) {
@@ -1308,51 +1655,43 @@ onMounted(async () => {
             }
           }
         }
-        // Update enabled state from device status
         const status = s.data.status as Record<string, unknown> | undefined
         enabled.value = status?.mode === 'auto'
         deviceStore.setEnabled(deviceId, enabled.value)
-        // Parse alarm info
-        const d = s.data as Record<string, unknown>
-        const newAlarms = ((d.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
-          .map(a => normalizeAlarmItem(a, 'Alarm'))
-        const newWarnings = ((d.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
-          .map(w => normalizeWarningItem(w))
-        const newCollision = (d.isCollision as boolean) || false
-        const newProtective = (d.protectiveStop as boolean) || false
-        const newEstop = (d.emergencyStop as boolean) || false
-
-        const prevIds = currentAlarms.value.map(a => a.id)
-        const hasNew = newAlarms.some(a => !prevIds.includes(a.id))
-        const prevWarningIds = currentWarnings.value.map(w => w.id)
-        const hasNewWarning = newWarnings.some(w => !prevWarningIds.includes(w.id))
-        currentAlarms.value = mergeAlarmDetails(newAlarms, currentAlarms.value)
-        currentWarnings.value = mergeAlarmDetails(newWarnings, currentWarnings.value)
-        if (hasNew) fetchDeviceLogs()
-        if (hasNewWarning) fetchDeviceLogs()
-        isCollision.value = newCollision
-        protectiveStop.value = newProtective
-        emergencyStop.value = newEstop
+        // 只在 isAlarmUpdate/isWarningUpdate 时刷新，避免空数组覆盖
+        const isAlarmUpd = (fb.isAlarmUpdate as boolean) || false
+        const isWarningUpd = (fb.isWarningUpdate as boolean) || false
+        if (isAlarmUpd) {
+          const newAlarms = ((fb.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
+            .map(a => normalizeAlarmItem(a, 'Alarm'))
+          currentAlarms.value = mergeAlarmDetails(newAlarms, currentAlarms.value)
+        }
+        if (isWarningUpd) {
+          const newWarnings = ((fb.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
+            .map(w => normalizeWarningItem(w))
+          currentWarnings.value = mergeAlarmDetails(newWarnings, currentWarnings.value)
+        }
+        isCollision.value = (fb.isCollision as boolean) || false
+        protectiveStop.value = (fb.protectiveStop as boolean) || false
+        emergencyStop.value = (fb.emergencyStop as boolean) || false
+        // TCP 状态
+        if (fb.mode === 'exclusive') {
+          tcpDown.value = !(fb.tcpConnected as boolean)
+        } else {
+          tcpDown.value = false
+        }
       }
     } catch { /* ignore */ }
-  }, 500)
-
-  wsClient.onState((devId, s) => {
-    if (devId === deviceId && s) {
-      state.value = s as unknown as Record<string, unknown>
-      deviceStore.setState(deviceId, state.value)
-    }
-  })
-  wsClient.onOnline((id) => { if (id === deviceId) deviceStore.setConnected(deviceId, true) })
-  wsClient.onOffline((id) => { if (id === deviceId) deviceStore.setOffline(deviceId) })
+  }, 3000) // 兜底轮询 3s，比 REST 主通道慢 6 倍
 })
 
 onUnmounted(() => {
   window.removeEventListener('message', handle3DModelMessage)
-  if (pollTimer) clearInterval(pollTimer)
+  window.removeEventListener('blur', onWindowBlur)
+  if (fallbackTimer) clearInterval(fallbackTimer)
   stopJog()
   keysDown.clear()
-  if (isSubscribed.value) wsClient.unsubscribe(deviceId)
+  wsClient.unsubscribe(deviceId)
 })
 </script>
 
@@ -1383,6 +1722,8 @@ onUnmounted(() => {
 .connection-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: var(--radius); font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em; border: 1px solid; }
 .connection-badge--online { border-color: var(--status-online); color: var(--status-online); background: var(--status-online-dim); box-shadow: 0 0 8px #00e67622; }
 .connection-badge--locked { border-color: var(--status-locked); color: var(--status-locked); background: var(--status-locked-dim); box-shadow: 0 0 8px #00e5ff22; }
+.connection-badge--virtual { border-color: #a855f7; color: #a855f7; background: rgba(168, 85, 247, 0.08); box-shadow: 0 0 8px #a855f722; }
+.connection-badge--warning { border-color: #f59e0b; color: #f59e0b; background: rgba(245, 158, 11, 0.08); box-shadow: 0 0 8px #f59e0b22; animation: pulse-warning 2s ease-in-out infinite; }
 .connection-badge--offline { border-color: var(--status-offline); color: var(--status-offline); background: var(--status-offline-dim); }
 
 /* Enable Toggle Switch */
@@ -1461,8 +1802,7 @@ onUnmounted(() => {
 .joint-value { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); width: 60px; text-align: right; }
 
 .jog-panel-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
-.jog-settings { display: flex; align-items: center; gap: 16px; }
-.amp-limit { display: flex; align-items: center; gap: 4px; }
+.jog-settings { display: flex; align-items: center; gap: 16px; }.amp-limit { display: flex; align-items: center; gap: 4px; }
 .amp-limit-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); }
 .amp-input {
   width: 48px; padding: 2px 6px; font-family: var(--font-mono); font-size: 0.7rem;
@@ -1485,47 +1825,64 @@ onUnmounted(() => {
 }
 .inch-preset--active { border-color: var(--cyan-400); color: var(--cyan-300); background: var(--cyan-800); }
 
-.jog-body { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0; }
-
-/* Shortcut hints */
-.jog-shortcut-hint { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-.shortcut-chip { display: flex; align-items: center; gap: 3px; font-family: var(--font-display); font-size: 0.5rem; color: var(--text-muted); }
-.shortcut-chip kbd {
-  padding: 1px 6px; font-family: var(--font-mono); font-size: 0.6rem;
-  background: var(--void-surface); border: 1px solid var(--border); border-radius: 3px;
-  color: var(--text-secondary); font-weight: 700;
-}
-.shortcut-axis {
-  padding: 1px 4px; font-size: 0.55rem; font-weight: 700;
-  color: var(--cyan-300); text-shadow: 0 0 4px var(--cyan-glow);
-}
-
-.jog-dpad { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.jog-axis-tabs { display: flex; gap: 4px; justify-content: center; }
-.jog-axis-tab { padding: 6px 16px; border: 1px solid var(--border); background: var(--void-surface); cursor: pointer; font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); border-radius: var(--radius); transition: all var(--duration-fast) var(--ease-out); }
-.jog-axis-tab:hover { border-color: var(--border-bright); color: var(--text-secondary); }
-.jog-axis-tab--active { background: var(--cyan-800); border-color: var(--cyan-400); color: var(--cyan-300); box-shadow: 0 0 12px var(--cyan-glow); }
-.jog-cross { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.jog-cross-middle { display: flex; align-items: center; gap: 4px; }
-.jog-btn { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); cursor: pointer; color: var(--text-secondary); transition: all 80ms var(--ease-out); user-select: none; touch-action: none; position: relative; }
-.jog-btn::after { content: ''; position: absolute; inset: 3px; border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 50%); pointer-events: none; }
-.jog-btn:hover:not(:disabled) { border-color: var(--border-bright); color: var(--text-primary); box-shadow: var(--shadow-md), 0 0 12px #00e5ff11; }
-.jog-btn:active:not(:disabled), .jog-btn--active { background: var(--cyan-800); border-color: var(--cyan-400); color: var(--cyan-300); box-shadow: 0 0 24px var(--cyan-glow), inset 0 2px 4px rgba(0,0,0,0.4); transform: scale(0.95); }
+/* Jog Grid — 六轴横排，每轴纵向一列 */
+.jog-grid { display: flex; gap: 8px; justify-content: center; padding: 8px 0; }
+.jog-axis-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 56px; }
+.jog-axis-name { font-family: var(--font-display); font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-secondary); }
+.jog-axis-val { font-family: var(--font-mono); font-size: 0.7rem; color: var(--cyan-300); text-shadow: 0 0 4px var(--cyan-glow); }
+/* 模拟键盘键位错位：↓ 按钮整排右移 */
+.jog-btn--down { transform: translateX(16px); }
+.jog-btn { width: 48px; height: 40px; display: flex; align-items: center; justify-content: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; color: var(--text-secondary); transition: all 80ms var(--ease-out); user-select: none; touch-action: none; }
+.jog-btn:hover:not(:disabled) { border-color: var(--border-bright); color: var(--text-primary); box-shadow: 0 0 8px #00e5ff11; }
+.jog-btn:active:not(:disabled), .jog-btn--active { background: var(--cyan-800); border-color: var(--cyan-400); color: var(--cyan-300); box-shadow: 0 0 16px var(--cyan-glow); }
+.jog-btn:active:not(:disabled):not(.jog-btn--down), .jog-btn--active:not(.jog-btn--down) { transform: scale(0.95); }
+.jog-btn--active.jog-btn--down { transform: translateX(16px) scale(0.95); }
 .jog-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.jog-center { width: 64px; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--void-surface); border: 1px dashed var(--border); border-radius: 50%; }
-.jog-center-axis { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: var(--cyan-300); text-shadow: 0 0 12px var(--cyan-glow); }
-.jog-center-dir { font-size: 0.7rem; color: var(--cyan-200); margin-top: -2px; }
-.jog-center-amp { font-family: var(--font-mono); font-size: 0.55rem; color: var(--status-danger); margin-top: 2px; }
+.jog-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .action-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Speed Slider */
+.speed-control {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-0);
+}
+.speed-control--disabled { opacity: 0.35; pointer-events: none; }
+.speed-label {
+  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
+  letter-spacing: 0.12em; color: var(--text-muted); white-space: nowrap;
+}
+.speed-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 140px; height: 4px; border-radius: 2px; outline: none;
+  background: var(--void-surface); cursor: pointer;
+}
+.speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--cyan-400); border: 2px solid var(--cyan-300);
+  box-shadow: 0 0 8px var(--cyan-glow); cursor: pointer;
+  transition: transform 0.1s var(--ease-out);
+}
+.speed-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+.speed-slider::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--cyan-400); border: 2px solid var(--cyan-300);
+  box-shadow: 0 0 8px var(--cyan-glow); cursor: pointer;
+}
+.speed-value {
+  font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700;
+  color: var(--cyan-300); min-width: 42px; text-align: right;
+  text-shadow: 0 0 6px var(--cyan-glow);
+}
 .action-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
 
 /* Move Panel */
 .move-panel-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.move-presets { display: flex; gap: 6px; flex-wrap: wrap; }
-.preset-editor { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.move-panel-actions { display: flex; gap: 6px; }
 .preset-name-input {
-  width: 180px; padding: 6px 8px; font-family: var(--font-mono); font-size: 0.7rem;
+  width: 160px; padding: 6px 8px; font-family: var(--font-mono); font-size: 0.7rem;
   background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text-primary); outline: none;
 }
@@ -1541,6 +1898,66 @@ onUnmounted(() => {
 .move-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
 .move-unit { font-family: var(--font-display); font-size: 0.45rem; color: var(--text-muted); letter-spacing: 0.08em; }
 .move-btn { align-self: flex-end; margin-left: auto; }
+
+/* Preset Management */
+.preset-section { border-top: 1px solid var(--border); padding-top: 12px; }
+.preset-section-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.preset-section-actions { display: flex; gap: 6px; align-items: center; }
+.preset-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.preset-list::-webkit-scrollbar { width: 4px; }
+.preset-list::-webkit-scrollbar-track { background: transparent; }
+.preset-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.preset-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius);
+  border: 1px solid transparent; transition: all var(--duration-fast);
+}
+.preset-item:not(.preset-item--system):hover { border-color: var(--border); background: var(--void-surface); }
+.preset-item--selected { border-color: var(--cyan-700); background: var(--cyan-800); }
+.preset-item--system { opacity: 0.6; cursor: default; }
+.preset-item--dragging { opacity: 0.4; }
+.preset-item--dragover { border-color: var(--cyan-400); box-shadow: 0 0 8px var(--cyan-glow); }
+.preset-item-grip {
+  color: var(--text-muted); cursor: grab; font-size: 14px; letter-spacing: -2px;
+  user-select: none; padding: 0 4px; line-height: 1;
+}
+.preset-item-grip:active { cursor: grabbing; }
+.preset-item-info { display: flex; flex-direction: column; min-width: 0; cursor: pointer; flex: 1; }
+.preset-item-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.preset-item-joints { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preset-item-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.btn-icon {
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; border-radius: 2px; cursor: pointer;
+  font-size: 11px; color: var(--text-muted); transition: all var(--duration-fast);
+}
+.btn-icon:hover:not(:disabled) { border-color: var(--border); color: var(--text-primary); background: var(--surface-1); }
+.btn-icon:disabled { opacity: 0.25; cursor: not-allowed; }
+.btn-icon--danger:hover:not(:disabled) { color: var(--status-danger); border-color: var(--status-danger); }
+.preset-item-badge {
+  font-family: var(--font-display); font-size: 0.45rem; font-weight: 700; letter-spacing: 0.1em;
+  padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; color: var(--text-muted);
+}
+.preset-empty { text-align: center; padding: 16px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+.modal-overlay--inline { position: absolute; inset: 0; border-radius: var(--radius-lg); }
+
+/* Modal (for rename preset) */
+.modal-overlay { position: fixed; inset: 0; background: rgba(4,10,20,0.85); backdrop-filter: blur(6px); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.modal { width: 100%; max-width: 400px; padding: 28px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; }
+.modal-header h3 { margin: 0; font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-primary); }
+.modal-close {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius);
+  cursor: pointer; color: var(--text-muted); padding: 4px; display: flex;
+  transition: all var(--duration-fast);
+}
+.modal-close:hover { color: var(--text-primary); border-color: var(--border-bright); background: var(--surface-1); }
+.modal-form { display: flex; flex-direction: column; }
+.modal-actions { display: flex; gap: 12px; }
+.modal-actions .btn { flex: 1; }
+.field-group { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); }
+.btn-quick--sys { border-color: var(--cyan-700); color: var(--cyan-300); background: var(--cyan-800); }
 
 .estop-btn { padding: 12px 28px; font-size: 13px; background: linear-gradient(180deg, #e01133 0%, #990022 100%); animation: glow-breath 2s ease-in-out infinite; }
 .estop-btn:hover:not(:disabled) { background: linear-gradient(180deg, #ff2244 0%, #bb0033 100%); animation: none; box-shadow: 0 0 32px #ff174466, 0 4px 12px rgba(0,0,0,0.6); }
@@ -1645,6 +2062,8 @@ onUnmounted(() => {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-warning { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+.status-dot--warning { background: #f59e0b; box-shadow: 0 0 4px #f59e0b; }
 
 .logs-slide-enter-active { transition: transform 0.25s var(--ease-out); }
 .logs-slide-leave-active { transition: transform 0.2s var(--ease-in); }
