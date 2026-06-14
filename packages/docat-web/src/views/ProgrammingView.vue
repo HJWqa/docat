@@ -129,7 +129,7 @@
 
         <div v-if="activeProject && activeFile" ref="editorContainer" class="code-editor" />
 
-        <div v-else class="editor-empty">
+        <div v-else-if="!activeProject" class="editor-empty">
           <h3>NO PROJECT OPEN</h3>
           <p>Select a controller project to edit its files.</p>
         </div>
@@ -137,6 +137,36 @@
         <div v-if="opening" class="editor-loading">
           <span class="loading-ring loading-ring--large"></span>
           <strong>{{ openingProjectName ? `OPENING ${openingProjectName}` : 'OPENING PROJECT' }}</strong>
+        </div>
+
+        <!-- Points panel below editor -->
+        <div v-if="activeProject" class="points-bar">
+          <div class="points-bar-header">
+            <span class="hud-label" style="margin-bottom:0">POINTS</span>
+            <button class="btn btn-primary btn-sm" :disabled="!selectedDeviceId || savingPoint" @click="doSavePoint">
+              {{ savingPoint ? 'SAVING...' : 'SAVE POINT' }}
+            </button>
+          </div>
+          <div v-if="projectPoints.length" class="points-bar-list">
+            <span v-for="point in projectPoints" :key="point.id"
+              class="points-bar-chip" :class="{ 'points-bar-chip--editing': editingPointId === point.id }"
+              @click="editingPointId = point.id">
+              <template v-if="editingPointId !== point.id">
+                <strong>{{ point.name }}</strong>
+                <small>{{ point.joint.map(v => v.toFixed(1)).slice(0, 3).join(', ') }}...</small>
+                <button class="points-bar-del" @click.stop="doDeletePoint(point)" :disabled="deletingPoint">×</button>
+              </template>
+              <template v-else>
+                <span class="points-edit-row" @click.stop>
+                  <input v-for="(v, j) in editingJoints" :key="j" v-model.number="editingJoints[j]"
+                    type="number" step="0.1" class="points-edit-input" />
+                  <button class="btn btn-primary btn-sm" @click="doUpdatePoint(point)" :disabled="updatingPoint">✓</button>
+                  <button class="btn btn-secondary btn-sm" @click="editingPointId = ''">✕</button>
+                </span>
+              </template>
+            </span>
+          </div>
+          <div v-else class="points-bar-empty">No points — jog &amp; save</div>
         </div>
 
       </main>
@@ -368,6 +398,12 @@ const opening = ref(false)
 const openingProjectName = ref('')
 const creating = ref(false)
 const saving = ref(false)
+const savingPoint = ref(false)
+const deletingPoint = ref(false)
+const updatingPoint = ref(false)
+const editingPointId = ref('')
+const editingJoints = ref<number[]>([0,0,0,0,0,0])
+const projectPoints = ref<api.PointData[]>([])
 const running = ref(false)
 const stopping = ref(false)
 const pausing = ref(false)
@@ -991,6 +1027,7 @@ async function openProject(projectName: string) {
     clearExecutionLine()
     chooseInitialFile(activeProject.value)
     syncEditor()
+    loadPoints()
     toastRef.value?.success(`[Mock] Opened ${projectName}`)
     return
   }
@@ -1007,6 +1044,7 @@ async function openProject(projectName: string) {
       chooseInitialFile(res.data)
       await loadProjects()
       syncEditor()
+      loadPoints()
     } else {
       toastRef.value?.error(`Open failed: ${res.error?.message}`)
     }
@@ -1026,6 +1064,7 @@ async function createProject() {
     newProjectName.value = ''
     chooseInitialFile(activeProject.value)
     syncEditor()
+    projectPoints.value = []
     toastRef.value?.success('[Mock] Project created')
     return
   }
@@ -1039,6 +1078,7 @@ async function createProject() {
       chooseInitialFile(res.data)
       await loadProjects()
       syncEditor()
+      projectPoints.value = []
       toastRef.value?.success('Project created')
     } else {
       toastRef.value?.error(`Create failed: ${res.error?.message}`)
@@ -1053,6 +1093,82 @@ function updateActiveProject(detail: api.ControllerProjectDetail, preferredFile 
   activeFileName.value = detail.fileList.find(file => file.name === preferredFile)?.name ?? detail.fileList[0]?.name ?? ''
   syncEditor()
 }
+
+// ─── Points ─────────────────────────────────────
+
+async function loadPoints() {
+  if (!selectedDeviceId.value || !activeProject.value) { projectPoints.value = []; return }
+  if (isMock) { projectPoints.value = []; return }
+  try {
+    const res = await api.getPoints(selectedDeviceId.value, activeProject.value.name)
+    if (res.success && res.data) projectPoints.value = res.data
+    else projectPoints.value = []
+  } catch { projectPoints.value = [] }
+}
+
+async function doSavePoint() {
+  if (!selectedDeviceId.value || !activeProject.value) return
+  if (isMock) {
+    const n = projectPoints.value.length + 1
+    projectPoints.value.push({ id: crypto.randomUUID(), name: `P${n}`, pose: [0,0,0,0,0,0], joint: [0,0,0,0,0,0], tool: 0, user: 0 })
+    toastRef.value?.success(`[Mock] Saved P${n}`)
+    return
+  }
+  savingPoint.value = true
+  try {
+    const res = await api.savePoint(selectedDeviceId.value, activeProject.value.name)
+    if (res.success && res.data) {
+      projectPoints.value.push(res.data)
+      toastRef.value?.success(`Saved ${res.data.name}`)
+    } else {
+      toastRef.value?.error(`Save point failed: ${res.error?.message}`)
+    }
+  } finally { savingPoint.value = false }
+}
+
+async function doDeletePoint(point: api.PointData) {
+  if (!selectedDeviceId.value || !activeProject.value) return
+  if (isMock) { projectPoints.value = projectPoints.value.filter(p => p.id !== point.id); return }
+  deletingPoint.value = true
+  try {
+    const res = await api.deletePoint(selectedDeviceId.value, activeProject.value.name, point.id)
+    if (res.success) {
+      projectPoints.value = projectPoints.value.filter(p => p.id !== point.id)
+      toastRef.value?.success(`Deleted ${point.name}`)
+    } else {
+      toastRef.value?.error(`Delete failed: ${res.error?.message}`)
+    }
+  } finally { deletingPoint.value = false }
+}
+
+async function doUpdatePoint(point: api.PointData) {
+  if (!selectedDeviceId.value || !activeProject.value) return
+  if (isMock) {
+    point.joint = [...editingJoints.value]
+    editingPointId.value = ''
+    toastRef.value?.success(`[Mock] ${point.name} updated`)
+    return
+  }
+  updatingPoint.value = true
+  try {
+    const res = await api.updatePoint(selectedDeviceId.value, activeProject.value.name, point.id, { joint: [...editingJoints.value] })
+    if (res.success && res.data) {
+      const idx = projectPoints.value.findIndex(p => p.id === point.id)
+      if (idx >= 0) projectPoints.value[idx] = res.data
+      editingPointId.value = ''
+      toastRef.value?.success(`${point.name} updated`)
+    } else {
+      toastRef.value?.error(`Update failed: ${res.error?.message}`)
+    }
+  } finally { updatingPoint.value = false }
+}
+
+// Populate editingJoints when editingPointId changes
+watch(editingPointId, (id) => {
+  if (!id) return
+  const point = projectPoints.value.find(p => p.id === id)
+  if (point) editingJoints.value = [...point.joint]
+})
 
 async function saveActiveFile() {
   if (!selectedDeviceId.value || !activeProject.value || !activeFile.value) return
@@ -1541,6 +1657,35 @@ onBeforeUnmount(() => {
 .runtime-log-row--popup strong { color: var(--green-300); }
 .runtime-log-row--error strong,
 .runtime-log-row--error p { color: var(--red-300); }
+
+/* Points bar (below editor) */
+.points-bar { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.points-bar-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.points-bar-list { display: flex; gap: 4px; flex-wrap: wrap; }
+.points-bar-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--void-surface); font-size: 11px;
+}
+.points-bar-chip strong { font-family: var(--font-display); font-size: 0.6rem; color: var(--cyan-300); }
+.points-bar-chip small { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+.points-bar-del {
+  width: 14px; height: 14px; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  font-size: 12px; margin-left: 2px; border-radius: 2px;
+}
+.points-bar-del:hover { color: var(--status-danger); background: #ff174411; }
+.points-bar-empty { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+.points-bar-chip { cursor: pointer; }
+.points-bar-chip--editing { border-color: var(--cyan-400); padding: 4px 8px; }
+.points-edit-row { display: flex; align-items: center; gap: 3px; }
+.points-edit-input {
+  width: 52px; padding: 2px 4px; font-family: var(--font-mono); font-size: 0.65rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: 2px;
+  color: var(--cyan-300); text-align: center; outline: none;
+}
+.points-edit-input:focus { border-color: var(--cyan-400); }
+
 .runtime-empty { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); text-align: center; padding: 32px 0; }
 .panel-loading,
 .editor-loading {

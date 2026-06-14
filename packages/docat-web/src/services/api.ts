@@ -381,6 +381,208 @@ export async function deleteProjectFile(id: string, projectName: string, fileNam
   return request('DELETE', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/files/${encodeURIComponent(fileName)}`)
 }
 
+// ─── Project Points ─────────────────────────────
+
+export interface PointData {
+  id: string
+  name: string
+  alias?: string
+  pose: number[]
+  joint: number[]
+  tool: number
+  user: number
+}
+
+export async function getPoints(id: string, projectName: string): Promise<ApiResponse<PointData[]>> {
+  return request('GET', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/points`)
+}
+
+export async function savePoint(id: string, projectName: string, opts?: { tool?: number; user?: number }): Promise<ApiResponse<PointData>> {
+  return request('POST', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/points`, opts)
+}
+
+export async function updatePoint(id: string, projectName: string, pointId: string, data: Partial<PointData>): Promise<ApiResponse<PointData>> {
+  return request('PUT', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/points/${pointId}`, data)
+}
+
+export async function deletePoint(id: string, projectName: string, pointId: string): Promise<ApiResponse<null>> {
+  return request('DELETE', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/points/${pointId}`)
+}
+
+export async function teachFileUpdate(id: string, projectName: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/teachFileUpdate`)
+}
+
+// ─── Load Parameters ──────────────────────────
+
+export interface LoadParams {
+  name: string
+  centerX: number
+  centerY: number
+  centerZ: number
+  loadValue: number
+}
+
+export async function getLoadParams(id: string): Promise<ApiResponse<LoadParams>> {
+  return request('GET', `/api/devices/${id}/loadParams`)
+}
+
+export async function setLoadParams(id: string, params: LoadParams): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/loadParams`, params)
+}
+
+export async function getLoadConfig(id: string): Promise<ApiResponse<LoadParams[]>> {
+  return request('GET', `/api/devices/${id}/loadConfig`)
+}
+
+export async function setLoadConfig(id: string, config: LoadParams[]): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/loadConfig`, config)
+}
+
+// ─── Custom Postures ──────────────────────────
+
+export interface CustomPostureItem {
+  name: string
+  joint: number[]
+}
+
+export async function getCustomPostures(id: string): Promise<ApiResponse<CustomPostureItem[]>> {
+  return request('GET', `/api/devices/${id}/customPostures`)
+}
+
+export async function setCustomPostures(id: string, postures: CustomPostureItem[]): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/customPostures`, postures)
+}
+
+// ─── System Settings ──────────────────────────
+
+export async function getSystemTime(id: string): Promise<ApiResponse<{ date?: string; time?: string; timeZone?: string }>> {
+  return request('GET', `/api/devices/${id}/systemTime`)
+}
+
+export async function setSystemTime(id: string, t: { date?: string; time?: string; timeZone?: string }): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/systemTime`, t)
+}
+
+export async function setDeviceAlias(id: string, alias: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/deviceAlias`, { alias })
+}
+
+// ─── User Management ──────────────────────────
+
+export interface ControllerUserItem {
+  level: number
+  name: string
+  password: string
+  enablePassword: boolean
+}
+
+export interface ControllerUserList {
+  defaultLevel: number
+  list: ControllerUserItem[]
+}
+
+export async function getControllerUsers(id: string): Promise<ApiResponse<ControllerUserList>> {
+  return request('GET', `/api/devices/${id}/users`)
+}
+
+export async function setControllerUsers(id: string, list: ControllerUserList): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/users`, list)
+}
+
+export interface PermissionConfig {
+  level: number
+  config: Record<string, number>
+}
+
+export async function getUserPermissions(id: string): Promise<ApiResponse<PermissionConfig[]>> {
+  return request('GET', `/api/devices/${id}/userPermissions`)
+}
+
+export async function setUserPermissions(id: string, config: PermissionConfig[]): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/userPermissions`, config)
+}
+
+// ─── Coordinate Management ────────────────────
+
+export interface CoordItem {
+  name: string; enable: boolean
+  x?: number; y?: number; z?: number; r?: number
+  rx?: number; ry?: number; rz?: number
+}
+
+export async function getUserCoordinate(id: string): Promise<ApiResponse<{ coordList: CoordItem[] }>> {
+  return request('GET', `/api/devices/${id}/userCoordinate`)
+}
+
+export async function setUserCoordinate(id: string, data: { coordList: CoordItem[] }): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/userCoordinate`, data)
+}
+
+export async function getToolCoordinate(id: string): Promise<ApiResponse<{ coordList: CoordItem[] }>> {
+  return request('GET', `/api/devices/${id}/toolCoordinate`)
+}
+
+export async function setToolCoordinate(id: string, data: { coordList: CoordItem[] }): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/toolCoordinate`, data)
+}
+
+// ─── Motion Parameters ────────────────────────
+
+export async function getPlaybackJointParams(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/playbackJointParams`)
+}
+
+export async function setPlaybackJointParams(id: string, p: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/playbackJointParams`, p)
+}
+
+export async function getPlaybackCoordinateParams(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/playbackCoordinateParams`)
+}
+
+export async function setPlaybackCoordinateParams(id: string, p: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/playbackCoordinateParams`, p)
+}
+
+export async function getTeachJointParams(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/teachJointParams`)
+}
+
+export async function setTeachJointParams(id: string, p: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/teachJointParams`, p)
+}
+
+export async function getTeachCoordinateParams(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/teachCoordinateParams`)
+}
+
+export async function setTeachCoordinateParams(id: string, p: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/teachCoordinateParams`, p)
+}
+
+// ─── Communication ────────────────────────────
+
+export async function setBus(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/bus`, params)
+}
+
+export async function getWiFi(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/wifi`)
+}
+
+export async function setWiFi(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/wifi`, params)
+}
+
+export async function getEthernet(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/ethernet`)
+}
+
+export async function setEthernet(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/ethernet`, params)
+}
+
 // ─── Scripts ────────────────────────────────────
 
 export async function listScripts(): Promise<ApiResponse<Script[]>> {

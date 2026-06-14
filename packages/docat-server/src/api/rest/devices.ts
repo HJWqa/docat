@@ -10,6 +10,7 @@ import type { DevicePool, ConnectionMode } from '../../device/DevicePool.js'
 import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
+import type { LoadParams, CustomPosture, SystemTime, CoordinateData, UserList, UserPermissionConfig } from '../../device/DeviceDriver.js'
 
 const CONTROL_LOG_DIR = '/developOnly/logs/user'
 const CONTROL_LOG_LEVELS = ['error', 'warning', 'info', 'user'] as const
@@ -596,6 +597,493 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  // ─── 负载参数 ──────────────────────────────────
+
+  /** 获取当前负载参数 */
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/loadParams',
+    async (request, reply): Promise<ApiResponse<LoadParams>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        const data = await entry.driver.getLoadParams()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 设置当前负载参数 */
+  app.post<{ Params: { id: string }; Body: { name: string; centerX: number; centerY: number; centerZ: number; loadValue: number } }>(
+    '/api/devices/:id/loadParams',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        await entry.driver.setLoadParams(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 获取全部负载预设组 */
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/loadConfig',
+    async (request, reply): Promise<ApiResponse<LoadParams[]>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        const data = await entry.driver.getLoadConfig()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 替换全部负载预设组 */
+  app.post<{ Params: { id: string }; Body: Array<{ name: string; centerX: number; centerY: number; centerZ: number; loadValue: number }> }>(
+    '/api/devices/:id/loadConfig',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        await entry.driver.setLoadConfig(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 自定义姿态（控制器端）────────────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/customPostures',
+    async (request, reply): Promise<ApiResponse<CustomPosture[]>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getCustomPostures()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: Array<{ name: string; joint: number[] }> }>(
+    '/api/devices/:id/customPostures',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setCustomPostures(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 系统设置 ──────────────────────────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/systemTime',
+    async (request, reply): Promise<ApiResponse<SystemTime>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getSystemTime()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { date?: string; time?: string; timeZone?: string } }>(
+    '/api/devices/:id/systemTime',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setSystemTime(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { alias: string } }>(
+    '/api/devices/:id/deviceAlias',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setDeviceAlias(request.body.alias)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 用户管理 ──────────────────────────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/users',
+    async (request, reply): Promise<ApiResponse<UserList>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getUserList()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/users',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setUserList(request.body as never)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/userPermissions',
+    async (request, reply): Promise<ApiResponse<UserPermissionConfig[]>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getUserConfig()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: Array<Record<string, unknown>> }>(
+    '/api/devices/:id/userPermissions',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setUserConfig(request.body as never)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 坐标系管理 ────────────────────────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/userCoordinate',
+    async (request, reply): Promise<ApiResponse<CoordinateData>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getUserCoordinate()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: CoordinateData }>(
+    '/api/devices/:id/userCoordinate',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setUserCoordinate(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/toolCoordinate',
+    async (request, reply): Promise<ApiResponse<CoordinateData>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getToolCoordinate()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: CoordinateData }>(
+    '/api/devices/:id/toolCoordinate',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setToolCoordinate(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 运动参数 ──────────────────────────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/playbackJointParams',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getPlaybackJointParams()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/playbackJointParams',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setPlaybackJointParams(request.body)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/playbackCoordinateParams',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getPlaybackCoordinateParams()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/playbackCoordinateParams',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setPlaybackCoordinateParams(request.body)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/teachJointParams',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getTeachJointParams()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/teachJointParams',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setTeachJointParams(request.body)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/teachCoordinateParams',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getTeachCoordinateParams()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/teachCoordinateParams',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setTeachCoordinateParams(request.body)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  // ─── 通讯设置 ──────────────────────────────────
+
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/bus',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setBus(request.body)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/wifi',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getWiFi()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/wifi',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setWiFi(request.body)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/ethernet',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getEthernet()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/devices/:id/ethernet',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setEthernet(request.body)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
   /** 设备级关节预设（所有用户可见） */
   app.get<{ Params: { id: string } }>(
     '/api/devices/:id/jointPresets',
@@ -653,13 +1141,23 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: false, error: { code: 40401, message: '设备不存在' } }
         }
 
+        // 同名覆盖：如果已存在同名自定义预设，则更新 joints
+        const existing = db.prepare('SELECT id, sortOrder FROM device_joint_presets WHERE deviceId = ? AND name = ?')
+          .get(request.params.id, trimmedName) as { id: string; sortOrder: number } | undefined
+
+        const rounded = joints.map(j => Number(j.toFixed(6)))
+        if (existing) {
+          db.prepare('UPDATE device_joint_presets SET joints = ?, updatedAt = datetime(\'now\') WHERE id = ?')
+            .run(JSON.stringify(rounded), existing.id)
+          return { success: true, data: { id: existing.id, name: trimmedName, joints: rounded, system: false, sortOrder: existing.sortOrder } }
+        }
+
         // 新预设排到最后
         const maxOrder = db.prepare('SELECT COALESCE(MAX(sortOrder), 0) FROM device_joint_presets WHERE deviceId = ?')
           .get(request.params.id) as Record<string, number>
         const sortOrder = (Object.values(maxOrder)[0] ?? 0) + 1
 
         const id = uuidv4()
-        const rounded = joints.map(j => Number(j.toFixed(6)))
         db.prepare('INSERT INTO device_joint_presets (id, deviceId, name, joints, sortOrder) VALUES (?, ?, ?, ?, ?)')
           .run(id, request.params.id, trimmedName, JSON.stringify(rounded), sortOrder)
         return { success: true, data: { id, name: trimmedName, joints: rounded, system: false, sortOrder } }
@@ -1163,6 +1661,232 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           x, y, z, r,
           mode: (mode as 'go' | 'move' | 'jump') || 'move',
           user, tool,
+        })
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 工程点位管理 (point.json) ──────────────────
+
+  interface PointData {
+    id: string
+    name: string
+    alias?: string
+    pose: number[]
+    joint: number[]
+    tool: number
+    user: number
+  }
+
+  /** 生成点名称：扫描已有点取最大编号+1 */
+  function nextPointName(points: PointData[]): string {
+    let max = 0
+    for (const p of points) {
+      const m = /^P(\d+)$/.exec(p.name)
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+    return `P${max + 1}`
+  }
+
+  /** 获取工程点位列表 */
+  app.get<{ Params: { id: string; projectName: string } }>(
+    '/api/devices/:id/projects/:projectName/points',
+    async (request, reply): Promise<ApiResponse<PointData[]>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const projectName = decodeURIComponent(request.params.projectName)
+        const projectPath = `/developOnly/project/${projectName}`
+        const sftp = new SftpTransport(entry.driver.ip)
+        const raw = await sftp.readText(`${projectPath}/point.json`)
+        return { success: true, data: JSON.parse(raw) as PointData[] }
+      } catch {
+        return { success: true, data: [] }
+      }
+    }
+  )
+
+  /** 保存当前设备位姿为新点 */
+  app.post<{ Params: { id: string; projectName: string }; Body: { tool?: number; user?: number } }>(
+    '/api/devices/:id/projects/:projectName/points',
+    async (request, reply): Promise<ApiResponse<PointData>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const projectName = decodeURIComponent(request.params.projectName)
+        const projectPath = `/developOnly/project/${projectName}`
+        const ip = entry.driver.ip
+
+        // 读取当前 point.json
+        const sftp = new SftpTransport(ip)
+        let points: PointData[] = []
+        try {
+          const raw = await sftp.readText(`${projectPath}/point.json`)
+          points = JSON.parse(raw) as PointData[]
+        } catch {
+          points = []
+        }
+
+        // 读取当前位姿
+        const state = await entry.driver.pollState()
+        const pose = state.pose
+        const joints = state.joints
+        const newPoint: PointData = {
+          id: crypto.randomUUID(),
+          name: nextPointName(points),
+          alias: '',
+          pose: [pose.x, pose.y, pose.z, pose.rx ?? pose.r ?? 0, pose.ry ?? 0, pose.rz ?? 0],
+          joint: [joints.j1, joints.j2, joints.j3, joints.j4, joints.j5 ?? 0, joints.j6 ?? 0],
+          tool: request.body?.tool ?? 0,
+          user: request.body?.user ?? 0,
+        }
+        points.push(newPoint)
+
+        // SFTP 写回
+        await sftp.writeText(`${projectPath}/point.json`, JSON.stringify(points))
+
+        // 触发控制器更新变量文件
+        try {
+          await entry.http.main.send({
+            method: 'post',
+            url: '/project/teachFileUpdate',
+            portName: ip,
+            params: { file: 'point.json' },
+            timeout: 5000,
+          })
+        } catch { /* 非关键 */ }
+
+        return { success: true, data: newPoint }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 删除工程点位 */
+  app.delete<{ Params: { id: string; projectName: string; pointId: string } }>(
+    '/api/devices/:id/projects/:projectName/points/:pointId',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const projectName = decodeURIComponent(request.params.projectName)
+        const projectPath = `/developOnly/project/${projectName}`
+        const ip = entry.driver.ip
+
+        const sftp = new SftpTransport(ip)
+        let points: PointData[] = []
+        try {
+          const raw = await sftp.readText(`${projectPath}/point.json`)
+          points = JSON.parse(raw) as PointData[]
+        } catch {
+          return { success: false, error: { code: 40401, message: '点位文件不存在' } }
+        }
+
+        const filtered = points.filter(p => p.id !== request.params.pointId)
+        if (filtered.length === points.length) {
+          return { success: false, error: { code: 40401, message: '点位不存在' } }
+        }
+
+        await sftp.writeText(`${projectPath}/point.json`, JSON.stringify(filtered))
+
+        try {
+          await entry.http.main.send({
+            method: 'post',
+            url: '/project/teachFileUpdate',
+            portName: ip,
+            params: { file: 'point.json' },
+            timeout: 5000,
+          })
+        } catch { /* 非关键 */ }
+
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 更新工程点位（支持修改 joint/pose 等） */
+  app.put<{ Params: { id: string; projectName: string; pointId: string }; Body: Partial<PointData> }>(
+    '/api/devices/:id/projects/:projectName/points/:pointId',
+    async (request, reply): Promise<ApiResponse<PointData>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const projectName = decodeURIComponent(request.params.projectName)
+        const projectPath = `/developOnly/project/${projectName}`
+        const ip = entry.driver.ip
+        const sftp = new SftpTransport(ip)
+
+        let points: PointData[] = []
+        try { points = JSON.parse(await sftp.readText(`${projectPath}/point.json`)) as PointData[] }
+        catch { return { success: false, error: { code: 40401, message: '点位文件不存在' } } }
+
+        const idx = points.findIndex(p => p.id === request.params.pointId)
+        if (idx === -1) return { success: false, error: { code: 40401, message: '点位不存在' } }
+
+        const body = request.body
+        const current = points[idx]
+        // 合并更新
+        if (body.name !== undefined) current.name = body.name
+        if (body.alias !== undefined) current.alias = body.alias
+        if (body.joint) current.joint = body.joint
+        if (body.pose) current.pose = body.pose
+        if (body.tool !== undefined) current.tool = body.tool
+        if (body.user !== undefined) current.user = body.user
+
+        await sftp.writeText(`${projectPath}/point.json`, JSON.stringify(points))
+        try { await entry.http.main.send({ method: 'post', url: '/project/teachFileUpdate', portName: ip, params: { file: 'point.json' }, timeout: 5000 }) }
+        catch { /* 非关键 */ }
+
+        return { success: true, data: current }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 触发控制器编译点文件 */
+  app.post<{ Params: { id: string; projectName: string } }>(
+    '/api/devices/:id/projects/:projectName/teachFileUpdate',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        await entry.http.main.send({
+          method: 'post',
+          url: '/project/teachFileUpdate',
+          portName: entry.driver.ip,
+          params: { file: 'point.json' },
+          timeout: 5000,
         })
         return { success: true, data: null }
       } catch (err) {

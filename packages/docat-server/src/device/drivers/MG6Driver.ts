@@ -3,7 +3,16 @@
  * 从 OpenDobot46 mg6Method.ts 提取适配
  * @see OpenDobot46/src.vm/dobotvm/device/mg6/mg6Method.ts
  */
-import { DeviceDriver, type DeviceTypeName } from '../DeviceDriver.js'
+import {
+  DeviceDriver,
+  type LoadParams,
+  type CustomPosture,
+  type SystemTime,
+  type UserList,
+  type UserPermissionConfig,
+  type CoordinateData,
+  type DeviceTypeName,
+} from '../DeviceDriver.js'
 import { HttpTransport } from '../transport/HttpTransport.js'
 import type {
   CartesianPose, JointPose, DeviceState, DeviceStatus,
@@ -319,6 +328,398 @@ export class MG6Driver extends DeviceDriver {
     })
   }
 
+  // ─── 负载参数 ──────────────────────────────────
+
+  async getLoadParams(): Promise<LoadParams> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/loadParams',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      const data = reply.data as Record<string, unknown>
+      return {
+        name: String(data.name ?? ''),
+        centerX: Number(data.centerX ?? 0),
+        centerY: Number(data.centerY ?? 0),
+        centerZ: Number(data.centerZ ?? 0),
+        loadValue: Number(data.loadValue ?? 0),
+      }
+    }
+    return { name: '', centerX: 0, centerY: 0, centerZ: 0, loadValue: 0 }
+  }
+
+  async setLoadParams(params: LoadParams): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/loadParams',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set loadParams failed: ${reply.message}`)
+    }
+  }
+
+  async getLoadConfig(): Promise<LoadParams[]> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/loadConfig',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && Array.isArray(reply.data)) {
+      return (reply.data as Array<Record<string, unknown>>).map(item => ({
+        name: String(item.name ?? ''),
+        centerX: Number(item.centerX ?? 0),
+        centerY: Number(item.centerY ?? 0),
+        centerZ: Number(item.centerZ ?? 0),
+        loadValue: Number(item.loadValue ?? 0),
+      }))
+    }
+    return []
+  }
+
+  async setLoadConfig(config: LoadParams[]): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/loadConfig',
+      portName: this.ip,
+      params: config,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set loadConfig failed: ${reply.message}`)
+    }
+  }
+
+  // ─── 自定义姿态 ────────────────────────────────
+
+  async getCustomPostures(): Promise<CustomPosture[]> {
+    try {
+      const reply = await this.http.send({
+        method: 'get',
+        url: '/settings/function/customPose',
+        portName: this.ip,
+        timeout: 5000,
+      })
+      if (reply.status && Array.isArray(reply.data)) {
+        return (reply.data as Array<Record<string, unknown>>).map(item => ({
+          name: String(item.name ?? ''),
+          joint: Array.isArray(item.joint) ? item.joint.map(Number) : [],
+        }))
+      }
+    } catch { /* ignore */ }
+    return []
+  }
+
+  async setCustomPostures(postures: CustomPosture[]): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/customPose',
+      portName: this.ip,
+      params: postures,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set customPose failed: ${reply.message}`)
+    }
+  }
+
+  // ─── 系统设置 ──────────────────────────────────
+
+  async getSystemTime(): Promise<SystemTime> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/systemTime',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      const d = reply.data as Record<string, unknown>
+      return { date: String(d.date ?? ''), time: String(d.time ?? ''), timeZone: String(d.timeZone ?? '') }
+    }
+    return {}
+  }
+
+  async setSystemTime(time: SystemTime): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/systemTime',
+      portName: this.ip,
+      params: time,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set systemTime failed: ${reply.message}`)
+    }
+  }
+
+  async setDeviceAlias(alias: string): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/robotAlias',
+      portName: this.ip,
+      params: { alias },
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set robotAlias failed: ${reply.message}`)
+    }
+  }
+
+  // ─── 用户管理 ──────────────────────────────────
+
+  async getUserList(): Promise<UserList> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/permission/userList',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      return reply.data as UserList
+    }
+    return { defaultLevel: 1, list: [] }
+  }
+
+  async setUserList(list: UserList): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/permission/userList',
+      portName: this.ip,
+      params: list,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set userList failed: ${reply.message}`)
+    }
+  }
+
+  async getUserConfig(): Promise<UserPermissionConfig[]> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/permission/config',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      const d = reply.data as Record<string, unknown>
+      return (d.list as UserPermissionConfig[]) ?? []
+    }
+    return []
+  }
+
+  async setUserConfig(config: UserPermissionConfig[]): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/permission/config',
+      portName: this.ip,
+      params: { list: config },
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set userConfig failed: ${reply.message}`)
+    }
+  }
+
+  // ─── 坐标系管理 ────────────────────────────────
+
+  async getUserCoordinate(): Promise<CoordinateData> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/coordinate/user',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      return { coordList: (reply.data as CoordinateItemRaw[]).map(normalizeCoord) }
+    }
+    return { coordList: [] }
+  }
+
+  async setUserCoordinate(data: CoordinateData): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/coordinate/user',
+      portName: this.ip,
+      params: data.coordList,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set userCoordinate failed: ${reply.message}`)
+    }
+  }
+
+  async getToolCoordinate(): Promise<CoordinateData> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/coordinate/tool',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      return { coordList: (reply.data as CoordinateItemRaw[]).map(normalizeCoord) }
+    }
+    return { coordList: [] }
+  }
+
+  async setToolCoordinate(data: CoordinateData): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/coordinate/tool',
+      portName: this.ip,
+      params: data.coordList,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Set toolCoordinate failed: ${reply.message}`)
+    }
+  }
+
+  // ─── 运动参数 ──────────────────────────────────
+
+  async getPlaybackJointParams(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/playback/joint',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setPlaybackJointParams(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/playback/joint',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set playback/joint failed: ${reply.message}`)
+  }
+
+  async getPlaybackCoordinateParams(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/playback/coordinate',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setPlaybackCoordinateParams(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/playback/coordinate',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set playback/coordinate failed: ${reply.message}`)
+  }
+
+  async getTeachJointParams(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/teach/joint',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setTeachJointParams(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/teach/joint',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set teach/joint failed: ${reply.message}`)
+  }
+
+  async getTeachCoordinateParams(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/teach/coordinate',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setTeachCoordinateParams(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/teach/coordinate',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set teach/coordinate failed: ${reply.message}`)
+  }
+
+  // ─── 通讯设置 ──────────────────────────────────
+
+  async setBus(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/bus',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set bus failed: ${reply.message}`)
+  }
+
+  async getWiFi(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/interface/setAP',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setWiFi(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/setAP',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set WiFi failed: ${reply.message}`)
+  }
+
+  async getEthernet(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/interface/ethernet',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setEthernet(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/ethernet',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set Ethernet failed: ${reply.message}`)
+  }
+
   // ─── 告警 ──────────────────────────────────────
 
   async getAlarms(): Promise<Array<{ id: number; level: number; description: string; solution: string; date: string; time: string }>> {
@@ -517,5 +918,28 @@ export class MG6Driver extends DeviceDriver {
 
   async deleteProject(_name: string): Promise<void> {
     // TODO
+  }
+}
+
+/** 控制器返回的原始坐标项 */
+interface CoordinateItemRaw {
+  name?: string
+  enable?: boolean
+  x?: number; y?: number; z?: number; r?: number
+  rx?: number; ry?: number; rz?: number
+  [key: string]: unknown
+}
+
+function normalizeCoord(item: CoordinateItemRaw) {
+  return {
+    name: String(item.name ?? ''),
+    enable: Boolean(item.enable),
+    x: Number(item.x ?? 0),
+    y: Number(item.y ?? 0),
+    z: Number(item.z ?? 0),
+    r: Number(item.r ?? 0),
+    rx: Number(item.rx ?? 0),
+    ry: Number(item.ry ?? 0),
+    rz: Number(item.rz ?? 0),
   }
 }

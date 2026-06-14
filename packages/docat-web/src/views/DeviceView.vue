@@ -48,6 +48,10 @@
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1"/><line x1="5" y1="9" x2="10" y2="9" stroke="currentColor" stroke-width="1"/><line x1="5" y1="12" x2="8" y2="12" stroke="currentColor" stroke-width="1"/></svg>
           LOGS{{ deviceLogs.length > 0 ? ` (${deviceLogs.length})` : '' }}
         </button>
+        <button :class="['btn btn-sm', showSettings ? 'btn-primary' : 'btn-secondary']" @click="showSettings = !showSettings" :disabled="!isConnected" title="Device Settings">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          SETTINGS
+        </button>
         <button class="btn btn-secondary btn-sm" @click="doLogout">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -217,16 +221,13 @@
         <div class="move-panel-header">
           <span class="hud-label" style="margin-bottom:0">MOVE TO JOINTS</span>
           <div class="move-panel-actions">
-            <!-- Quick preset buttons: 3 system + 4 custom -->
-            <button v-for="preset in quickPresets" :key="preset.id"
-              :class="['btn btn-sm', selectedPresetId === preset.id ? 'btn-primary' : 'btn-secondary', preset.system ? 'btn-quick--sys' : '']"
-              @click="applyJointPreset(preset)" :title="preset.joints.map(v=>v.toFixed(1)).join(', ')+'°'">
-              {{ preset.name }}
-            </button>
             <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentJoints" title="Read current joint values">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1010.9-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               READ
             </button>
+            <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="Posture name"
+              @keyup.enter="saveCurrentAsPosture" style="width:100px" />
+            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture">💾 SAVE</button>
           </div>
         </div>
         <div class="move-grid">
@@ -243,87 +244,69 @@
           </button>
         </div>
 
-        <!-- Preset Management -->
+        <!-- Postures (system + controller) -->
         <div class="preset-section mt-2">
-          <div class="preset-section-header" @click="presetListExpanded = !presetListExpanded" style="cursor:pointer">
+          <div class="preset-section-header" @click="postureListExpanded = !postureListExpanded" style="cursor:pointer">
             <div style="display:flex;align-items:center;gap:8px">
-              <span class="hud-label" style="margin-bottom:0">PRESETS</span>
-              <span class="preset-count-badge">{{ jointPresets.length }}</span>
+              <span class="hud-label" style="margin-bottom:0">POSTURES</span>
+              <span class="preset-count-badge">{{ allPostures.length }}</span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px" @click.stop>
-              <input v-model.trim="presetName" class="preset-name-input" type="text" placeholder="New preset name"
-                @keyup.enter="saveJointPreset" />
-              <button class="btn btn-primary btn-sm" :disabled="!presetName" @click="saveJointPreset">SAVE</button>
-              <button class="btn-icon" :title="presetListExpanded ? 'Collapse' : 'Expand'"
-                @click="presetListExpanded = !presetListExpanded"
-                style="font-size:14px;color:var(--text-muted)">
-                {{ presetListExpanded ? '▲' : '▼' }}
-              </button>
-            </div>
+            <button class="btn-icon" :title="postureListExpanded ? 'Collapse' : 'Expand'"
+              style="font-size:14px;color:var(--text-muted)">
+              {{ postureListExpanded ? '▲' : '▼' }}
+            </button>
           </div>
 
+          <!-- Quick bar: first 7 postures (3 system + up to 4 custom) -->
+          <div class="quick-posture-bar">
+            <button v-for="(p, i) in allPostures.slice(0, 7)" :key="p._key"
+              :class="['btn-quick-posture', { 'btn-quick-posture--sys': p.system }]"
+              @click="fillPosture(p)"
+              :title="`J[${p.joint.map(v => v.toFixed(1)).join(', ')}]`">
+              <span class="qpi">{{ p.name }}</span>
+            </button>
+          </div>
+
+          <!-- Full list (collapsible) -->
           <Transition name="preset-collapse">
-            <div v-if="presetListExpanded" class="preset-list">
-              <!-- Custom presets -->
-              <div v-for="(preset, idx) in customPresets" :key="preset.id"
-                class="preset-item" :class="{ 'preset-item--selected': selectedPresetId === preset.id, 'preset-item--dragging': dragIdx === idx, 'preset-item--dragover': dragOverIdx === idx && dragIdx !== idx }"
-                draggable="true"
-                @dragstart="onDragStart($event, idx)"
-                @dragover.prevent="onDragOver(idx)"
-                @dragleave="onDragLeave"
-                @drop="onDrop(idx)"
-                @dragend="onDragEnd">
-                <div class="preset-item-grip" title="Drag to reorder">⋮⋮</div>
-                <div class="preset-item-info" @click="applyJointPreset(preset)">
-                  <span class="preset-item-name">{{ preset.name }}</span>
-                  <span class="preset-item-joints">{{ preset.joints.map(v => v.toFixed(1)).join(', ') }}°</span>
+            <div v-if="postureListExpanded" class="preset-list">
+              <div v-for="(p, idx) in allPostures" :key="p._key"
+                class="preset-item"
+                :class="{
+                  'preset-item--system': p.system,
+                  'preset-item--dragging': dragPostureIdx === idx,
+                  'preset-item--dragover': dragPostureOver === idx && dragPostureIdx !== idx,
+                }"
+                :draggable="!p.system"
+                @dragstart="onPostureDragStart($event, idx)"
+                @dragover.prevent="onPostureDragOver(idx)"
+                @dragleave="onPostureDragLeave"
+                @drop="onPostureDrop(idx)"
+                @dragend="onPostureDragEnd">
+                <div v-if="!p.system" class="preset-item-grip" title="Drag to reorder">⋮⋮</div>
+                <div v-else class="preset-item-grip" style="visibility:hidden">⋮⋮</div>
+                <div class="preset-item-info" @click="fillPosture(p)">
+                  <template v-if="renamingPostureKey === p._key">
+                    <input v-model.trim="renamePostureValue" class="preset-rename-input"
+                      @keyup.enter="confirmRenamePosture(p)" @keyup.escape="renamingPostureKey = ''"
+                      @click.stop @blur="confirmRenamePosture(p)" ref="renamePostureInputRef" />
+                  </template>
+                  <template v-else>
+                    <span class="preset-item-name">{{ p.name }}</span>
+                  </template>
+                  <span class="preset-item-joints">{{ p.joint.map(v => v.toFixed(1)).join(', ') }}°</span>
                 </div>
                 <div class="preset-item-actions">
-                  <button class="btn-icon" title="Rename" @click="startRenamePreset(preset)">✎</button>
-                  <button class="btn-icon btn-icon--danger" title="Delete" @click="doDeletePreset(preset)">✕</button>
+                  <span v-if="p.system" class="preset-item-badge">SYS</span>
+                  <template v-else>
+                    <button class="btn-icon" title="Rename" @click.stop="startRenamePosture(p)">✎</button>
+                    <button class="btn-icon btn-icon--danger" title="Delete" @click="deletePostureItem(p._controllerIdx!)">✕</button>
+                  </template>
                 </div>
               </div>
-              <!-- System presets -->
-              <div v-for="preset in systemPresets" :key="preset.id"
-                class="preset-item preset-item--system" :class="{ 'preset-item--selected': selectedPresetId === preset.id }"
-                @click="applyJointPreset(preset)">
-                <div class="preset-item-info">
-                  <span class="preset-item-name">{{ preset.name }}</span>
-                  <span class="preset-item-joints">{{ preset.joints.map(v => v.toFixed(1)).join(', ') }}°</span>
-                </div>
-                <span class="preset-item-badge">SYS</span>
-              </div>
-              <div v-if="!jointPresets.length" class="preset-empty">No presets — save current joints above</div>
             </div>
           </Transition>
         </div>
-
-        <!-- Rename Modal -->
-        <Transition name="fade">
-          <div v-if="renamingPreset" class="modal-overlay" @click.self="renamingPreset = null">
-            <div class="modal card">
-              <div class="modal-header">
-                <h3>RENAME PRESET</h3>
-                <button class="modal-close" @click="renamingPreset = null">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
-                </button>
-              </div>
-              <p class="mt-1" style="font-size:12px;color:var(--text-secondary)">
-                Renaming <strong>{{ renamingPreset.name }}</strong>
-              </p>
-              <form @submit.prevent="confirmRenamePreset" class="modal-form mt-2">
-                <div class="field-group">
-                  <label class="field-label">NEW NAME</label>
-                  <input v-model.trim="renameValue" class="input" ref="renameInputRef" @keyup.escape="renamingPreset = null" />
-                </div>
-                <div class="modal-actions mt-3">
-                  <button type="button" class="btn btn-secondary" @click="renamingPreset = null">CANCEL</button>
-                  <button type="submit" class="btn btn-primary" :disabled="!renameValue || renameValue === renamingPreset.name">RENAME</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </Transition>
       </div>
     </div>
 
@@ -418,6 +401,394 @@
       </div>
     </Transition>
 
+    <!-- Settings Modal -->
+    <Transition name="fade">
+      <div v-if="showSettings" class="modal-overlay" @click.self="showSettings = false">
+        <div class="modal settings-modal card">
+          <div class="modal-header">
+            <h3>⚙ DEVICE SETTINGS</h3>
+            <button class="modal-close" @click="showSettings = false">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
+            </button>
+          </div>
+          <div class="settings-layout">
+            <!-- Sidebar -->
+            <nav class="settings-sidebar">
+              <button
+                v-for="tab in settingsTabs"
+                :key="tab.key"
+                :class="['settings-nav-item', { 'settings-nav-item--active': settingsTab === tab.key }]"
+                @click="settingsTab = tab.key"
+              >
+                <span class="settings-nav-icon">{{ tab.icon }}</span>
+                <span class="settings-nav-label">{{ tab.label }}</span>
+              </button>
+            </nav>
+            <!-- Content -->
+            <div class="settings-content">
+
+              <!-- Load Parameters -->
+              <div v-if="settingsTab === 'load'">
+                <!-- Current Load -->
+                <div class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>CURRENT LOAD</h4>
+                    <button class="btn btn-primary btn-sm" @click="saveCurrentLoad" :disabled="!loadParamsEditable">APPLY</button>
+                  </div>
+                  <div class="load-fields">
+                    <div class="load-field">
+                      <label>Name</label>
+                      <input :value="loadParamsForm.name" class="input-sm" readonly placeholder="(select a preset)" />
+                    </div>
+                    <div class="load-field">
+                      <label>Weight (kg)</label>
+                      <input v-model.number="loadParamsForm.loadValue" type="number" class="input-sm" step="0.001" min="0" />
+                    </div>
+                    <div class="load-field">
+                      <label>Center X (mm)</label>
+                      <input v-model.number="loadParamsForm.centerX" type="number" class="input-sm" step="0.1" />
+                    </div>
+                    <div class="load-field">
+                      <label>Center Y (mm)</label>
+                      <input v-model.number="loadParamsForm.centerY" type="number" class="input-sm" step="0.1" />
+                    </div>
+                    <div class="load-field">
+                      <label>Center Z (mm)</label>
+                      <input v-model.number="loadParamsForm.centerZ" type="number" class="input-sm" step="0.1" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Load Presets -->
+                <div class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>LOAD PRESETS</h4>
+                    <button class="btn btn-secondary btn-sm" @click="startAddPreset" :disabled="editingPresetIdx !== null">+ NEW</button>
+                  </div>
+                  <div v-if="loadConfigs.length === 0 && !addingPreset" class="text-muted" style="padding:12px 0;font-size:0.75rem;">
+                    No presets on device — add one or set custom load above
+                  </div>
+                  <table v-if="loadConfigs.length > 0 || addingPreset" class="load-config-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Weight</th>
+                        <th>X</th>
+                        <th>Y</th>
+                        <th>Z</th>
+                        <th style="width:140px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(item, i) in loadConfigs" :key="i" :class="{ 'row--editing': editingPresetIdx === i }">
+                        <template v-if="editingPresetIdx === i">
+                          <td><input v-model.trim="editPresetForm.name" class="input-xs" style="width:80px" /></td>
+                          <td><input v-model.number="editPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="0.001" /></td>
+                          <td><input v-model.number="editPresetForm.centerX" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editPresetForm.centerZ" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td class="table-actions">
+                            <button class="btn btn-primary btn-xs" @click="saveEditPreset(i)">✓</button>
+                            <button class="btn btn-secondary btn-xs" @click="cancelEditPreset">✕</button>
+                          </td>
+                        </template>
+                        <template v-else>
+                          <td class="preset-name">{{ item.name }}</td>
+                          <td>{{ item.loadValue }}</td>
+                          <td>{{ item.centerX }}</td>
+                          <td>{{ item.centerY }}</td>
+                          <td>{{ item.centerZ }}</td>
+                          <td class="table-actions">
+                            <button class="btn btn-secondary btn-xs" @click="applyPreset(item)">USE</button>
+                            <button class="btn btn-secondary btn-xs" @click="startEditPreset(i)">✎</button>
+                            <button class="btn btn-secondary btn-xs" @click="deletePreset(i)">✕</button>
+                          </td>
+                        </template>
+                      </tr>
+                      <tr v-if="addingPreset" class="row--editing">
+                        <td><input v-model.trim="addPresetForm.name" class="input-xs" style="width:80px" placeholder="name" /></td>
+                        <td><input v-model.number="addPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="0.001" placeholder="0" /></td>
+                        <td><input v-model.number="addPresetForm.centerX" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
+                        <td><input v-model.number="addPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
+                        <td><input v-model.number="addPresetForm.centerZ" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
+                        <td>
+                          <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddPreset">✓</button>
+                          <button class="btn btn-secondary btn-xs" @click="cancelAddPreset">✕</button></span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- System Settings -->
+              <div v-else-if="settingsTab === 'system'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>ROBOT ALIAS</h4></div>
+                  <div style="display:flex;gap:8px">
+                    <input v-model.trim="aliasInput" class="input-sm settings-alias-input" placeholder="Robot alias" @keyup.enter="saveAlias" />
+                    <button class="btn btn-primary btn-sm" @click="saveAlias">SAVE</button>
+                  </div>
+                </div>
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>SYSTEM TIME</h4></div>
+                  <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
+                    <div class="load-field"><label>Date</label><input v-model.trim="sysTimeForm.date" class="input-sm" placeholder="YYYY-MM-DD" /></div>
+                    <div class="load-field"><label>Time</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" /></div>
+                    <div class="load-field"><label>Timezone</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="UTC+8" /></div>
+                  </div>
+                  <button class="btn btn-primary btn-sm mt-2" @click="saveSystemTime">APPLY</button>
+                </div>
+              </div>
+
+              <!-- User Management -->
+              <div v-else-if="settingsTab === 'users'">
+                <div class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>USERS</h4>
+                    <button class="btn btn-secondary btn-sm" @click="startAddUser">+ NEW</button>
+                  </div>
+                  <table class="load-config-table" v-if="ctrlUserList.list.length > 0">
+                    <thead><tr><th>名称</th><th>密码</th><th>需密码</th><th style="width:80px">操作</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(u, i) in ctrlUserList.list" :key="i" :class="{ 'row--editing': editingUserIdx === i }">
+                        <template v-if="editingUserIdx === i">
+                          <td style="display:flex;gap:4px;align-items:center">
+                            <template v-if="isFixedLevel(u.level)">
+                              <span class="preset-name">{{ levelName(u.level) }}</span>
+                            </template>
+                            <template v-else>
+                              <select v-model.number="editUserForm.level" class="input-xs" style="width:85px">
+                                <option :value="0">默认</option><option :value="1">管理员</option><option :value="2">技术员</option><option :value="3">操作员</option>
+                              </select>
+                              <input v-model.trim="editUserForm.name" class="input-xs" style="width:70px" placeholder="名称" />
+                            </template>
+                          </td>
+                          <td><input v-model.trim="editUserForm.password" class="input-xs" style="width:80px" /></td>
+                          <td><label class="checkbox-xs"><input v-model="editUserForm.enablePassword" type="checkbox" /><span>需密码</span></label></td>
+                          <td class="table-actions">
+                            <button class="btn btn-primary btn-xs" @click="saveEditUser(i)">✓</button>
+                            <button class="btn btn-secondary btn-xs" @click="editingUserIdx = null">✕</button>
+                          </td>
+                        </template>
+                        <template v-else>
+                          <td class="preset-name">{{ isFixedLevel(u.level) ? levelName(u.level) : (u.name || `等级${u.level}`) }}</td>
+                          <td>{{ u.enablePassword ? '●●●●' : '(无)' }}</td>
+                          <td>{{ u.enablePassword ? '✓' : '—' }}</td>
+                          <td class="table-actions">
+                            <button class="btn btn-secondary btn-xs" @click="startEditUser(i)">✎</button>
+                            <button class="btn btn-secondary btn-xs" @click="deleteUser(i)">✕</button>
+                          </td>
+                        </template>
+                      </tr>
+                      <tr v-if="addingUser" class="row--editing">
+                        <td><input v-model.trim="addUserForm.name" class="input-xs" style="width:100px" placeholder="名称" /></td>
+                        <td><input v-model.trim="addUserForm.password" class="input-xs" style="width:80px" placeholder="密码" /></td>
+                        <td><label class="checkbox-xs"><input v-model="addUserForm.enablePassword" type="checkbox" /><span>需密码</span></label></td>
+                        <td class="table-actions">
+                          <button class="btn btn-primary btn-xs" @click="confirmAddUser">✓</button>
+                          <button class="btn btn-secondary btn-xs" @click="addingUser = false">✕</button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">No users on controller</div>
+                </div>
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>PERMISSIONS</h4></div>
+                  <div v-if="permConfigs.length > 0" style="overflow-x:auto">
+                    <table class="load-config-table" style="min-width:700px">
+                      <thead><tr><th>等级</th><th v-for="k in permKeys" :key="k" style="font-size:0.42rem;writing-mode:vertical-lr;text-orientation:mixed;height:90px;padding:2px">{{ permKeyLabels[k] || k }}</th></tr></thead>
+                      <tbody>
+                        <tr v-for="pc in permConfigs" :key="pc.level">
+                          <td>{{ userDisplayName(pc.level) }}</td>
+                          <td v-for="k in permKeys" :key="k"><input type="checkbox" :checked="pc.config[k] === 1" @change="togglePerm(pc.level, k, ($event.target as HTMLInputElement).checked)" /></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <button class="btn btn-primary btn-sm mt-2" @click="savePermissions">SAVE PERMISSIONS</button>
+                </div>
+              </div>
+
+              <!-- Coordinate Management -->
+              <div v-else-if="settingsTab === 'coordinates'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>TOOL COORDINATE</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('tool')">+ ADD</button></div>
+                  <table class="load-config-table" v-if="toolCoords.length > 0">
+                    <thead><tr><th>Name</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>En</th><th style="width:80px">Act</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(c, i) in toolCoords" :key="i" :class="{ 'row--editing': editingCoordIdx === i && editingCoordType === 'tool' }">
+                        <template v-if="editingCoordIdx === i && editingCoordType === 'tool'">
+                          <td><input v-model.trim="editCoordForm.name" class="input-xs" style="width:70px" /></td>
+                          <td><input v-model.number="editCoordForm.x" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.r" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>En</span></label></td>
+                          <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
+                        </template>
+                        <template v-else>
+                          <td class="preset-name">{{ c.name }}</td><td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td><td>{{ c.r }}</td><td>{{ c.enable ? '✓' : '—' }}</td>
+                          <td class="table-actions"><button class="btn btn-secondary btn-xs" @click="startEditCoord('tool', i)">✎</button><button class="btn btn-secondary btn-xs" @click="deleteCoord('tool', i)">✕</button></td>
+                        </template>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">No tool coordinates</div>
+                  <button class="btn btn-primary btn-sm mt-2" :disabled="toolCoords.length === 0" @click="saveCoords('tool')">SAVE</button>
+                  <div v-if="addingCoord && addCoordType === 'tool'" class="coord-add-row">
+                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="name" />
+                    <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:60px" placeholder="x" step="0.1" />
+                    <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:60px" placeholder="y" step="0.1" />
+                    <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:60px" placeholder="z" step="0.1" />
+                    <input v-model.number="addCoordForm.r" type="number" class="input-xs" style="width:60px" placeholder="r" step="0.1" />
+                    <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddCoord">✓</button>
+                    <button class="btn btn-secondary btn-xs" @click="addingCoord = false">✕</button></span>
+                  </div>
+                </div>
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>USER COORDINATE</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('user')">+ ADD</button></div>
+                  <table class="load-config-table" v-if="userCoords.length > 0">
+                    <thead><tr><th>Name</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>En</th><th style="width:80px">Act</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(c, i) in userCoords" :key="i" :class="{ 'row--editing': editingCoordIdx === i && editingCoordType === 'user' }">
+                        <template v-if="editingCoordIdx === i && editingCoordType === 'user'">
+                          <td><input v-model.trim="editCoordForm.name" class="input-xs" style="width:70px" /></td>
+                          <td><input v-model.number="editCoordForm.x" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.r" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
+                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>En</span></label></td>
+                          <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
+                        </template>
+                        <template v-else>
+                          <td class="preset-name">{{ c.name }}</td><td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td><td>{{ c.r }}</td><td>{{ c.enable ? '✓' : '—' }}</td>
+                          <td class="table-actions"><button class="btn btn-secondary btn-xs" @click="startEditCoord('user', i)">✎</button><button class="btn btn-secondary btn-xs" @click="deleteCoord('user', i)">✕</button></td>
+                        </template>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">No user coordinates</div>
+                  <button class="btn btn-primary btn-sm mt-2" :disabled="userCoords.length === 0" @click="saveCoords('user')">SAVE</button>
+                  <div v-if="addingCoord && addCoordType === 'user'" class="coord-add-row">
+                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="name" />
+                    <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:60px" placeholder="x" step="0.1" />
+                    <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:60px" placeholder="y" step="0.1" />
+                    <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:60px" placeholder="z" step="0.1" />
+                    <input v-model.number="addCoordForm.r" type="number" class="input-xs" style="width:60px" placeholder="r" step="0.1" />
+                    <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddCoord">✓</button>
+                    <button class="btn btn-secondary btn-xs" @click="addingCoord = false">✕</button></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Custom Postures -->
+              <div v-else-if="settingsTab === 'postures'">
+                <div class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>CUSTOM POSTURES (on controller)</h4>
+                    <div style="display:flex;gap:6px">
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent" :disabled="!isConnected">📋 READ CURRENT</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture">+ ADD</button>
+                    </div>
+                  </div>
+                  <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">No postures saved on controller</div>
+                  <table v-if="customPostures.length > 0" class="load-config-table">
+                    <thead><tr><th style="width:40px">#</th><th>J1</th><th>J2</th><th>J3</th><th>J4</th><th>J5</th><th>J6</th><th style="width:120px">Act</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(p, i) in customPostures" :key="i" :class="{ 'row--editing': editingPostureIdx === i }">
+                        <template v-if="editingPostureIdx === i">
+                          <td class="preset-name">{{ i }}</td>
+                          <td v-for="j in 6" :key="j"><input v-model.number="editPostureForm.joint[j-1]" type="number" class="input-xs" style="width:60px" step="0.1" /></td>
+                          <td class="table-actions">
+                            <button class="btn btn-primary btn-xs" @click="saveEditPosture(i)">✓</button>
+                            <button class="btn btn-secondary btn-xs" @click="editingPostureIdx = null">✕</button>
+                          </td>
+                        </template>
+                        <template v-else>
+                          <td class="preset-name">{{ i }}</td>
+                          <td v-for="v in p.joint" :key="v">{{ Number(v).toFixed(1) }}</td>
+                          <td class="table-actions">
+                            <button class="btn btn-secondary btn-xs" @click="fillPosture(p)">GO</button>
+                            <button class="btn btn-secondary btn-xs" @click="startEditPosture(i)" :disabled="moving">✎</button>
+                            <button class="btn btn-secondary btn-xs" @click="deletePosture(i)" :disabled="moving">✕</button>
+                          </td>
+                        </template>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Motion Parameters -->
+              <div v-else-if="settingsTab === 'motion'">
+                <div v-for="sec in motionSections" :key="sec.key" class="settings-section">
+                  <div class="settings-section-header"><h4>{{ sec.label }}</h4></div>
+                  <div v-if="sec.data && Object.keys(sec.data).length > 0" class="motion-params-grid">
+                    <div v-for="(val, k) in sec.data" :key="k" class="load-field">
+                      <label>{{ k }}</label>
+                      <input v-model.number="sec.data[k]" type="number" class="input-sm" step="0.01" />
+                    </div>
+                  </div>
+                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">Not loaded</div>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadMotionParams(sec.key)">LOAD</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!sec.data" @click="saveMotionParams(sec.key)">SAVE</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Communication -->
+              <div v-else-if="settingsTab === 'comm'">
+                <!-- WiFi -->
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>WiFi (AP)</h4></div>
+                  <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
+                    <div class="load-field"><label>SSID</label><input v-model.trim="wifiForm.ssid" class="input-sm" /></div>
+                    <div class="load-field"><label>Password</label><input v-model.trim="wifiForm.passWd" class="input-sm" /></div>
+                    <div class="load-field" style="justify-content:flex-end"><label class="checkbox-xs" style="margin-top:18px"><input v-model="wifiForm.enable" type="checkbox" /><span>Enable</span></label></div>
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadWiFi">LOAD</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveWiFi">SAVE</button>
+                  </div>
+                </div>
+                <!-- Ethernet -->
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>ETHERNET (IP)</h4></div>
+                  <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
+                    <div class="load-field"><label>DHCP</label><label class="checkbox-xs" style="margin-top:2px"><input v-model="ethForm.dhcp" type="checkbox" /><span>Enable</span></label></div>
+                    <div class="load-field"><label>IP</label><input v-model.trim="ethForm.ip" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                    <div class="load-field"><label>Mask</label><input v-model.trim="ethForm.mask" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                    <div class="load-field"><label>Gateway</label><input v-model.trim="ethForm.gateway" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                    <div class="load-field"><label>DNS</label><input v-model.trim="ethForm.dns" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadEthernet">LOAD</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveEthernet">SAVE</button>
+                  </div>
+                </div>
+                <!-- Bus -->
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>BUS</h4></div>
+                  <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
+                    <div class="load-field"><label>Baud Rate</label><input v-model.number="busForm.baudRate" type="number" class="input-sm" /></div>
+                    <div class="load-field"><label>Slave ID</label><input v-model.number="busForm.slaveId" type="number" class="input-sm" /></div>
+                    <div class="load-field"><label>Type</label><input v-model.trim="busForm.type" class="input-sm" /></div>
+                    <div class="load-field"><label>Data Bits</label><input v-model.number="busForm.dataBits" type="number" class="input-sm" /></div>
+                    <div class="load-field"><label>Stop Bits</label><input v-model.number="busForm.stopBits" type="number" class="input-sm" step="0.5" /></div>
+                    <div class="load-field"><label>Parity</label><input v-model.trim="busForm.parity" class="input-sm" /></div>
+                  </div>
+                  <button class="btn btn-primary btn-sm mt-2" @click="saveBus">SAVE</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Toast -->
     <Toast ref="toastRef" />
   </div>
@@ -470,10 +841,6 @@ const enabling = ref(false)
 const moving = ref(false)
 const moveTargetInit = ref(false)
 const moveTarget = reactive<Record<string, number>>({ j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 })
-const jointPresets = ref<api.JointPreset[]>([])
-const selectedPresetId = ref('')
-const presetName = ref('')
-const selectedCustomPreset = computed(() => jointPresets.value.find(p => p.id === selectedPresetId.value && !p.system) || null)
 const modelReady = ref(false)
 let last3DPose = ''
 
@@ -545,6 +912,17 @@ interface DeviceLogEntry {
 }
 const deviceLogs = ref<DeviceLogEntry[]>([])
 const showLogs = ref(false)
+const showSettings = ref(false)
+const settingsTab = ref('system')
+const settingsTabs = [
+  { key: 'system', icon: '⚙', label: 'System' },
+  { key: 'users', icon: '👤', label: 'Users' },
+  { key: 'coordinates', icon: '📐', label: 'Coordinates' },
+  { key: 'load', icon: '⚖', label: 'Load Params' },
+  { key: 'postures', icon: '📌', label: 'Postures' },
+  { key: 'motion', icon: '🏃', label: 'Motion' },
+  { key: 'comm', icon: '🌐', label: 'Comm' },
+]
 const loadingLogs = ref(false)
 const logListRef = ref<HTMLElement>()
 const logPanelTab = ref<'alarms' | 'history'>('alarms')
@@ -847,6 +1225,11 @@ const shortcutHints = [
 const keysDown = new Set<string>()
 
 function onKeyDown(e: KeyboardEvent) {
+  // Esc 关闭设置弹窗
+  if (e.key === 'Escape' && showSettings.value) {
+    showSettings.value = false
+    return
+  }
   // 跳过输入框/编辑器，避免打字触发 jog
   const target = e.target as HTMLElement
   const tag = target.tagName
@@ -920,6 +1303,7 @@ async function load() {
   if (isMock) {
     device.value = deviceStore.getDevice(deviceId)
     enabled.value = true
+    loadPostures()
     return
   }
   const res = await api.listDevices()
@@ -927,7 +1311,6 @@ async function load() {
     deviceStore.setDevices(res.data)
     device.value = res.data.find(d => d.id === deviceId) ?? null
   }
-  await loadJointPresets()
   try {
     const s = await api.getDeviceStatus(deviceId)
     if (s.success && s.data) {
@@ -953,13 +1336,7 @@ async function load() {
       if (currentAlarms.value.length > 0) fetchDeviceLogs()
     }
   } catch { /* ignore */ }
-}
-
-async function loadJointPresets() {
-  const res = await api.listJointPresets(deviceId)
-  if (res.success && res.data) {
-    jointPresets.value = res.data
-  }
+  loadPostures()
 }
 
 async function doConnect() {
@@ -1339,24 +1716,6 @@ function getMoveTargetJoints() {
   return [1,2,3,4,5,6].map(j => Number(moveTarget['j'+j] || 0))
 }
 
-function applyJointPreset(preset: api.JointPreset) {
-  setMoveTargetJoints(preset.joints)
-  selectedPresetId.value = preset.id
-  presetName.value = preset.name
-}
-
-// ─── Preset Management ────────────────────────────
-
-const systemPresets = computed(() => jointPresets.value.filter(p => p.system))
-const customPresets = computed(() => jointPresets.value.filter(p => !p.system))
-/** 系统预设（前3）+ 自定义预设（前4）= 最多7个快速按钮 */
-const quickPresets = computed(() => [
-  ...systemPresets.value.slice(0, 3),
-  ...customPresets.value.slice(0, 4),
-])
-const presetListExpanded = ref(false)
-const renameInputRef = ref<HTMLInputElement | null>(null)
-
 /** 读取当前关节值到编辑框 */
 function readCurrentJoints() {
   const joints = state.value.joints as Record<string, number> | undefined
@@ -1365,103 +1724,6 @@ function readCurrentJoints() {
     moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
   }
   toastRef.value?.info('Current joint values loaded')
-}
-
-async function saveJointPreset() {
-  const name = presetName.value.trim()
-  if (!name) {
-    toastRef.value?.error('Preset name required')
-    return
-  }
-  if (jointPresets.value.some(p => !p.system && p.name.toLowerCase() === name.toLowerCase())) {
-    toastRef.value?.error('Preset name already exists')
-    return
-  }
-  const res = await api.createJointPreset(deviceId, name, getMoveTargetJoints())
-  if (res.success && res.data) {
-    await loadJointPresets()
-    selectedPresetId.value = res.data.id
-    presetName.value = ''
-    toastRef.value?.success('Preset saved')
-  } else {
-    toastRef.value?.error(`Save preset failed: ${res.error?.message}`)
-  }
-}
-
-async function doDeletePreset(preset: api.JointPreset) {
-  if (preset.system) return
-  const res = await api.deleteJointPreset(deviceId, preset.id)
-  if (res.success) {
-    if (selectedPresetId.value === preset.id) selectedPresetId.value = ''
-    await loadJointPresets()
-    toastRef.value?.success('Preset deleted')
-  } else {
-    toastRef.value?.error(`Delete failed: ${res.error?.message}`)
-  }
-}
-
-// Rename
-const renamingPreset = ref<api.JointPreset | null>(null)
-const renameValue = ref('')
-
-function startRenamePreset(preset: api.JointPreset) {
-  renamingPreset.value = preset
-  renameValue.value = preset.name
-}
-
-async function confirmRenamePreset() {
-  if (!renamingPreset.value || !renameValue.value) return
-  if (jointPresets.value.some(p => !p.system && p.id !== renamingPreset.value!.id && p.name.toLowerCase() === renameValue.value.toLowerCase())) {
-    toastRef.value?.error('Preset name already exists')
-    return
-  }
-  const res = await api.updateJointPreset(deviceId, renamingPreset.value.id, { name: renameValue.value })
-  if (res.success) {
-    toastRef.value?.success('Preset renamed')
-    renamingPreset.value = null
-    await loadJointPresets()
-  } else {
-    toastRef.value?.error(`Rename failed: ${res.error?.message}`)
-  }
-}
-
-// ─── Drag & Drop Reorder ────────────────────────────
-
-const dragIdx = ref(-1)
-const dragOverIdx = ref(-1)
-
-function onDragStart(e: DragEvent, idx: number) {
-  dragIdx.value = idx
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(idx))
-  }
-}
-
-function onDragOver(idx: number) {
-  if (dragIdx.value < 0 || dragIdx.value === idx) return
-  dragOverIdx.value = idx
-}
-
-function onDragLeave() {
-  dragOverIdx.value = -1
-}
-
-async function onDrop(targetIdx: number) {
-  const srcIdx = dragIdx.value
-  dragIdx.value = -1
-  dragOverIdx.value = -1
-  if (srcIdx < 0 || srcIdx === targetIdx) return
-  const presets = [...customPresets.value]
-  const [moved] = presets.splice(srcIdx, 1)
-  presets.splice(targetIdx, 0, moved)
-  await api.reorderJointPresets(deviceId, presets.map(p => p.id))
-  await loadJointPresets()
-}
-
-function onDragEnd() {
-  dragIdx.value = -1
-  dragOverIdx.value = -1
 }
 
 async function doMove() {
@@ -1552,6 +1814,521 @@ async function doEstop() {
 
 function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); router.push('/login') }
 
+// ─── Load Parameters (Device Settings) ──────────
+
+interface LoadConfigItem {
+  name: string
+  centerX: number
+  centerY: number
+  centerZ: number
+  loadValue: number
+}
+
+const loadConfigs = ref<LoadConfigItem[]>([])
+const loadParamsForm = reactive<LoadConfigItem>({ name: '', centerX: 0, centerY: 0, centerZ: 0, loadValue: 0 })
+const addingPreset = ref(false)
+const addPresetForm = reactive<LoadConfigItem>({ name: '', centerX: 0, centerY: 0, centerZ: 0, loadValue: 0 })
+const editingPresetIdx = ref<number | null>(null)
+const editPresetForm = reactive<LoadConfigItem>({ name: '', centerX: 0, centerY: 0, centerZ: 0, loadValue: 0 })
+const loadingLoadData = ref(false)
+const loadParamsEditable = computed(() => isConnected.value && !loadingLoadData.value)
+
+async function loadLoadData() {
+  if (!isConnected.value && !isMock) return
+  loadingLoadData.value = true
+  try {
+    if (isMock) {
+      loadConfigs.value = [
+        { name: 'load1', centerX: 0, centerY: 0, centerZ: 30, loadValue: 0.5 },
+        { name: 'load2', centerX: 20, centerY: 0, centerZ: 50, loadValue: 1.0 },
+      ]
+      Object.assign(loadParamsForm, { name: 'load1', centerX: 0, centerY: 0, centerZ: 30, loadValue: 0.5 })
+      return
+    }
+    const [configRes, paramsRes] = await Promise.all([
+      api.getLoadConfig(deviceId),
+      api.getLoadParams(deviceId),
+    ])
+    if (configRes.success && configRes.data) {
+      loadConfigs.value = configRes.data
+    }
+    if (paramsRes.success && paramsRes.data) {
+      Object.assign(loadParamsForm, paramsRes.data)
+    }
+  } catch (err) {
+    console.warn('[LoadParams] Failed to load:', err)
+  } finally {
+    loadingLoadData.value = false
+  }
+}
+
+async function saveCurrentLoad() {
+  try {
+    const res = await api.setLoadParams(deviceId, { ...loadParamsForm })
+    if (res.success) {
+      toastRef.value?.success('Load params applied')
+    } else {
+      toastRef.value?.error(`Apply failed: ${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`Apply error: ${(err as Error).message}`)
+  }
+}
+
+function applyPreset(item: LoadConfigItem) {
+  Object.assign(loadParamsForm, { ...item })
+  saveCurrentLoad()
+}
+
+async function saveLoadConfig() {
+  if (isMock) return
+  try {
+    const res = await api.setLoadConfig(deviceId, [...loadConfigs.value])
+    if (!res.success) {
+      toastRef.value?.error(`Save presets failed: ${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`Save presets error: ${(err as Error).message}`)
+  }
+}
+
+function startAddPreset() {
+  addingPreset.value = true
+  Object.assign(addPresetForm, { name: '', centerX: 0, centerY: 0, centerZ: 0, loadValue: 0 })
+}
+
+function cancelAddPreset() {
+  addingPreset.value = false
+}
+
+async function confirmAddPreset() {
+  if (!addPresetForm.name.trim()) {
+    toastRef.value?.error('Preset name required')
+    return
+  }
+  if (loadConfigs.value.some(c => c.name === addPresetForm.name.trim())) {
+    toastRef.value?.error('Preset name already exists')
+    return
+  }
+  loadConfigs.value.push({ ...addPresetForm, name: addPresetForm.name.trim() })
+  addingPreset.value = false
+  await saveLoadConfig()
+  toastRef.value?.success('Preset added')
+}
+
+function startEditPreset(idx: number) {
+  editingPresetIdx.value = idx
+  Object.assign(editPresetForm, loadConfigs.value[idx])
+}
+
+function cancelEditPreset() {
+  editingPresetIdx.value = null
+}
+
+async function saveEditPreset(idx: number) {
+  if (!editPresetForm.name.trim()) {
+    toastRef.value?.error('Preset name required')
+    return
+  }
+  if (loadConfigs.value.some((c, i) => i !== idx && c.name === editPresetForm.name.trim())) {
+    toastRef.value?.error('Preset name already exists')
+    return
+  }
+  loadConfigs.value[idx] = { ...editPresetForm, name: editPresetForm.name.trim() }
+  editingPresetIdx.value = null
+  await saveLoadConfig()
+  toastRef.value?.success('Preset updated')
+}
+
+async function deletePreset(idx: number) {
+  const name = loadConfigs.value[idx].name
+  loadConfigs.value.splice(idx, 1)
+  if (editingPresetIdx.value === idx) editingPresetIdx.value = null
+  await saveLoadConfig()
+  toastRef.value?.success(`Preset "${name}" deleted`)
+}
+
+// Watch: reload load data when settings panel opens
+watch(showSettings, (val) => {
+  if (val) loadLoadData()
+})
+
+// ─── System Settings ───────────────────────────
+
+const aliasInput = ref('')
+async function saveAlias() {
+  if (!aliasInput.value.trim()) { toastRef.value?.error('Alias required'); return }
+  const res = await api.setDeviceAlias(deviceId, aliasInput.value.trim())
+  if (res.success) toastRef.value?.success('Alias saved')
+  else toastRef.value?.error(`Alias failed: ${res.error?.message}`)
+}
+
+const sysTimeForm = reactive({ date: '', time: '', timeZone: '' })
+async function loadSystemTime() {
+  const res = await api.getSystemTime(deviceId)
+  if (res.success && res.data) Object.assign(sysTimeForm, res.data)
+}
+async function saveSystemTime() {
+  const res = await api.setSystemTime(deviceId, { ...sysTimeForm })
+  if (res.success) toastRef.value?.success('System time saved')
+  else toastRef.value?.error(`Time failed: ${res.error?.message}`)
+}
+
+// ─── User Management ───────────────────────────
+
+const ctrlUserList = ref<api.ControllerUserList>({ defaultLevel: 1, list: [] })
+const editingUserIdx = ref<number | null>(null)
+const editUserForm = reactive<api.ControllerUserItem>({ level: 1, name: '', password: '', enablePassword: false })
+const addingUser = ref(false)
+const addUserForm = reactive<api.ControllerUserItem>({ level: 2, name: '', password: '', enablePassword: false })
+const permConfigs = ref<api.PermissionConfig[]>([])
+const permKeys = computed(() => {
+  if (permConfigs.value.length === 0) return []
+  return Object.keys(permConfigs.value[0].config)
+})
+const permKeyLabels: Record<string, string> = {
+  baseFunc: '基本操作', remoteMode: '远程模式', systemTime: '系统时间', coordinate: '坐标系',
+  loadParameters: '负载参数', buttonSettings: '按键设置', motionParameters: '运动参数',
+  postureSettings: '姿态设置', trajectoryPlayback: '轨迹复现', communication: '通讯设置',
+  installation: '安装设置', drag: '拖拽设置', security: '安全设置', autoManualSettings: '手自动模式',
+  homeCalibration: '零点标定', advancedSettings: '高级功能', log: '日志',
+  pluginOperations: '插件操作', projectStateOpertions: '工程运行', projectFileOperations: '工程编辑',
+  teachPointOperations: '示教点位', IO: 'IO', Modbus: 'Modbus', Bus: 'Bus',
+  globalVariable: '全局变量', jog: '点动', powerSettings: '电源设置', backgroundScriptConfig: '后台进程',
+}
+function levelName(l: number): string { return l === 0 ? '默认' : l === 1 ? '管理员' : l === 2 ? '技术员' : l === 3 ? '操作员' : `等级${l}` }
+function isFixedLevel(l: number): boolean { return l >= 0 && l <= 3 }
+function userDisplayName(l: number): string {
+  if (isFixedLevel(l)) return levelName(l)
+  const u = ctrlUserList.value.list.find(u => u.level === l)
+  return u?.name || levelName(l)
+}
+
+async function loadUsers() {
+  const res = await api.getControllerUsers(deviceId)
+  if (res.success && res.data) ctrlUserList.value = res.data
+  const pres = await api.getUserPermissions(deviceId)
+  if (pres.success && pres.data) permConfigs.value = pres.data
+}
+
+function startEditUser(i: number) {
+  editingUserIdx.value = i
+  Object.assign(editUserForm, ctrlUserList.value.list[i])
+}
+function startAddUser() {
+  const maxLevel = ctrlUserList.value.list.reduce((m, u) => Math.max(m, u.level), 3)
+  addingUser.value = true
+  Object.assign(addUserForm, { level: maxLevel + 1, name: '', password: '', enablePassword: false })
+}
+async function confirmAddUser() {
+  if (!addUserForm.name.trim()) { toastRef.value?.error('名称不能为空'); return }
+  ctrlUserList.value.list.push({ ...addUserForm })
+  addingUser.value = false
+  await saveUserList()
+}
+async function saveEditUser(i: number) {
+  if (!editUserForm.name.trim()) { toastRef.value?.error('名称不能为空'); return }
+  ctrlUserList.value.list[i] = { ...editUserForm }
+  editingUserIdx.value = null
+  await saveUserList()
+}
+async function deleteUser(i: number) {
+  ctrlUserList.value.list.splice(i, 1)
+  await saveUserList()
+}
+async function saveUserList() {
+  const res = await api.setControllerUsers(deviceId, ctrlUserList.value)
+  if (res.success) toastRef.value?.success('User list saved')
+  else toastRef.value?.error(`Save users failed: ${res.error?.message}`)
+}
+function togglePerm(level: number, key: string, checked: boolean) {
+  const pc = permConfigs.value.find(p => p.level === level)
+  if (pc) pc.config[key] = checked ? 1 : 0
+}
+async function savePermissions() {
+  const res = await api.setUserPermissions(deviceId, permConfigs.value)
+  if (res.success) toastRef.value?.success('Permissions saved')
+  else toastRef.value?.error(`Save permissions failed: ${res.error?.message}`)
+}
+
+// ─── Coordinate Management ─────────────────────
+
+const toolCoords = ref<api.CoordItem[]>([])
+const userCoords = ref<api.CoordItem[]>([])
+const editingCoordIdx = ref(-1)
+const editingCoordType = ref('')
+const editCoordForm = reactive<api.CoordItem>({ name: '', enable: true, x: 0, y: 0, z: 0, r: 0 })
+const addingCoord = ref(false)
+const addCoordType = ref('')
+const addCoordForm = reactive<api.CoordItem>({ name: '', enable: true, x: 0, y: 0, z: 0, r: 0 })
+
+async function loadCoords() {
+  const [toolR, userR] = await Promise.all([api.getToolCoordinate(deviceId), api.getUserCoordinate(deviceId)])
+  if (toolR.success && toolR.data) toolCoords.value = toolR.data.coordList
+  if (userR.success && userR.data) userCoords.value = userR.data.coordList
+}
+function startAddCoord(type: string) { addingCoord.value = true; addCoordType.value = type; Object.assign(addCoordForm, { name: '', enable: true, x: 0, y: 0, z: 0, r: 0 }) }
+async function confirmAddCoord() {
+  if (!addCoordForm.name.trim()) { toastRef.value?.error('Name required'); return }
+  if (addCoordType.value === 'tool') toolCoords.value.push({ ...addCoordForm })
+  else userCoords.value.push({ ...addCoordForm })
+  addingCoord.value = false
+  await saveCoords(addCoordType.value)
+}
+function startEditCoord(type: string, idx: number) {
+  editingCoordIdx.value = idx; editingCoordType.value = type
+  const src = type === 'tool' ? toolCoords.value[idx] : userCoords.value[idx]
+  Object.assign(editCoordForm, src)
+}
+async function saveEditCoord() {
+  if (!editCoordForm.name.trim()) { toastRef.value?.error('Name required'); return }
+  if (editingCoordType.value === 'tool') {
+    toolCoords.value[editingCoordIdx.value] = { ...editCoordForm }
+  } else {
+    userCoords.value[editingCoordIdx.value] = { ...editCoordForm }
+  }
+  editingCoordIdx.value = -1
+  await saveCoords(editingCoordType.value)
+}
+async function deleteCoord(type: string, idx: number) {
+  if (type === 'tool') toolCoords.value.splice(idx, 1)
+  else userCoords.value.splice(idx, 1)
+  await saveCoords(type)
+}
+async function saveCoords(type: string) {
+  const data = { coordList: type === 'tool' ? toolCoords.value : userCoords.value }
+  const fn = type === 'tool' ? api.setToolCoordinate : api.setUserCoordinate
+  const res = await fn(deviceId, data)
+  if (res.success) toastRef.value?.success(`${type} coords saved`)
+  else toastRef.value?.error(`Save ${type} failed: ${res.error?.message}`)
+}
+
+// ─── Custom Postures ────────────────────────────
+
+const customPostures = ref<api.CustomPostureItem[]>([])
+
+// System postures (always present, not stored on controller)
+const systemPostures: Array<{ name: string; joint: number[]; system: true }> = [
+  { name: '零点', joint: [0, 0, 0, 0, 0, 0], system: true },
+  { name: '打包', joint: [-90, 0, -140, -40, 0, 0], system: true },
+  { name: '研究', joint: [-90, 0, -90, 0, 90, 0], system: true },
+]
+
+interface PostureItem { _key: string; name: string; joint: number[]; system: boolean; _controllerIdx?: number }
+const allPostures = computed<PostureItem[]>(() => [
+  ...systemPostures.map((s, i) => ({ ...s, _key: `sys-${i}`, joint: [...s.joint] })),
+  ...customPostures.value.map((p, i) => ({ _key: `ctrl-${i}`, name: p.name, joint: [...p.joint], system: false, _controllerIdx: i })),
+])
+
+const postureListExpanded = ref(false)
+const editingPostureIdx = ref<number | null>(null)
+const editPostureForm = reactive<api.CustomPostureItem>({ name: '', joint: [0,0,0,0,0,0] })
+
+async function loadPostures() {
+  const res = await api.getCustomPostures(deviceId)
+  if (res.success && res.data) customPostures.value = res.data
+}
+function nextAutoName(): string {
+  const maxN = customPostures.value.reduce((m, p) => {
+    const match = /^P(\d+)$/.exec(p.name)
+    return match ? Math.max(m, parseInt(match[1], 10)) : m
+  }, 0)
+  return `P${maxN + 1}`
+}
+function addEmptyPosture() {
+  customPostures.value.push({ name: nextAutoName(), joint: [0,0,0,0,0,0] })
+  const idx = customPostures.value.length - 1
+  editingPostureIdx.value = idx
+  Object.assign(editPostureForm, customPostures.value[idx])
+  postureListExpanded.value = true
+  savePostures()
+}
+// ─── Posture Drag Reorder ─────────────────────────
+
+const dragPostureIdx = ref(-1)
+const dragPostureOver = ref(-1)
+
+function onPostureDragStart(e: DragEvent, idx: number) {
+  const p = allPostures.value[idx]
+  if (!p || p.system) { e.preventDefault(); return }
+  dragPostureIdx.value = idx
+  e.dataTransfer!.effectAllowed = 'move'
+}
+function onPostureDragOver(idx: number) {
+  const p = allPostures.value[idx]
+  if (!p || p.system || dragPostureIdx.value < 0) return
+  if (dragPostureIdx.value !== idx) dragPostureOver.value = idx
+}
+function onPostureDragLeave() { dragPostureOver.value = -1 }
+async function onPostureDrop(targetIdx: number) {
+  const srcIdx = dragPostureIdx.value
+  dragPostureIdx.value = -1; dragPostureOver.value = -1
+  if (srcIdx < 0 || srcIdx === targetIdx) return
+  const srcP = allPostures.value[srcIdx]
+  const tgtP = allPostures.value[targetIdx]
+  if (!srcP || srcP.system || !tgtP) return
+  // Find the controller indices
+  const srcCtrl = srcP._controllerIdx
+  const tgtCtrl = tgtP._controllerIdx ?? customPostures.value.length
+  if (srcCtrl === undefined) return
+  const [moved] = customPostures.value.splice(srcCtrl, 1)
+  const newIdx = tgtCtrl > srcCtrl ? tgtCtrl - 1 : tgtCtrl
+  customPostures.value.splice(newIdx, 0, moved)
+  await savePostures()
+  toastRef.value?.success('Postures reordered')
+}
+function onPostureDragEnd() { dragPostureIdx.value = -1; dragPostureOver.value = -1 }
+
+function addPostureFromCurrent() {
+  const joints = state.value.joints as Record<string, number> | undefined
+  if (!joints) return
+  const name = nextAutoName()
+  customPostures.value.push({ name, joint: [1,2,3,4,5,6].map(j => Math.round((joints['j'+j] ?? 0) * 10) / 10) })
+  postureListExpanded.value = true
+  savePostures()
+  toastRef.value?.info(`Posture "${name}" saved from current joints`)
+}
+function startEditPosture(i: number) { editingPostureIdx.value = i; Object.assign(editPostureForm, customPostures.value[i]) }
+async function saveEditPosture(i: number) {
+  customPostures.value[i] = { ...editPostureForm, name: String(i) }
+  editingPostureIdx.value = null
+  await savePostures()
+}
+async function deletePosture(i: number) { customPostures.value.splice(i, 1); await savePostures() }
+function deletePostureItem(ctrlIdx: number) { deletePosture(ctrlIdx) }
+async function savePostures() {
+  const res = await api.setCustomPostures(deviceId, customPostures.value)
+  if (res.success) toastRef.value?.success('Postures saved')
+  else toastRef.value?.error(`Save postures failed: ${res.error?.message}`)
+}
+const newPostureName = ref('')
+function saveCurrentAsPosture() {
+  if (!newPostureName.value.trim()) return
+  const joints = getMoveTargetJoints()
+  const name = newPostureName.value.trim()
+  if (customPostures.value.some(p => p.name === name)) {
+    // Overwrite existing
+    const idx = customPostures.value.findIndex(p => p.name === name)
+    customPostures.value[idx] = { name, joint: [...joints] }
+    toastRef.value?.success(`Posture "${name}" updated`)
+  } else {
+    customPostures.value.push({ name, joint: [...joints] })
+    toastRef.value?.success(`Posture "${name}" saved`)
+  }
+  newPostureName.value = ''
+  postureListExpanded.value = true
+  savePostures()
+}
+
+// ─── Posture Rename ─────────────────────────────
+
+const renamingPostureKey = ref('')
+const renamePostureValue = ref('')
+const renamePostureInputRef = ref<HTMLInputElement | null>(null)
+
+function startRenamePosture(p: PostureItem) {
+  renamingPostureKey.value = p._key
+  renamePostureValue.value = p.name
+}
+function confirmRenamePosture(p: PostureItem) {
+  if (!renamePostureValue.value.trim() || renamePostureValue.value === p.name) {
+    renamingPostureKey.value = ''
+    return
+  }
+  if (p._controllerIdx !== undefined) {
+    customPostures.value[p._controllerIdx] = { ...customPostures.value[p._controllerIdx], name: renamePostureValue.value.trim() }
+    savePostures()
+  }
+  renamingPostureKey.value = ''
+  toastRef.value?.success(`Renamed to "${renamePostureValue.value.trim()}"`)
+}
+
+function fillPosture(p: { joint: number[] }) {
+  for (let j = 1; j <= 6; j++) moveTarget['j'+j] = p.joint[j-1] ?? 0
+}
+
+// ─── Motion Parameters ─────────────────────────
+
+const motionParamsData = reactive<Record<string, Record<string, number> | null>>({
+  playbackJoint: null, playbackCoordinate: null, teachJoint: null, teachCoordinate: null,
+})
+const motionSections = computed(() => [
+  { key: 'playbackJoint', label: 'PLAYBACK JOINT PARAMS', data: motionParamsData.playbackJoint },
+  { key: 'playbackCoordinate', label: 'PLAYBACK COORDINATE PARAMS', data: motionParamsData.playbackCoordinate },
+  { key: 'teachJoint', label: 'TEACH / JOG JOINT PARAMS', data: motionParamsData.teachJoint },
+  { key: 'teachCoordinate', label: 'TEACH / JOG COORDINATE PARAMS', data: motionParamsData.teachCoordinate },
+])
+async function loadMotionParams(key: string) {
+  const fnMap: Record<string, () => Promise<{ success: boolean; data?: Record<string, unknown>; error?: { code: number; message: string } }>> = {
+    playbackJoint: () => api.getPlaybackJointParams(deviceId),
+    playbackCoordinate: () => api.getPlaybackCoordinateParams(deviceId),
+    teachJoint: () => api.getTeachJointParams(deviceId),
+    teachCoordinate: () => api.getTeachCoordinateParams(deviceId),
+  }
+  const res = await fnMap[key]()
+  if (res.success && res.data) motionParamsData[key] = res.data as Record<string, number>
+  else toastRef.value?.error(`Load ${key} failed: ${res.error?.message}`)
+}
+async function saveMotionParams(key: string) {
+  const data = motionParamsData[key]
+  if (!data) return
+  const fnMap: Record<string, (p: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: { code: number; message: string } }>> = {
+    playbackJoint: (d) => api.setPlaybackJointParams(deviceId, d),
+    playbackCoordinate: (d) => api.setPlaybackCoordinateParams(deviceId, d),
+    teachJoint: (d) => api.setTeachJointParams(deviceId, d),
+    teachCoordinate: (d) => api.setTeachCoordinateParams(deviceId, d),
+  }
+  const res = await fnMap[key](data)
+  if (res.success) toastRef.value?.success(`${key} saved`)
+  else toastRef.value?.error(`Save failed: ${res.error?.message}`)
+}
+
+// ─── Communication ─────────────────────────────
+
+const busForm = reactive({ type: '', baudRate: 115200, slaveId: 1, dataBits: 8, stopBits: 1, parity: 'none' })
+async function saveBus() {
+  const res = await api.setBus(deviceId, { ...busForm })
+  if (res.success) toastRef.value?.success('Bus settings saved')
+  else toastRef.value?.error(`Bus save failed: ${res.error?.message}`)
+}
+
+const wifiForm = reactive<Record<string, unknown>>({ ssid: '', passWd: '', enable: false })
+async function loadWiFi() {
+  const res = await api.getWiFi(deviceId)
+  if (res.success && res.data) Object.assign(wifiForm, res.data)
+}
+async function saveWiFi() {
+  const res = await api.setWiFi(deviceId, { ...wifiForm })
+  if (res.success) toastRef.value?.success('WiFi settings saved')
+  else toastRef.value?.error(`WiFi save failed: ${res.error?.message}`)
+}
+
+const ethForm = reactive({ dhcp: true, ip: '', mask: '', gateway: '', dns: '' })
+async function loadEthernet() {
+  const res = await api.getEthernet(deviceId)
+  if (res.success && res.data) {
+    const d = res.data as Record<string, unknown>
+    ethForm.dhcp = Boolean(d.dhcp)
+    ethForm.ip = String(d.ip ?? '')
+    ethForm.mask = String(d.mask ?? '')
+    ethForm.gateway = String(d.gateway ?? '')
+    ethForm.dns = String(d.dns ?? '')
+  }
+}
+async function saveEthernet() {
+  const res = await api.setEthernet(deviceId, { dhcp: ethForm.dhcp, ip: ethForm.ip, mask: ethForm.mask, gateway: ethForm.gateway, dns: ethForm.dns })
+  if (res.success) toastRef.value?.success('Ethernet settings saved')
+  else toastRef.value?.error(`Ethernet save failed: ${res.error?.message}`)
+}
+
+// Watch settings tab to auto-load
+watch(settingsTab, (tab) => {
+  if (tab === 'system') loadSystemTime()
+  else if (tab === 'users') loadUsers()
+  else if (tab === 'coordinates') loadCoords()
+  else if (tab === 'postures') loadPostures()
+})
+
 // ─── Lifecycle ──────────────────────────────────
 
 let fallbackTimer: ReturnType<typeof setInterval> | null = null
@@ -1567,7 +2344,6 @@ onMounted(async () => {
 
   // Mock 模式跳过 WS 订阅和 REST 兜底轮询，避免覆盖 mock 状态
   if (isMock) {
-    await loadJointPresets()
     ;(document.querySelector('.device-page') as HTMLElement)?.focus()
     return
   }
@@ -1955,12 +2731,96 @@ onUnmounted(() => {
 .modal-form { display: flex; flex-direction: column; }
 .modal-actions { display: flex; gap: 12px; }
 .modal-actions .btn { flex: 1; }
+
+/* Settings Modal */
+.settings-modal { max-width: 900px; width: 90vw; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }
+.settings-layout { display: flex; flex: 1; min-height: 0; }
+.settings-sidebar {
+  width: 155px; flex-shrink: 0; padding: 12px 0;
+  border-right: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: 2px;
+}
+
+.settings-alias-input { padding: 5px 8px; font-family: var(--font-mono); font-size: 0.7rem; background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; flex: 1; }
+.settings-alias-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
+.settings-nav-item {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  background: transparent; border: none; cursor: pointer;
+  font-family: var(--font-display); font-size: 0.58rem; font-weight: 600;
+  letter-spacing: 0.06em; color: var(--text-muted);
+  transition: all 0.15s ease; text-align: left; width: 100%;
+  border-left: 2px solid transparent;
+}
+.settings-nav-item:hover { color: var(--text-primary); background: var(--surface-1); }
+.settings-nav-item--active {
+  color: var(--cyan-300); background: var(--cyan-800);
+  border-left-color: var(--cyan-400);
+}
+.settings-nav-icon { font-size: 0.85rem; flex-shrink: 0; }
+.settings-nav-label { white-space: nowrap; }
+.settings-content { flex: 1; overflow-y: auto; padding: 12px 24px 24px; min-height: 0; }
+.settings-placeholder { display: flex; align-items: center; justify-content: center; height: 200px; }
+
+.settings-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.settings-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.settings-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.settings-section-header h4 { margin: 0; font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-secondary); }
+
+.load-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.load-field { display: flex; flex-direction: column; gap: 3px; }
+.load-field label { font-family: var(--font-display); font-size: 0.48rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); }
+.load-field .input-sm { width: 100%; padding: 5px 8px; font-family: var(--font-mono); font-size: 0.7rem; background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
+.load-field .input-sm:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
+.load-field .input-sm[readonly] { opacity: 0.55; cursor: default; user-select: none; }
+
+.load-config-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.68rem; }
+.load-config-table th { text-align: left; padding: 6px 6px; font-family: var(--font-display); font-size: 0.48rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
+.load-config-table td { padding: 5px 6px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); vertical-align: middle; }
+.load-config-table .preset-name { color: var(--text-primary); font-weight: 600; }
+.load-config-table .row--editing td { background: var(--cyan-800); padding: 4px 6px; }
+.table-actions { display: flex; gap: 4px; }
+.load-config-table td .btn + .btn { margin-left: 0; }
+.load-config-table .row--editing td:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.load-config-table .row--editing td:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+
+.input-xs { padding: 3px 5px; font-family: var(--font-mono); font-size: 0.65rem; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
+.input-xs:focus { border-color: var(--cyan-400); }
+
+.btn-xs { padding: 2px 7px; font-size: 0.6rem; height: 22px; }
+
+.mt-2 { margin-top: 12px; }
+.text-muted { color: var(--text-muted); }
+.checkbox-xs { display: inline-flex; align-items: center; gap: 3px; font-size: 0.6rem; cursor: pointer; }
+.checkbox-xs input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--cyan-500); }
+
+.coord-add-row { display: flex; gap: 6px; align-items: center; padding: 8px 0; }
+.motion-params-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
 .field-group { display: flex; flex-direction: column; gap: 4px; }
 .field-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); }
 .btn-quick--sys { border-color: var(--cyan-700); color: var(--cyan-300); background: var(--cyan-800); }
 
 .estop-btn { padding: 12px 28px; font-size: 13px; background: linear-gradient(180deg, #e01133 0%, #990022 100%); animation: glow-breath 2s ease-in-out infinite; }
 .estop-btn:hover:not(:disabled) { background: linear-gradient(180deg, #ff2244 0%, #bb0033 100%); animation: none; box-shadow: 0 0 32px #ff174466, 0 4px 12px rgba(0,0,0,0.6); }
+
+/* Quick Posture Buttons */
+.quick-posture-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
+.btn-quick-posture {
+  min-width: 36px; height: 28px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--void-surface); color: var(--text-muted);
+  cursor: pointer; font-family: var(--font-display); font-size: 0.65rem; font-weight: 700;
+  transition: all 0.15s ease;
+}
+.btn-quick-posture:hover:not(:disabled) { border-color: var(--cyan-500); color: var(--cyan-300); background: var(--cyan-800); }
+.btn-quick-posture--moving { border-color: var(--status-danger); color: #ff6b6b; background: #ff174422; }
+.btn-quick-posture .qpi { font-size: 0.7rem; }
+
+.preset-rename-input {
+  padding: 1px 4px; font-family: var(--font-mono); font-size: 0.65rem;
+  background: var(--surface-1); border: 1px solid var(--cyan-500); border-radius: var(--radius);
+  color: var(--text-primary); outline: none; width: 80px;
+}
 
 /* Alarm Panel */
 .alarm-panel { border: 1px solid var(--status-danger); box-shadow: 0 0 16px #ff174422; }
@@ -2068,4 +2928,9 @@ onUnmounted(() => {
 .logs-slide-enter-active { transition: transform 0.25s var(--ease-out); }
 .logs-slide-leave-active { transition: transform 0.2s var(--ease-in); }
 .logs-slide-enter-from, .logs-slide-leave-to { transform: translateX(100%); }
+
+/* Fade transition for settings modal */
+.fade-enter-active { transition: opacity 0.2s ease-out; }
+.fade-leave-active { transition: opacity 0.15s ease-in; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
