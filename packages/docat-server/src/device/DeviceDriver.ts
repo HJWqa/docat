@@ -144,6 +144,20 @@ export abstract class DeviceDriver {
   /** 设置示教坐标参数 */
   abstract setTeachCoordinateParams(params: Record<string, unknown>): Promise<void>
 
+  // ─── Dobot+ 插件系统 ──────────────────────────
+
+  /** 列出已安装的 Dobot+ 插件 */
+  abstract listDobotPlus(): Promise<string[]>
+
+  /** 安装 Dobot+ 插件 */
+  abstract installDobotPlus(name: string): Promise<void>
+
+  /** 卸载 Dobot+ 插件 */
+  abstract uninstallDobotPlus(name: string): Promise<void>
+
+  /** 获取 Dobot+ 插件端口分配 */
+  abstract getDobotPlusPorts(): Promise<Record<string, unknown>>
+
   // ─── 通讯设置 ──────────────────────────────────
 
   /** 设置总线通讯参数 */

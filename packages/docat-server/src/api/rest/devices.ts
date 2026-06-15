@@ -9,6 +9,7 @@ import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import type { DevicePool, ConnectionMode } from '../../device/DevicePool.js'
 import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
+import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
 import type { LoadParams, CustomPosture, SystemTime, CoordinateData, UserList, UserPermissionConfig } from '../../device/DeviceDriver.js'
 
@@ -1080,6 +1081,138 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
         await entry.driver.setEthernet(request.body)
         return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  // ─── Dobot+ 插件管理 ──────────────────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/dobotPlus',
+    async (request, reply): Promise<ApiResponse<string[]>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.listDobotPlus()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { name: string; action: string } }>(
+    '/api/devices/:id/dobotPlus',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        if (request.body.action === 'install') await entry.driver.installDobotPlus(request.body.name)
+        else if (request.body.action === 'uninstall') await entry.driver.uninstallDobotPlus(request.body.name)
+        else return { success: false, error: { code: 40001, message: 'action 必须是 install 或 uninstall' } }
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/dobotPlus/ports',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getDobotPlusPorts()
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  // ─── CR TCP Dashboard (29999) + Feedback (30004) ──
+
+  const crTcpCache = new Map<string, CRApiTcpTransport>()
+  let crTcpLatestFeed: CRFeedBackData | null = null
+
+  function getCrTcp(deviceId: string, ip: string): CRApiTcpTransport {
+    let t = crTcpCache.get(deviceId)
+    if (!t) {
+      t = new CRApiTcpTransport(ip)
+      t.on('feedback', (data) => { crTcpLatestFeed = data })
+      t.connectDashboard()
+      t.connectFeed()
+      crTcpCache.set(deviceId, t)
+    }
+    return t
+  }
+
+  app.post<{ Params: { id: string }; Body: { command: string } }>(
+    '/api/devices/:id/tcp/dashboard',
+    async (request, reply): Promise<ApiResponse<{ reply: string }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        const tcp = getCrTcp(request.params.id, config.ip)
+        const replyText = await tcp.sendDashboard(request.body.command)
+        return { success: true, data: { reply: replyText } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/status',
+    async (request, reply): Promise<ApiResponse<{ dashboard: string; feed: string; feedback: CRFeedBackData | null }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        const tcp = getCrTcp(request.params.id, config.ip)
+        return {
+          success: true,
+          data: {
+            dashboard: tcp.isDashboardConnected ? 'connected' : 'disconnected',
+            feed: tcp.isFeedConnected ? 'connected' : 'disconnected',
+            feedback: crTcpLatestFeed,
+          },
+        }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/disconnect',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const t = crTcpCache.get(request.params.id)
+        if (t) { t.disconnect(); crTcpCache.delete(request.params.id) }
+        crTcpLatestFeed = null
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { autoReconnect: boolean } }>(
+    '/api/devices/:id/tcp/autoReconnect',
+    async (request, reply): Promise<ApiResponse<{ autoReconnect: boolean }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const t = crTcpCache.get(request.params.id)
+        if (t) { t.autoReconnect = request.body.autoReconnect }
+        return { success: true, data: { autoReconnect: !!t?.autoReconnect } }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )

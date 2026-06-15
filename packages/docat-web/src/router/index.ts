@@ -6,6 +6,7 @@ import DeviceView from '../views/DeviceView.vue'
 import UserManagementView from '../views/UserManagementView.vue'
 
 const ProgrammingView = () => import('../views/ProgrammingView.vue')
+const TCPView = () => import('../views/TCPView.vue')
 
 const routes = [
   {
@@ -36,6 +37,12 @@ const routes = [
     path: '/device/:id/programming',
     name: 'DeviceProgramming',
     component: ProgrammingView,
+    meta: { auth: true, workspaceDepth: 2 },
+  },
+  {
+    path: '/device/:id/tcp',
+    name: 'DeviceTCP',
+    component: TCPView,
     meta: { auth: true, workspaceDepth: 2 },
   },
   {

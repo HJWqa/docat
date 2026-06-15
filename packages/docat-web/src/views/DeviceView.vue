@@ -20,6 +20,9 @@
           <router-link :to="{ path: `/device/${deviceId}/programming`, query: $route.query }" class="workspace-switch-btn">
             PROGRAMMING
           </router-link>
+          <router-link :to="{ path: `/device/${deviceId}/tcp`, query: $route.query }" class="workspace-switch-btn">
+            TCP
+          </router-link>
         </div>
       </div>
       <div class="workspace-header-actions">
@@ -52,6 +55,20 @@
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           SETTINGS
         </button>
+        <div class="dobotplus-toolbar" v-if="dobotPlusList.length > 0">
+          <button class="btn btn-sm btn-secondary" @click="showDobotPlusBar = !showDobotPlusBar" title="Dobot+ Plugins">
+            🧩 DOBOT+
+          </button>
+          <Transition name="fade">
+            <div v-if="showDobotPlusBar" class="dobotplus-dropdown">
+              <button v-for="name in dobotPlusList" :key="name" class="dobotplus-dropdown-item"
+                @click="openDobotPlusIframe(name); showDobotPlusBar = false"
+                :title="`Port: ${dobotPlusPorts[name] || '?'}`">
+                <span>🧩</span> {{ name }}
+              </button>
+            </div>
+          </Transition>
+        </div>
         <button class="btn btn-secondary btn-sm" @click="doLogout">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -783,6 +800,52 @@
                   <button class="btn btn-primary btn-sm mt-2" @click="saveBus">SAVE</button>
                 </div>
               </div>
+
+              <!-- Dobot+ -->
+              <div v-else-if="settingsTab === 'dobotplus'">
+                <div class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>INSTALLED PLUGINS</h4>
+                    <button class="btn btn-secondary btn-sm" @click="loadDobotPlusList" :disabled="loadingDobotPlus">🔄 REFRESH</button>
+                  </div>
+                  <div v-if="loadingDobotPlus" class="text-muted" style="padding:8px 0;font-size:0.7rem">Loading...</div>
+                  <table v-else-if="dobotPlusList.length > 0" class="load-config-table">
+                    <thead><tr><th>Name</th><th>Port</th><th style="width:80px">Actions</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(name, i) in dobotPlusList" :key="i">
+                        <td class="preset-name">{{ name }}</td>
+                        <td>{{ dobotPlusPorts[name] || '—' }}</td>
+                        <td class="table-actions">
+                          <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="openDobotPlusIframe(name)">OPEN</button>
+                          <button class="btn btn-secondary btn-xs" @click="uninstallDobotPlusPlugin(name)">✕</button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">No plugins installed</div>
+                </div>
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>INSTALL PLUGIN</h4></div>
+                  <div style="display:flex;gap:6px">
+                    <input v-model.trim="dobotPlusInstallName" class="input-sm settings-alias-input" placeholder="Plugin package name" @keyup.enter="installDobotPlusPlugin" />
+                    <button class="btn btn-primary btn-sm" :disabled="!dobotPlusInstallName || installingDobotPlus" @click="installDobotPlusPlugin">
+                      {{ installingDobotPlus ? 'INSTALLING...' : 'INSTALL' }}
+                    </button>
+                  </div>
+                </div>
+                <!-- Plugin iframe -->
+                <div v-if="dobotPlusIframeName" class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>{{ dobotPlusIframeName }}</h4>
+                    <button class="btn btn-secondary btn-sm" @click="dobotPlusIframeName = ''">✕ CLOSE</button>
+                  </div>
+                  <iframe
+                    :src="`http://${device?.ip}:${dobotPlusPorts[dobotPlusIframeName]}`"
+                    class="dobotplus-iframe"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -913,6 +976,7 @@ interface DeviceLogEntry {
 const deviceLogs = ref<DeviceLogEntry[]>([])
 const showLogs = ref(false)
 const showSettings = ref(false)
+const showDobotPlusBar = ref(false)
 const settingsTab = ref('system')
 const settingsTabs = [
   { key: 'system', icon: '⚙', label: 'System' },
@@ -922,6 +986,7 @@ const settingsTabs = [
   { key: 'postures', icon: '📌', label: 'Postures' },
   { key: 'motion', icon: '🏃', label: 'Motion' },
   { key: 'comm', icon: '🌐', label: 'Comm' },
+  { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
 ]
 const loadingLogs = ref(false)
 const logListRef = ref<HTMLElement>()
@@ -1337,6 +1402,7 @@ async function load() {
     }
   } catch { /* ignore */ }
   loadPostures()
+  loadDobotPlusList()
 }
 
 async function doConnect() {
@@ -2321,6 +2387,67 @@ async function saveEthernet() {
   else toastRef.value?.error(`Ethernet save failed: ${res.error?.message}`)
 }
 
+// ─── Dobot+ ─────────────────────────────────────
+
+const dobotPlusList = ref<string[]>([])
+const dobotPlusPorts = ref<Record<string, string>>({})
+const dobotPlusInstallName = ref('')
+const loadingDobotPlus = ref(false)
+const installingDobotPlus = ref(false)
+const dobotPlusIframeName = ref('')
+
+async function loadDobotPlusList() {
+  loadingDobotPlus.value = true
+  try {
+    const [listRes, portsRes] = await Promise.all([
+      api.listDobotPlus(deviceId),
+      api.getDobotPlusPorts(deviceId),
+    ])
+    if (listRes.success && listRes.data) dobotPlusList.value = listRes.data
+    if (portsRes.success && portsRes.data) {
+      const p: Record<string, string> = {}
+      for (const [k, v] of Object.entries(portsRes.data)) p[k] = String(v)
+      dobotPlusPorts.value = p
+    }
+  } catch (err) { console.warn('[DobotPlus] load failed:', err) }
+  finally { loadingDobotPlus.value = false }
+}
+async function installDobotPlusPlugin() {
+  if (!dobotPlusInstallName.value.trim()) return
+  installingDobotPlus.value = true
+  try {
+    const res = await api.manageDobotPlus(deviceId, dobotPlusInstallName.value.trim(), 'install')
+    if (res.success) {
+      toastRef.value?.success(`Plugin "${dobotPlusInstallName.value}" installed`)
+      dobotPlusInstallName.value = ''
+      await loadDobotPlusList()
+    } else {
+      toastRef.value?.error(`Install failed: ${res.error?.message}`)
+    }
+  } catch (err) { toastRef.value?.error(`Install error: ${(err as Error).message}`) }
+  finally { installingDobotPlus.value = false }
+}
+async function uninstallDobotPlusPlugin(name: string) {
+  try {
+    const res = await api.manageDobotPlus(deviceId, name, 'uninstall')
+    if (res.success) {
+      toastRef.value?.success(`Plugin "${name}" uninstalled`)
+      if (dobotPlusIframeName.value === name) dobotPlusIframeName.value = ''
+      await loadDobotPlusList()
+    } else {
+      toastRef.value?.error(`Uninstall failed: ${res.error?.message}`)
+    }
+  } catch (err) { toastRef.value?.error(`Uninstall error: ${(err as Error).message}`) }
+}
+function openDobotPlusIframe(name: string) {
+  dobotPlusIframeName.value = name
+}
+
+// Watch settings tab to auto-load Dobot+
+watch(settingsTab, (tab) => {
+  if (tab === 'dobotplus') loadDobotPlusList()
+})
+
 // Watch settings tab to auto-load
 watch(settingsTab, (tab) => {
   if (tab === 'system') loadSystemTime()
@@ -2795,6 +2922,23 @@ onUnmounted(() => {
 
 .coord-add-row { display: flex; gap: 6px; align-items: center; padding: 8px 0; }
 .motion-params-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+.dobotplus-iframe { width: 100%; height: 400px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: #fff; }
+
+.dobotplus-toolbar { position: relative; }
+.dobotplus-dropdown {
+  position: absolute; top: 100%; right: 0; z-index: 250;
+  min-width: 180px; margin-top: 4px; padding: 4px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.dobotplus-dropdown-item {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 12px;
+  background: transparent; border: none; border-radius: var(--radius);
+  color: var(--text-secondary); font-family: var(--font-display); font-size: 0.62rem;
+  font-weight: 600; letter-spacing: 0.04em; cursor: pointer; text-align: left;
+}
+.dobotplus-dropdown-item:hover { background: var(--cyan-800); color: var(--cyan-300); }
 
 .field-group { display: flex; flex-direction: column; gap: 4px; }
 .field-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); }

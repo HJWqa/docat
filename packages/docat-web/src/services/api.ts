@@ -583,6 +583,44 @@ export async function setEthernet(id: string, params: Record<string, unknown>): 
   return request('POST', `/api/devices/${id}/ethernet`, params)
 }
 
+// ─── Dobot+ ────────────────────────────────────
+
+export async function listDobotPlus(id: string): Promise<ApiResponse<string[]>> {
+  return request('GET', `/api/devices/${id}/dobotPlus`)
+}
+
+export async function manageDobotPlus(id: string, name: string, action: 'install' | 'uninstall'): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/dobotPlus`, { name, action })
+}
+
+export async function getDobotPlusPorts(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/dobotPlus/ports`)
+}
+
+// ─── CR TCP Dashboard (29999/30004) ────────────
+
+export interface CRTcpStatus {
+  dashboard: string
+  feed: string
+  feedback: Record<string, unknown> | null
+}
+
+export async function getCRTcpStatus(id: string): Promise<ApiResponse<CRTcpStatus>> {
+  return request('GET', `/api/devices/${id}/tcp/status`)
+}
+
+export async function sendCRDashboard(id: string, command: string): Promise<ApiResponse<{ reply: string }>> {
+  return request('POST', `/api/devices/${id}/tcp/dashboard`, { command })
+}
+
+export async function disconnectCRTcp(id: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/tcp/disconnect`)
+}
+
+export async function setCRAutoReconnect(id: string, autoReconnect: boolean): Promise<ApiResponse<{ autoReconnect: boolean }>> {
+  return request('POST', `/api/devices/${id}/tcp/autoReconnect`, { autoReconnect })
+}
+
 // ─── Scripts ────────────────────────────────────
 
 export async function listScripts(): Promise<ApiResponse<Script[]>> {

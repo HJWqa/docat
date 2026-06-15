@@ -665,6 +665,55 @@ export class MG6Driver extends DeviceDriver {
     if (!reply.status) throw new Error(`Set teach/coordinate failed: ${reply.message}`)
   }
 
+  // ─── Dobot+ 插件系统 ──────────────────────────
+
+  async listDobotPlus(): Promise<string[]> {
+    try {
+      const reply = await this.http.send({
+        method: 'get',
+        url: '/dobotPlus/list',
+        portName: this.ip,
+        timeout: 5000,
+      })
+      if (reply.status && Array.isArray(reply.data)) {
+        return reply.data.map(String)
+      }
+    } catch { /* ignore */ }
+    return []
+  }
+
+  async installDobotPlus(name: string): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/dobotPlus/install',
+      portName: this.ip,
+      params: { name },
+      timeout: 60000,
+    })
+    if (!reply.status) throw new Error(`DobotPlus install failed: ${reply.message}`)
+  }
+
+  async uninstallDobotPlus(name: string): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/dobotPlus/uninstall',
+      portName: this.ip,
+      params: { name },
+      timeout: 30000,
+    })
+    if (!reply.status) throw new Error(`DobotPlus uninstall failed: ${reply.message}`)
+  }
+
+  async getDobotPlusPorts(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/dobotPlus/getPorts',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
   // ─── 通讯设置 ──────────────────────────────────
 
   async setBus(params: Record<string, unknown>): Promise<void> {

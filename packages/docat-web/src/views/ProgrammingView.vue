@@ -21,6 +21,9 @@
           <router-link :to="{ path: routeDeviceId ? `/device/${routeDeviceId}/programming` : '/programming', query: $route.query }" class="workspace-switch-btn workspace-switch-btn--active">
             PROGRAMMING
           </router-link>
+          <router-link v-if="routeDeviceId" :to="{ path: `/device/${routeDeviceId}/tcp`, query: $route.query }" class="workspace-switch-btn">
+            TCP
+          </router-link>
         </div>
       </div>
       <div class="workspace-header-actions">
