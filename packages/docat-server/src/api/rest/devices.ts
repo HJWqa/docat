@@ -554,6 +554,73 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  /** 设置/获取手动自动模式总开关 */
+  app.post<{ Params: { id: string }; Body: { value: boolean } }>(
+    '/api/devices/:id/autoManualSwitch',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setAutoManualSwitch(request.body.value)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/autoManualSwitch',
+    async (request, reply): Promise<ApiResponse<{ value: boolean }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const value = await entry.driver.getAutoManualSwitch()
+        return { success: true, data: { value } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 设置手动/自动模式 */
+  app.post<{ Params: { id: string }; Body: { mode: 'auto' | 'manual' } }>(
+    '/api/devices/:id/autoManualMode',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setAutoManualMode(request.body.mode)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 设置/获取远程模式开关 (TCP vs Online) */
+  app.post<{ Params: { id: string }; Body: { value: boolean } }>(
+    '/api/devices/:id/remoteSwitch',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setRemoteSwitch(request.body.value)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/remoteSwitch',
+    async (request, reply): Promise<ApiResponse<{ value: boolean }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const value = await entry.driver.getRemoteSwitch()
+        return { success: true, data: { value } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
   /** 使能（启用运动控制） */
   app.post<{ Params: { id: string } }>(
     '/api/devices/:id/enable',
@@ -1920,6 +1987,61 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
+    }
+  )
+
+  /** 笛卡尔直线移动 (MovL, 控制器内部 IK) */
+  app.post<{ Params: { id: string }; Body: { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number; user?: number; tool?: number } }>(
+    '/api/devices/:id/moveCartesian',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const b = request.body
+        const data = await entry.driver.moveCartesian({
+          x: b.x, y: b.y, z: b.z,
+          rx: b.rx ?? 0, ry: b.ry ?? 0, rz: b.rz ?? 0,
+          user: b.user, tool: b.tool,
+        })
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 正运动学求解（关节 → 笛卡尔） */
+  app.post<{ Params: { id: string }; Body: { joint: number[]; user?: number; tool?: number } }>(
+    '/api/devices/:id/forwardKinematics',
+    async (request, reply): Promise<ApiResponse<{ coordinate: number[]; errID: number; errMsg?: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.forwardKinematics(request.body)
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 逆运动学求解（不执行运动） */
+  app.post<{ Params: { id: string }; Body: { coordinate: number[]; jointNear?: number[]; user?: number; tool?: number } }>(
+    '/api/devices/:id/inverseKinematics',
+    async (request, reply): Promise<ApiResponse<{ joint: number[]; errID: number; errMsg?: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const b = request.body
+        const data = await entry.driver.inverseKinematics({
+          coordinate: b.coordinate,
+          jointNear: b.jointNear ?? [0,0,0,0,0,0],
+          user: b.user, tool: b.tool,
+        })
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )
 

@@ -293,8 +293,8 @@ export class DevicePool {
               extInfo.mode = mode
             }
             extInfo.mode = mode // 告诉前端当前连接模式
-            extInfo.tcpConnected = tcpConnected // TCP 连接状态
-            extInfo.tcpDownSince = tcpDownSince // TCP 断开起始时间（0=正常）
+            extInfo.autoManual = rawExchange?.autoManual // 1=auto, 0=manual
+            extInfo.tcpConnected = tcpConnected
             eventBus.emit('device:state', { deviceId: driverId, state: { ...state, _ext: extInfo } })
           }
         } catch {

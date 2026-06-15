@@ -182,6 +182,26 @@ export async function disableDevice(id: string): Promise<ApiResponse<null>> {
   return request('POST', `/api/devices/${id}/disable`)
 }
 
+export async function setAutoManualSwitch(id: string, value: boolean): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/autoManualSwitch`, { value })
+}
+
+export async function getAutoManualSwitch(id: string): Promise<ApiResponse<{ value: boolean }>> {
+  return request('GET', `/api/devices/${id}/autoManualSwitch`)
+}
+
+export async function setAutoManualMode(id: string, mode: 'auto' | 'manual'): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/autoManualMode`, { mode })
+}
+
+export async function setRemoteSwitch(id: string, value: boolean): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/remoteSwitch`, { value })
+}
+
+export async function getRemoteSwitch(id: string): Promise<ApiResponse<{ value: boolean }>> {
+  return request('GET', `/api/devices/${id}/remoteSwitch`)
+}
+
 export interface DeviceAlarm {
   id: number; level: number; description: string; solution: string; date: string; time: string
 }
@@ -299,6 +319,22 @@ export async function moveJointsCommand(id: string, joints: number[], value: boo
 
 export async function moveDevice(id: string, params: { x: number; y: number; z: number; r?: number; mode?: string; user?: number; tool?: number }): Promise<ApiResponse<null>> {
   return request('POST', `/api/devices/${id}/move`, params)
+}
+
+export async function moveCartesian(id: string, params: { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number; user?: number; tool?: number }): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('POST', `/api/devices/${id}/moveCartesian`, params)
+}
+
+export interface IKResult { joint: number[]; errID: number; errMsg?: string }
+
+export async function inverseKinematics(id: string, params: { coordinate: number[]; jointNear?: number[]; user?: number; tool?: number }): Promise<ApiResponse<IKResult>> {
+  return request('POST', `/api/devices/${id}/inverseKinematics`, params)
+}
+
+export interface FKResult { coordinate: number[]; errID: number; errMsg?: string }
+
+export async function forwardKinematics(id: string, params: { joint: number[]; user?: number; tool?: number }): Promise<ApiResponse<FKResult>> {
+  return request('POST', `/api/devices/${id}/forwardKinematics`, params)
 }
 
 // ─── Controller Projects ────────────────────────

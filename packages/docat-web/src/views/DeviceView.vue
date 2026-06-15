@@ -190,6 +190,23 @@
         <div class="jog-panel-header">
           <div class="hud-label">MANUAL JOG CONTROL</div>
           <div class="jog-settings">
+            <!-- Mode Switches -->
+            <div class="mode-switch-group">
+              <span class="amp-limit-label">手动自动</span>
+              <label class="toggle-switch">
+                <input type="checkbox" :checked="autoModeEnabled" @change="toggleAutoModeEnabled" :disabled="modeSwitching" />
+                <span class="toggle-track"><span class="toggle-thumb" /></span>
+                <span class="toggle-label">{{ autoModeEnabled ? '开' : '关' }}</span>
+              </label>
+            </div>
+            <div class="mode-switch-group">
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isAutoMode }]" @click="setMode('auto')" :disabled="!autoModeEnabled || modeSwitching">AUTO</button>
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isAutoMode }]" @click="setMode('manual')" :disabled="!autoModeEnabled || modeSwitching">MANUAL</button>
+            </div>
+            <div class="mode-switch-group">
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isOnlineMode }]" @click="setDeviceMode('online')" :disabled="isAutoMode || modeSwitching">ONLINE</button>
+            </div>
             <!-- Amplitude limit -->
             <div class="amp-limit">
               <span class="amp-limit-label">MAX Δ</span>
@@ -250,15 +267,28 @@
         <div class="move-grid">
           <div v-for="j in 6" :key="j" class="move-field">
             <label class="move-label">J{{ j }}</label>
-            <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input" />
+            <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input" @blur="onJointBlur" />
             <span class="move-unit">°</span>
           </div>
-          <button class="btn btn-primary move-btn" :disabled="!isConnected || moving" @click="doMove">
+        </div>
+
+        <div class="move-grid mt-1">
+          <div v-for="axis in ['X','Y','Z','RX','RY','RZ']" :key="axis" class="move-field">
+            <label class="move-label">{{ axis }}</label>
+            <input v-model.number="moveCartTarget[axis.toLowerCase()]" type="number" step="0.1" class="move-input" @blur="onCartBlur" />
+            <span class="move-unit">{{ ['X','Y','Z'].includes(axis) ? 'mm' : '°' }}</span>
+          </div>
+        </div>
+
+        <div class="move-actions-row mt-2">
+          <button class="btn btn-primary" :disabled="!isConnected || moving" @click="doMove">
             {{ moving ? 'MOVING...' : 'MOVE' }}
           </button>
-          <button v-if="moving" class="btn btn-danger move-stop-btn" @click="() => stopMoveJoints()">
+          <button v-if="moving" class="btn btn-danger" @click="() => stopMoveJoints()">
             STOP
           </button>
+          <span v-if="ikResult === 'ok'" class="ik-label ik-label--ok">✓ Reachable</span>
+          <span v-if="ikResult === 'fail'" class="ik-label ik-label--fail">✗ {{ ikMsg }}</span>
         </div>
 
         <!-- Postures (system + controller) -->
@@ -936,9 +966,63 @@ const connecting = ref(false)
 const isLocked = ref(false)
 const enabled = ref(deviceStore.isEnabled(deviceId))
 const enabling = ref(false)
+const isAutoMode = ref(false)
+const autoModeEnabled = ref(false)
+const modeSwitching = ref(false)
+const isOnlineMode = ref(true)
 const moving = ref(false)
 const moveTargetInit = ref(false)
 const moveTarget = reactive<Record<string, number>>({ j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 })
+const moveCartTarget = reactive<Record<string, number>>({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
+const ikResult = ref('') // '' | 'ok' | 'fail'
+const ikMsg = ref('')
+
+let fkTimer: ReturnType<typeof setTimeout> | null = null
+let ikTimer: ReturnType<typeof setTimeout> | null = null
+
+async function onJointBlur() {
+  if (!isConnected.value || isMock) return
+  if (fkTimer) clearTimeout(fkTimer)
+  fkTimer = setTimeout(async () => {
+    const j = getMoveTargetJoints()
+    try {
+      const res = await api.forwardKinematics(deviceId, { joint: j })
+      if (res.success && res.data && res.data.errID === 0 && res.data.coordinate.length >= 6) {
+        const c = res.data.coordinate
+        moveCartTarget.x = Math.round(c[0] * 10) / 10
+        moveCartTarget.y = Math.round(c[1] * 10) / 10
+        moveCartTarget.z = Math.round(c[2] * 10) / 10
+        moveCartTarget.rx = Math.round(c[3] * 10) / 10
+        moveCartTarget.ry = Math.round(c[4] * 10) / 10
+        moveCartTarget.rz = Math.round(c[5] * 10) / 10
+      }
+    } catch { /* ignore */ }
+  }, 300)
+}
+
+async function onCartBlur() {
+  if (!isConnected.value || isMock) return
+  if (ikTimer) clearTimeout(ikTimer)
+  ikTimer = setTimeout(async () => {
+    const joints = state.value.joints as Record<string, number> | undefined
+    const c = moveCartTarget
+    try {
+      const res = await api.inverseKinematics(deviceId, {
+        coordinate: [c.x, c.y, c.z, c.rx, c.ry, c.rz],
+        jointNear: joints ? [joints.j1||0, joints.j2||0, joints.j3||0, joints.j4||0, joints.j5||0, joints.j6||0] : undefined,
+      })
+      if (res.success && res.data) {
+        if (res.data.errID === 0 && res.data.joint.length >= 6) {
+          const j = res.data.joint
+          for (let i = 1; i <= 6; i++) moveTarget['j'+i] = Math.round(j[i-1] * 10) / 10
+          ikResult.value = 'ok'; ikMsg.value = ''
+        } else {
+          ikResult.value = 'fail'; ikMsg.value = res.data.errMsg || `IK error #${res.data.errID}`
+        }
+      }
+    } catch { /* ignore */ }
+  }, 300)
+}
 const modelReady = ref(false)
 let last3DPose = ''
 
@@ -1439,6 +1523,21 @@ async function load() {
   } catch { /* ignore */ }
   loadPostures()
   loadDobotPlusList()
+  // Load switch states periodically
+  api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
+  api.getRemoteSwitch(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = !r.data.value })
+}
+
+async function refreshSwitchStates() {
+  if (!isConnected.value || isMock) return
+  try {
+    const [autoSw, remoteSw] = await Promise.all([
+      api.getAutoManualSwitch(deviceId),
+      api.getRemoteSwitch(deviceId),
+    ])
+    if (autoSw.success && autoSw.data) autoModeEnabled.value = autoSw.data.value
+    if (remoteSw.success && remoteSw.data) isOnlineMode.value = !remoteSw.data.value
+  } catch { /* best-effort */ }
 }
 
 async function doConnect() {
@@ -1533,6 +1632,54 @@ async function doPowerOff() {
   } catch (err) {
     toastRef.value?.error(`Power off error: ${(err as Error).message}`)
   }
+}
+
+async function toggleAutoModeEnabled() {
+  if (modeSwitching.value || !isConnected.value) return
+  modeSwitching.value = true
+  const newVal = !autoModeEnabled.value
+  try {
+    const res = await api.setAutoManualSwitch(deviceId, newVal)
+    if (res.success) {
+      autoModeEnabled.value = newVal
+      if (!newVal && isAutoMode.value) setMode('manual')
+    } else {
+      toastRef.value?.error(`开关切换失败: ${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`开关错误: ${(err as Error).message}`)
+  } finally { modeSwitching.value = false }
+}
+async function setMode(mode: 'auto' | 'manual') {
+  if (!isConnected.value || modeSwitching.value) return
+  if (!autoModeEnabled.value && mode === 'auto') { toastRef.value?.error('请先开启手动自动开关'); return }
+  modeSwitching.value = true
+  try {
+    const res = await api.setAutoManualMode(deviceId, mode)
+    if (res.success) {
+      isAutoMode.value = mode === 'auto'
+    } else {
+      toastRef.value?.error(`切换失败: ${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`切换错误: ${(err as Error).message}`)
+  } finally { modeSwitching.value = false }
+}
+async function setDeviceMode(mode: 'online' | 'tcp') {
+  if (isAutoMode.value) { toastRef.value?.error('自动模式下无法切换设备模式'); return }
+  if (modeSwitching.value) return
+  modeSwitching.value = true
+  try {
+    const res = await api.setRemoteSwitch(deviceId, mode === 'tcp')
+    if (res.success) {
+      isOnlineMode.value = mode === 'online'
+      toastRef.value?.success(`已切换至 ${mode === 'tcp' ? 'TCP远程' : '在线'} 模式`)
+    } else {
+      toastRef.value?.error(`切换失败: ${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`切换错误: ${(err as Error).message}`)
+  } finally { modeSwitching.value = false }
 }
 
 async function toggleEnable() {
@@ -2556,6 +2703,7 @@ watch(settingsTab, (tab) => {
 // ─── Lifecycle ──────────────────────────────────
 
 let fallbackTimer: ReturnType<typeof setInterval> | null = null
+let switchTimer: ReturnType<typeof setInterval> | null = null
 let wsDisconnected = false
 
 onMounted(async () => {
@@ -2565,6 +2713,8 @@ onMounted(async () => {
   await load()
   if (!isMock && !isConnected.value) await doConnect()
   if (!isMock && isConnected.value) loadSpeed()
+  // Periodic switch state sync (every 30s)
+  switchTimer = setInterval(refreshSwitchStates, 30000)
 
   // Mock 模式跳过 WS 订阅和 REST 兜底轮询，避免覆盖 mock 状态
   if (isMock) {
@@ -2625,6 +2775,10 @@ onMounted(async () => {
         tcpDown.value = !(ext.tcpConnected as boolean)
       } else {
         tcpDown.value = false
+      }
+      // Auto/Manual mode
+      if (ext.autoManual !== undefined) {
+        isAutoMode.value = ext.autoManual === 1
       }
     }
   })
@@ -2689,6 +2843,7 @@ onUnmounted(() => {
   window.removeEventListener('message', handle3DModelMessage)
   window.removeEventListener('blur', onWindowBlur)
   if (fallbackTimer) clearInterval(fallbackTimer)
+  if (switchTimer) clearInterval(switchTimer)
   stopJog()
   keysDown.clear()
   wsClient.unsubscribe(deviceId)
@@ -2802,7 +2957,9 @@ onUnmounted(() => {
 .joint-value { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); width: 60px; text-align: right; }
 
 .jog-panel-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
-.jog-settings { display: flex; align-items: center; gap: 16px; }.amp-limit { display: flex; align-items: center; gap: 4px; }
+.jog-settings { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mode-switch-group { display: flex; align-items: center; gap: 6px; }
+.amp-limit { display: flex; align-items: center; gap: 4px; }
 .amp-limit-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); }
 .amp-input {
   width: 48px; padding: 2px 6px; font-family: var(--font-mono); font-size: 0.7rem;
@@ -3050,6 +3207,13 @@ onUnmounted(() => {
 .field-group { display: flex; flex-direction: column; gap: 4px; }
 .field-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); }
 .btn-quick--sys { border-color: var(--cyan-700); color: var(--cyan-300); background: var(--cyan-800); }
+
+.ik-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em; align-self: flex-end; margin-bottom: 8px; white-space: nowrap; }
+.ik-label--ok { color: var(--status-success); }
+.ik-label--fail { color: var(--status-danger); }
+
+.move-actions-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; justify-content: flex-end; }
+.move-actions-row .ik-label { margin-right: auto; }
 
 .estop-btn { padding: 12px 28px; font-size: 13px; background: linear-gradient(180deg, #e01133 0%, #990022 100%); animation: glow-breath 2s ease-in-out infinite; }
 .estop-btn:hover:not(:disabled) { background: linear-gradient(180deg, #ff2244 0%, #bb0033 100%); animation: none; box-shadow: 0 0 32px #ff174466, 0 4px 12px rgba(0,0,0,0.6); }

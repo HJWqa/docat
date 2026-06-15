@@ -116,13 +116,16 @@
                 @pointerdown="startJog(`J${j}-`)" @pointerup="stopJog" @pointerleave="stopJog">−</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-sm move-go" :disabled="!connected" @click="moveToJoints">MOV J</button>
+          <div class="move-actions">
+            <button class="btn btn-primary btn-sm" :disabled="!connected" @click="moveToJoints">MOV J</button>
+          </div>
         </div>
         <div class="move-section">
           <div class="move-row-label">Coord</div>
           <div v-for="(axis, ai) in ['X','Y','Z','RX','RY','RZ']" :key="'c'+ai" class="move-field">
             <label>{{ axis }}</label>
-            <input v-model.number="moveCoord[axis.toLowerCase()]" type="number" step="0.1" class="move-input" />
+            <input v-model.number="moveCoord[axis.toLowerCase()]" type="number" step="0.1" class="move-input"
+              @blur="onCoordIkBlur" />
             <div class="move-jog-btns">
               <button class="btn btn-secondary jog-btn" :disabled="!connected"
                 @pointerdown="startJog(`${axis}+`)" @pointerup="stopJog" @pointerleave="stopJog">+</button>
@@ -130,7 +133,11 @@
                 @pointerdown="startJog(`${axis}-`)" @pointerup="stopJog" @pointerleave="stopJog">−</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-sm move-go" :disabled="!connected" @click="moveToCoord">MOV L</button>
+          <div class="move-actions">
+            <button class="btn btn-primary btn-sm" :disabled="!connected" @click="moveToCoord">MOV L</button>
+            <span v-if="coordIkOk" class="check-label check-label--ok">✓</span>
+            <span v-if="coordIkFail" class="check-label check-label--fail">✗ {{ coordIkMsg }}</span>
+          </div>
         </div>
       </div>
 
@@ -221,6 +228,9 @@ const feedback = ref<FeedData | null>(null)
 // Move
 const moveJoints = reactive<Record<string, number>>({ j1:0,j2:0,j3:0,j4:0,j5:0,j6:0 })
 const moveCoord = reactive<Record<string, number>>({ x:0,y:0,z:0,rx:0,ry:0,rz:0 })
+const coordIkOk = ref(false)
+const coordIkFail = ref(false)
+const coordIkMsg = ref('')
 
 // Log
 interface LogEntry { type: 'send' | 'recv'; text: string }
@@ -393,8 +403,40 @@ function moveToJoints() {
   sendCommandStr(`MovJ(${j.j1},${j.j2},${j.j3},${j.j4},${j.j5},${j.j6})`)
 }
 function moveToCoord() {
+  coordIkOk.value = false; coordIkFail.value = false
   const c = moveCoord
   sendCommandStr(`MovL(${c.x},${c.y},${c.z},${c.rx},${c.ry},${c.rz})`)
+}
+
+let coordIkTimer: ReturnType<typeof setTimeout> | null = null
+async function onCoordIkBlur() {
+  if (!connected.value) return
+  if (coordIkTimer) clearTimeout(coordIkTimer)
+  coordIkTimer = setTimeout(async () => {
+    const c = moveCoord
+    const f = feedback.value
+    const jointNear = f?.QActual ? `{${f.QActual.map(v=>v.toFixed(3)).join(',')}}` : ''
+    const cmd = `InverseKin(${c.x},${c.y},${c.z},${c.rx},${c.ry},${c.rz},user=0,tool=0,useJointNear=1,JointNear=${jointNear})`
+    try {
+      const res = await api.sendCRDashboard(deviceId, cmd)
+      const reply = res.success ? (res.data?.reply || '') : ''
+      tcpLog.value.push({ type:'send', text:'IK' }, { type:'recv', text:reply.substring(0, 80) || 'Error' })
+      if (reply.includes('Not Tcp')) { tcpModeError.value = true; return }
+      const nums = (reply.match(/-?\d+\.?\d*/g) || []).map(Number)
+      if (nums.length >= 6) {
+        coordIkOk.value = true; coordIkFail.value = false
+        moveJoints.j1 = Math.round(nums[0] * 10) / 10
+        moveJoints.j2 = Math.round(nums[1] * 10) / 10
+        moveJoints.j3 = Math.round(nums[2] * 10) / 10
+        moveJoints.j4 = Math.round(nums[3] * 10) / 10
+        moveJoints.j5 = Math.round(nums[4] * 10) / 10
+        moveJoints.j6 = Math.round(nums[5] * 10) / 10
+      } else {
+        coordIkOk.value = false; coordIkFail.value = true
+        coordIkMsg.value = reply.substring(0, 60) || 'Unreachable'
+      }
+    } catch { /* ignore */ }
+  }, 400)
 }
 
 onMounted(async () => {
@@ -485,6 +527,10 @@ onUnmounted(() => {
 .move-jog-btns { display: flex; gap: 1px; }
 .jog-btn { width: 26px; height: 18px; padding: 0; font-size: 0.6rem; line-height: 1; display: flex; align-items: center; justify-content: center; }
 .move-go { align-self: flex-end; margin-bottom: 2px; }
+.move-actions { display: flex; align-items: center; gap: 6px; align-self: flex-end; margin-bottom: 2px; }
+.check-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.05em; }
+.check-label--ok { color: var(--status-success); }
+.check-label--fail { color: var(--status-danger); }
 
 /* Row 3: Feedback + Log */
 .tcp-bottom-row { display: flex; gap: 12px; height: 280px; }
