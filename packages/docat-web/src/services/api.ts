@@ -621,6 +621,37 @@ export async function setCRAutoReconnect(id: string, autoReconnect: boolean): Pr
   return request('POST', `/api/devices/${id}/tcp/autoReconnect`, { autoReconnect })
 }
 
+// ─── Trajectory Recording ──────────────────────
+
+export interface TrackItem {
+  name: string; size: number; mtime: string
+}
+export interface TrackPoint {
+  j1: number; j2: number; j3: number; j4: number; j5: number; j6: number
+}
+
+export async function startRecord(id: string, name: string): Promise<ApiResponse<{ name: string }>> {
+  return request('POST', `/api/devices/${id}/tcp/record/start`, { name })
+}
+export async function stopRecord(id: string): Promise<ApiResponse<{ name: string }>> {
+  return request('POST', `/api/devices/${id}/tcp/record/stop`)
+}
+export async function getRecordStatus(id: string): Promise<ApiResponse<{ recording: boolean; name?: string }>> {
+  return request('GET', `/api/devices/${id}/tcp/record/status`)
+}
+export async function listTracks(id: string): Promise<ApiResponse<TrackItem[]>> {
+  return request('GET', `/api/devices/${id}/tcp/tracks`)
+}
+export async function deleteTrack(id: string, trackName: string): Promise<ApiResponse<null>> {
+  return request('DELETE', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
+}
+export async function renameTrack(id: string, trackName: string, newName: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}/rename`, { newName })
+}
+export async function getTrackPoints(id: string, trackName: string): Promise<ApiResponse<TrackPoint[]>> {
+  return request('GET', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
+}
+
 // ─── Scripts ────────────────────────────────────
 
 export async function listScripts(): Promise<ApiResponse<Script[]>> {

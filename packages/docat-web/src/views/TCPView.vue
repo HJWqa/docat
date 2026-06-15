@@ -27,6 +27,12 @@
       </div>
     </header>
 
+    <!-- TCP Mode Warning -->
+    <div v-if="tcpModeError && connected" class="tcp-mode-warning">
+      ⚠ 设备未处于 TCP 控制模式 — Dashboard 命令无法执行。
+      请通过示教器设置 → 控制模式，切换为 <strong>TCP/IP 模式</strong>
+    </div>
+
     <div class="tcp-layout">
       <!-- Row 1: Connect + Dashboard -->
       <div class="tcp-top-row">
@@ -220,6 +226,68 @@ const moveCoord = reactive<Record<string, number>>({ x:0,y:0,z:0,rx:0,ry:0,rz:0 
 interface LogEntry { type: 'send' | 'recv'; text: string }
 const tcpLog = ref<LogEntry[]>([])
 
+// Recording
+const recording = ref(false)
+const trackName = ref('')
+const tracks = ref<api.TrackItem[]>([])
+const playing = ref(false)
+const playingTrack = ref('')
+
+async function loadTracks() {
+  const res = await api.listTracks(deviceId)
+  if (res.success && res.data) tracks.value = res.data
+}
+async function startRecording() {
+  if (!trackName.value.trim()) return
+  const res = await api.startRecord(deviceId, trackName.value.trim())
+  if (res.success) {
+    recording.value = true
+    tcpLog.value.push({ type:'send', text:`REC START: ${trackName.value}` })
+  } else {
+    toastRef.value?.error(`Record start failed: ${res.error?.message}`)
+  }
+}
+async function stopRecording() {
+  const res = await api.stopRecord(deviceId)
+  if (res.success) {
+    recording.value = false
+    tcpLog.value.push({ type:'send', text:`REC STOP: ${res.data?.name}` })
+    await loadTracks()
+  }
+}
+async function deleteTrackFile(name: string) {
+  await api.deleteTrack(deviceId, name)
+  await loadTracks()
+}
+async function playTrack(t: api.TrackItem) {
+  if (!connected.value) return
+  playing.value = true; playingTrack.value = t.name
+  try {
+    const res = await api.getTrackPoints(deviceId, t.name)
+    if (res.success && res.data) {
+      const points = res.data
+      tcpLog.value.push({ type:'send', text:`PLAY START: ${t.name} (${points.length} pts)` })
+      for (let i = 0; i < points.length; i++) {
+        if (!playing.value) break
+        const p = points[i]
+        await api.sendCRDashboard(deviceId, `MovJ(${p.j1},${p.j2},${p.j3},${p.j4},${p.j5},${p.j6})`)
+        tcpLog.value.push({ type:'send', text:`PLAY [${i+1}/${points.length}] MovJ(${p.j1.toFixed(1)},${p.j2.toFixed(1)},${p.j3.toFixed(1)},${p.j4.toFixed(1)},${p.j5.toFixed(1)},${p.j6.toFixed(1)})` })
+        await new Promise(r => setTimeout(r, 200))
+      }
+      tcpLog.value.push({ type:'send', text:`PLAY END: ${t.name}` })
+    }
+  } catch (err) {
+    tcpLog.value.push({ type:'recv', text:`Playback error: ${(err as Error).message}` })
+  } finally { playing.value = false; playingTrack.value = '' }
+}
+
+function fmtTrackTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`
+  } catch { return iso }
+}
+
 function fmtHex(v: number | undefined): string {
   return v !== undefined ? '0x' + v.toString(16).toUpperCase().padStart(4, '0') : '—'
 }
@@ -233,8 +301,11 @@ function modeClass(m: number | undefined): string {
   return ''
 }
 
+const tcpModeError = ref(false) // 设备未切换到 TCP 模式
+
 async function connectTcp() {
   connecting.value = true
+  tcpModeError.value = false
   try {
     await pollStatus()
     // 轮询直到连上或超时（10s）
@@ -245,6 +316,13 @@ async function connectTcp() {
     }
     if (!connected.value) {
       toastRef.value?.error('Connection timeout — check if device is reachable on ports 29999/30004')
+    } else {
+      // 连接成功，发一个空命令检测是否为 TCP 模式
+      const testRes = await api.sendCRDashboard(deviceId, 'RobotMode()')
+      if (testRes.success && testRes.data?.reply && testRes.data.reply.includes('Not Tcp')) {
+        tcpModeError.value = true
+        toastRef.value?.error('设备未切换到 TCP 模式！请通过示教器或设置将控制模式切换为 TCP')
+      }
     }
     if (!pollTimer) pollTimer = setInterval(pollStatus, 500)
   } finally {
@@ -253,7 +331,7 @@ async function connectTcp() {
 }
 async function disconnectTcp() {
   await api.disconnectCRTcp(deviceId)
-  connected.value = false; feedback.value = null
+  connected.value = false; feedback.value = null; tcpModeError.value = false
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 async function toggleAutoReconnect() {
@@ -283,6 +361,9 @@ async function sendCommand() {
   try {
     const res = await api.sendCRDashboard(deviceId, cmd)
     const reply = res.success ? res.data?.reply || '(empty)' : `Error: ${res.error?.message}`
+    if (reply.includes('Not Tcp')) {
+      tcpModeError.value = true
+    }
     tcpLog.value.push({ type: 'recv', text: reply })
   } catch (err) {
     tcpLog.value.push({ type: 'recv', text: `Error: ${(err as Error).message}` })
@@ -321,6 +402,7 @@ onMounted(async () => {
   if (res.success && res.data) {
     device.value = res.data.find(d => d.id === deviceId) ?? null
   }
+  loadTracks()
 })
 
 onUnmounted(() => {
@@ -356,6 +438,9 @@ onUnmounted(() => {
 
 /* Layout */
 .tcp-layout { padding: 16px; max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+
+/* TCP Mode Warning Banner */
+.tcp-mode-warning { margin: 12px 20px 0; padding: 12px 20px; border: 1px solid #ffaa0033; border-radius: var(--radius); background: #ffaa0011; color: #ffd93d; font-size: 0.65rem; font-family: var(--font-display); letter-spacing: 0.04em; }
 
 /* Card */
 .card { background: var(--surface-0); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 14px 18px; }
@@ -424,4 +509,17 @@ onUnmounted(() => {
 .log-arrow--recv { color: var(--text-muted); }
 .log-text { color: var(--text-secondary); word-break: break-all; line-height: 1.4; }
 .log-empty { color: var(--text-muted); padding: 8px 0; font-style: italic; }
+
+/* Track Recording */
+.tcp-track { }
+.track-controls { display: flex; align-items: center; gap: 8px; }
+.recording-indicator { color: var(--status-danger); font-size: 0.8rem; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+.track-list { display: flex; flex-direction: column; gap: 3px; }
+.track-item { display: flex; align-items: center; gap: 12px; padding: 4px 8px; background: var(--void-surface); border-radius: var(--radius); font-size: 0.62rem; }
+.track-item-name { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-item-size { color: var(--text-muted); font-size: 0.55rem; min-width: 50px; }
+.track-item-time { color: var(--text-muted); font-size: 0.55rem; min-width: 80px; }
+.mt-2 { margin-top: 10px; }
+.text-muted { color: var(--text-muted); }
 </style>

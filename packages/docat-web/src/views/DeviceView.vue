@@ -700,6 +700,41 @@
                 </div>
               </div>
 
+              <!-- Trajectory Recording -->
+              <div v-else-if="settingsTab === 'recording'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>TRAJECTORY RECORD (CR TCP)</h4></div>
+                  <div class="track-controls" style="display:flex;align-items:center;gap:10px">
+                    <input v-model.trim="recTrackName" class="input-sm settings-alias-input" style="max-width:220px" placeholder="Track name" :disabled="recRecording" />
+                    <button v-if="!recRecording" class="btn btn-danger btn-sm" @click="recStart" :disabled="!isConnected || !recTrackName">
+                      ⏺ RECORD
+                    </button>
+                    <button v-else class="btn btn-secondary btn-sm" @click="recStop">
+                      ⏹ STOP ({{ recTrackName }})
+                    </button>
+                    <span v-if="recRecording" class="recording-indicator">●</span>
+                  </div>
+                  <div v-if="recTracks.length > 0" class="track-list mt-2">
+                    <div v-for="t in recTracks" :key="t.name" class="track-item">
+                      <template v-if="recRenaming === t.name">
+                        <input v-model.trim="recRenameValue" class="preset-rename-input" style="flex:1"
+                          @keyup.enter="recConfirmRename(t.name)" @keyup.escape="recRenaming = ''"
+                          @blur="recConfirmRename(t.name)" />
+                      </template>
+                      <span v-else class="track-item-name">{{ t.name }}</span>
+                      <span class="track-item-size">{{ (t.size / 1024).toFixed(1) }} KB</span>
+                      <span class="track-item-time">{{ fmtTrackTime(t.mtime) }}</span>
+                      <button class="btn btn-secondary btn-xs" @click="recPlay(t)" :disabled="!isConnected || recPlaying">
+                        {{ recPlaying && recPlayingTrack === t.name ? '▶▶...' : '▶' }}
+                      </button>
+                      <button class="btn btn-secondary btn-xs" @click="recStartRename(t.name)">✎</button>
+                      <button class="btn btn-secondary btn-xs" @click="recDelete(t.name)">✕</button>
+                    </div>
+                  </div>
+                  <div v-else class="text-muted" style="padding:4px 0;font-size:0.7rem">No recordings on controller</div>
+                </div>
+              </div>
+
               <!-- Custom Postures -->
               <div v-else-if="settingsTab === 'postures'">
                 <div class="settings-section">
@@ -983,6 +1018,7 @@ const settingsTabs = [
   { key: 'users', icon: '👤', label: 'Users' },
   { key: 'coordinates', icon: '📐', label: 'Coordinates' },
   { key: 'load', icon: '⚖', label: 'Load Params' },
+  { key: 'recording', icon: '⏺', label: 'Recording' },
   { key: 'postures', icon: '📌', label: 'Postures' },
   { key: 'motion', icon: '🏃', label: 'Motion' },
   { key: 'comm', icon: '🌐', label: 'Comm' },
@@ -2387,6 +2423,67 @@ async function saveEthernet() {
   else toastRef.value?.error(`Ethernet save failed: ${res.error?.message}`)
 }
 
+// ─── Trajectory Recording ──────────────────────
+
+const recRecording = ref(false)
+const recTrackName = ref('')
+const recTracks = ref<api.TrackItem[]>([])
+const recPlaying = ref(false)
+const recPlayingTrack = ref('')
+
+async function recLoadTracks() {
+  const res = await api.listTracks(deviceId)
+  if (res.success && res.data) recTracks.value = res.data
+}
+async function recStart() {
+  if (!recTrackName.value.trim()) return
+  const res = await api.startRecord(deviceId, recTrackName.value.trim())
+  if (res.success) recRecording.value = true
+  else toastRef.value?.error(`Record start failed: ${res.error?.message}`)
+}
+async function recStop() {
+  const res = await api.stopRecord(deviceId)
+  if (res.success) { recRecording.value = false; await recLoadTracks() }
+}
+const recRenaming = ref('')
+const recRenameValue = ref('')
+function recStartRename(name: string) { recRenaming.value = name; recRenameValue.value = name }
+async function recConfirmRename(oldName: string) {
+  if (!recRenameValue.value.trim() || recRenameValue.value === oldName) { recRenaming.value = ''; return }
+  const res = await api.renameTrack(deviceId, oldName, recRenameValue.value.trim())
+  if (res.success) { recRenaming.value = ''; await recLoadTracks() }
+  else toastRef.value?.error(`Rename failed: ${res.error?.message}`)
+}
+async function recDelete(name: string) {
+  await api.deleteTrack(deviceId, name)
+  await recLoadTracks()
+}
+async function recPlay(t: api.TrackItem) {
+  if (!isConnected.value) return
+  recPlaying.value = true; recPlayingTrack.value = t.name
+  try {
+    const res = await api.getTrackPoints(deviceId, t.name)
+    if (res.success && res.data) {
+      for (let i = 0; i < res.data.length; i++) {
+        if (!recPlaying.value) break
+        const p = res.data[i]
+        await api.sendCRDashboard(deviceId, `MovJ(${p.j1},${p.j2},${p.j3},${p.j4},${p.j5},${p.j6})`)
+        await new Promise(r => setTimeout(r, 200))
+      }
+    }
+  } catch { /* ignore */ }
+  finally { recPlaying.value = false; recPlayingTrack.value = '' }
+}
+function fmtTrackTime(iso: string): string {
+  try { const d = new Date(iso); return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}` }
+  catch { return iso }
+}
+
+// Watch settings tab for recording
+watch(settingsTab, (tab) => {
+  if (tab === 'recording') recLoadTracks()
+})
+
 // ─── Dobot+ ─────────────────────────────────────
 
 const dobotPlusList = ref<string[]>([])
@@ -2924,6 +3021,16 @@ onUnmounted(() => {
 .motion-params-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
 .dobotplus-iframe { width: 100%; height: 400px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: #fff; }
+
+/* Track Recording */
+.track-controls { display: flex; align-items: center; gap: 8px; }
+.recording-indicator { color: var(--status-danger); font-size: 0.8rem; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+.track-list { display: flex; flex-direction: column; gap: 3px; }
+.track-item { display: flex; align-items: center; gap: 12px; padding: 4px 8px; background: var(--void-surface); border-radius: var(--radius); font-size: 0.62rem; }
+.track-item-name { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-item-size { color: var(--text-muted); font-size: 0.55rem; min-width: 50px; }
+.track-item-time { color: var(--text-muted); font-size: 0.55rem; min-width: 80px; }
 
 .dobotplus-toolbar { position: relative; }
 .dobotplus-dropdown {
