@@ -5,20 +5,20 @@
       <div class="workspace-header-left">
         <router-link to="/" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          DASHBOARD
+          返回主控台
         </router-link>
         <div class="top-bar-device">
-          <h2>{{ device?.name || 'DEVICE' }}</h2>
+          <h2>{{ device?.name || '设备' }}</h2>
           <span class="top-bar-ip">{{ device?.ip }}</span>
         </div>
       </div>
       <div class="workspace-header-center">
         <div class="workspace-switch">
           <router-link :to="{ path: `/device/${deviceId}`, query: $route.query }" class="workspace-switch-btn workspace-switch-btn--active">
-            CONTROL
+            控制
           </router-link>
           <router-link :to="{ path: `/device/${deviceId}/programming`, query: $route.query }" class="workspace-switch-btn">
-            PROGRAMMING
+            编程
           </router-link>
           <router-link :to="{ path: `/device/${deviceId}/tcp`, query: $route.query }" class="workspace-switch-btn">
             TCP
@@ -28,7 +28,7 @@
       <div class="workspace-header-actions">
         <span :class="['connection-badge', isLocked ? 'connection-badge--locked' : isVirtualMode ? 'connection-badge--virtual' : isConnected ? (tcpDown ? 'connection-badge--warning' : 'connection-badge--online') : 'connection-badge--offline']">
           <span class="status-dot" :class="`status-dot--${isLocked ? 'locked' : isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
-          {{ isLocked ? '🔒 LOCKED' : isVirtualMode ? '🔮 vCONNECTED' : isConnected ? (tcpDown ? '⚠ TCP DOWN' : '🔗 ONLINE') : '⚫ OFFLINE' }}
+          {{ isLocked ? '🔒 已锁定' : isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
         </span>
         <!-- Enable Toggle Switch -->
         <label v-if="isConnected" class="toggle-switch" title="使能开关">
@@ -36,34 +36,34 @@
           <span class="toggle-track">
             <span class="toggle-thumb" />
           </span>
-          <span class="toggle-label">{{ enabling ? 'ENABLING...' : enabled ? 'ENABLED' : 'DISABLED' }}</span>
+          <span class="toggle-label">{{ enabling ? '使能中...' : enabled ? '已使能' : '未使能' }}</span>
         </label>
         <button v-if="!isConnected" class="btn btn-success btn-sm" @click="doConnect" :disabled="connecting">
-          {{ connecting ? 'CONNECTING...' : 'CONNECT' }}
+          {{ connecting ? '连接中...' : '连接' }}
         </button>
         <template v-if="isConnected">
-          <button v-if="!isLocked" class="btn btn-primary btn-sm" @click="doLock">LOCK</button>
-          <button v-if="isLocked" class="btn btn-danger btn-sm" @click="doRelease">RELEASE</button>
+          <button v-if="!isLocked" class="btn btn-primary btn-sm" @click="doLock">锁定</button>
+          <button v-if="isLocked" class="btn btn-danger btn-sm" @click="doRelease">释放</button>
         </template>
-        <button v-if="!isSubscribed" class="btn btn-secondary btn-sm" @click="doSubscribe">SUBSCRIBE</button>
-        <button v-else class="btn btn-secondary btn-sm" @click="doUnsubscribe">UNSUBSCRIBE</button>
+        <button v-if="!isSubscribed" class="btn btn-secondary btn-sm" @click="doSubscribe">订阅</button>
+        <button v-else class="btn btn-secondary btn-sm" @click="doUnsubscribe">取消订阅</button>
         <button :class="['btn btn-sm', showLogs ? 'btn-primary' : 'btn-secondary']" @click="toggleLogs">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1"/><line x1="5" y1="9" x2="10" y2="9" stroke="currentColor" stroke-width="1"/><line x1="5" y1="12" x2="8" y2="12" stroke="currentColor" stroke-width="1"/></svg>
-          LOGS{{ deviceLogs.length > 0 ? ` (${deviceLogs.length})` : '' }}
+          日志{{ deviceLogs.length > 0 ? ` (${deviceLogs.length})` : '' }}
         </button>
-        <button :class="['btn btn-sm', showSettings ? 'btn-primary' : 'btn-secondary']" @click="showSettings = !showSettings" :disabled="!isConnected" title="Device Settings">
+        <button :class="['btn btn-sm', showSettings ? 'btn-primary' : 'btn-secondary']" @click="showSettings = !showSettings" :disabled="!isConnected" title="设备设置">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-          SETTINGS
+          设置
         </button>
         <div class="dobotplus-toolbar" v-if="dobotPlusList.length > 0">
-          <button class="btn btn-sm btn-secondary" @click="showDobotPlusBar = !showDobotPlusBar" title="Dobot+ Plugins">
+          <button class="btn btn-sm btn-secondary" @click="showDobotPlusBar = !showDobotPlusBar" title="Dobot+ 插件">
             🧩 DOBOT+
           </button>
           <Transition name="fade">
             <div v-if="showDobotPlusBar" class="dobotplus-dropdown">
               <button v-for="name in dobotPlusList" :key="name" class="dobotplus-dropdown-item"
                 @click="openDobotPlusIframe(name); showDobotPlusBar = false"
-                :title="`Port: ${dobotPlusPorts[name] || '?'}`">
+                :title="`端口: ${dobotPlusPorts[name] || '?'}`">
                 <span>🧩</span> {{ name }}
               </button>
             </div>
@@ -78,7 +78,7 @@
     <!-- Pose HUD -->
     <div class="status-grid mt-2">
       <div class="card pose-card">
-        <div class="hud-label">CARTESIAN POSE</div>
+        <div class="hud-label">位姿</div>
         <div class="pose-readout">
           <div v-for="axis in ['x','y','z','r']" :key="axis" class="pose-axis-row">
             <span class="pose-axis-label">{{ axis.toUpperCase() }}</span>
@@ -89,7 +89,7 @@
       </div>
 
       <div class="card joint-card">
-        <div class="hud-label">JOINT ANGLES</div>
+        <div class="hud-label">关节角度</div>
         <div class="joint-readout">
           <div v-for="j in 6" :key="j" class="joint-row">
             <span class="joint-label">J{{ j }}</span>
@@ -108,22 +108,22 @@
       <div class="card model-panel">
         <div class="model-panel-header">
           <div>
-            <div class="hud-label" style="margin-bottom:0">3D MODEL</div>
-            <div class="model-subtitle">{{ robotModelType }} · realtime joint pose</div>
+            <div class="hud-label" style="margin-bottom:0">3D 模型</div>
+            <div class="model-subtitle">{{ robotModelType }} · 实时关节姿态</div>
           </div>
-          <button class="btn btn-secondary btn-sm" @click="reset3DView">RESET VIEW</button>
+          <button class="btn btn-secondary btn-sm" @click="reset3DView">重置视角</button>
         </div>
         <div class="model-frame-shell">
           <iframe
             ref="modelIframeRef"
             class="model-frame"
             src="/3d/index.html"
-            title="Dobot 3D Model"
+            title="Dobot 3D 模型"
             @load="on3DModelLoad"
           />
           <div v-if="!modelReady" class="model-loading">
             <span class="loading-ring"></span>
-            <strong>LOADING MODEL</strong>
+            <strong>加载模型中</strong>
           </div>
         </div>
       </div>
@@ -132,10 +132,10 @@
     <!-- Alarms & Warnings -->
     <div v-if="hasAlarms || hasWarnings || isCollision" class="card alarm-panel mt-2">
       <div class="alarm-panel-header">
-        <span class="hud-label" style="margin-bottom:0;color:var(--status-danger)">⚠ ALARMS & WARNINGS</span>
+        <span class="hud-label" style="margin-bottom:0;color:var(--status-danger)">⚠ 告警与警告</span>
         <div class="alarm-actions">
-          <button v-if="hasAlarms" class="btn btn-danger btn-sm" @click="doClearAlarm">CLEAR ALARM</button>
-          <button v-if="isCollision" class="btn btn-warning btn-sm" @click="doResetCollision">RESET COLLISION</button>
+          <button v-if="hasAlarms" class="btn btn-danger btn-sm" @click="doClearAlarm">清除告警</button>
+          <button v-if="isCollision" class="btn btn-warning btn-sm" @click="doResetCollision">复位碰撞</button>
         </div>
       </div>
       <div class="alarm-list">
@@ -143,8 +143,8 @@
         <div v-for="a in currentAlarms" :key="'a'+a.id" class="alarm-item alarm-item--error">
           <div class="alarm-item-main">
             <span class="alarm-icon">✗</span>
-            <span class="alarm-code">ALARM #{{ a.id }}</span>
-            <span v-if="a.level !== ''" class="alarm-level">LEVEL {{ a.level }}</span>
+            <span class="alarm-code">告警 #{{ a.id }}</span>
+            <span v-if="a.level !== ''" class="alarm-level">等级 {{ a.level }}</span>
             <span v-if="a.date || a.time" class="alarm-time">{{ a.date }} {{ a.time }}</span>
           </div>
           <div class="alarm-detail">
@@ -156,8 +156,8 @@
         <div v-for="w in currentWarnings" :key="'w'+w.id" class="alarm-item alarm-item--warn">
           <div class="alarm-item-main">
             <span class="alarm-icon">!</span>
-            <span class="alarm-code">WARNING #{{ w.id }}</span>
-            <span v-if="w.level !== ''" class="alarm-level">LEVEL {{ w.level }}</span>
+            <span class="alarm-code">警告 #{{ w.id }}</span>
+            <span v-if="w.level !== ''" class="alarm-level">等级 {{ w.level }}</span>
             <span v-if="w.date || w.time" class="alarm-time">{{ w.date }} {{ w.time }}</span>
           </div>
           <div class="alarm-detail">
@@ -168,18 +168,18 @@
         <!-- Collision -->
         <div v-if="isCollision" class="alarm-item alarm-item--error">
           <span class="alarm-icon">⚠</span>
-          <span class="alarm-code">COLLISION</span>
+          <span class="alarm-code">碰撞</span>
           <span class="alarm-msg">碰撞检测触发 — 请确认安全后复位</span>
         </div>
         <!-- Protective Stop -->
         <div v-if="protectiveStop" class="alarm-item alarm-item--warn">
           <span class="alarm-icon">⏸</span>
-          <span class="alarm-code">PROTECTIVE STOP</span>
+          <span class="alarm-code">保护停止</span>
         </div>
         <!-- Emergency Stop -->
         <div v-if="emergencyStop" class="alarm-item alarm-item--error">
           <span class="alarm-icon">🛑</span>
-          <span class="alarm-code">E-STOP ACTIVE</span>
+          <span class="alarm-code">急停已触发</span>
         </div>
       </div>
     </div>
@@ -188,7 +188,7 @@
       <!-- Jog Control Panel -->
       <div class="card jog-panel">
         <div class="jog-panel-header">
-          <div class="hud-label">MANUAL JOG CONTROL</div>
+          <div class="hud-label">手动点动控制</div>
           <div class="jog-settings">
             <!-- Mode Switches -->
             <div class="mode-switch-group">
@@ -200,8 +200,8 @@
               </label>
             </div>
             <div class="mode-switch-group">
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isAutoMode }]" @click="setMode('auto')" :disabled="!autoModeEnabled || modeSwitching">AUTO</button>
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isAutoMode }]" @click="setMode('manual')" :disabled="!autoModeEnabled || modeSwitching">MANUAL</button>
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isAutoMode }]" @click="setMode('auto')" :disabled="!autoModeEnabled || modeSwitching">自动</button>
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isAutoMode }]" @click="setMode('manual')" :disabled="!autoModeEnabled || modeSwitching">手动</button>
             </div>
             <div class="mode-switch-group">
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
@@ -209,16 +209,16 @@
             </div>
             <!-- Amplitude limit -->
             <div class="amp-limit">
-              <span class="amp-limit-label">MAX Δ</span>
+              <span class="amp-limit-label">最大增量</span>
               <input v-model.number="ampLimit" type="number" min="1" max="500" step="1" class="amp-input" />
               <span class="amp-limit-unit">{{ jogAxis.startsWith('j') || jogAxis === 'r' ? '°' : 'mm' }}</span>
             </div>
             <div class="jog-mode-selector">
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">CONT</button>
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'step' }]" @click="changeJogMode('step')">STEP</button>
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">连续</button>
+              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'step' }]" @click="changeJogMode('step')">步进</button>
             </div>
             <div v-if="jogMode === 'step'" class="inch-setting">
-              <span class="amp-limit-label">INCH</span>
+              <span class="amp-limit-label">步长</span>
               <input v-model.number="jogInch" type="number" min="0.01" step="0.01" class="amp-input" @change="applyTeachInch" />
               <span class="amp-limit-unit">°</span>
               <button v-for="value in inchPresets" :key="value" :class="['inch-preset', { 'inch-preset--active': jogInch === value }]" @click="setTeachInchPreset(value)">
@@ -253,52 +253,39 @@
       <!-- Move To Position (joint angles) -->
       <div class="card move-panel">
         <div class="move-panel-header">
-          <span class="hud-label" style="margin-bottom:0">MOVE TO JOINTS</span>
+          <span class="hud-label" style="margin-bottom:0">移动至关节</span>
           <div class="move-panel-actions">
-            <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentJoints" title="Read current joint values">
+            <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentJoints" title="读取当前关节值">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1010.9-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              READ
+              读取
             </button>
-            <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="Posture name"
+            <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="姿态名称"
               @keyup.enter="saveCurrentAsPosture" style="width:100px" />
-            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture">💾 SAVE</button>
+            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture">💾 保存</button>
           </div>
         </div>
         <div class="move-grid">
           <div v-for="j in 6" :key="j" class="move-field">
             <label class="move-label">J{{ j }}</label>
-            <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input" @blur="onJointBlur" />
+            <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input" />
             <span class="move-unit">°</span>
           </div>
-        </div>
-
-        <div class="move-grid mt-1">
-          <div v-for="axis in ['X','Y','Z','RX','RY','RZ']" :key="axis" class="move-field">
-            <label class="move-label">{{ axis }}</label>
-            <input v-model.number="moveCartTarget[axis.toLowerCase()]" type="number" step="0.1" class="move-input" @blur="onCartBlur" />
-            <span class="move-unit">{{ ['X','Y','Z'].includes(axis) ? 'mm' : '°' }}</span>
-          </div>
-        </div>
-
-        <div class="move-actions-row mt-2">
-          <button class="btn btn-primary" :disabled="!isConnected || moving" @click="doMove">
-            {{ moving ? 'MOVING...' : 'MOVE' }}
+          <button class="btn btn-primary move-btn" :disabled="!isConnected || moving" @click="doMove">
+            {{ moving ? '移动中...' : '移动' }}
           </button>
-          <button v-if="moving" class="btn btn-danger" @click="() => stopMoveJoints()">
-            STOP
+          <button v-if="moving" class="btn btn-danger move-stop-btn" @click="() => stopMoveJoints()">
+            停止
           </button>
-          <span v-if="ikResult === 'ok'" class="ik-label ik-label--ok">✓ Reachable</span>
-          <span v-if="ikResult === 'fail'" class="ik-label ik-label--fail">✗ {{ ikMsg }}</span>
         </div>
 
         <!-- Postures (system + controller) -->
         <div class="preset-section mt-2">
           <div class="preset-section-header" @click="postureListExpanded = !postureListExpanded" style="cursor:pointer">
             <div style="display:flex;align-items:center;gap:8px">
-              <span class="hud-label" style="margin-bottom:0">POSTURES</span>
+              <span class="hud-label" style="margin-bottom:0">姿态</span>
               <span class="preset-count-badge">{{ allPostures.length }}</span>
             </div>
-            <button class="btn-icon" :title="postureListExpanded ? 'Collapse' : 'Expand'"
+            <button class="btn-icon" :title="postureListExpanded ? '折叠' : '展开'"
               style="font-size:14px;color:var(--text-muted)">
               {{ postureListExpanded ? '▲' : '▼' }}
             </button>
@@ -330,7 +317,7 @@
                 @dragleave="onPostureDragLeave"
                 @drop="onPostureDrop(idx)"
                 @dragend="onPostureDragEnd">
-                <div v-if="!p.system" class="preset-item-grip" title="Drag to reorder">⋮⋮</div>
+                <div v-if="!p.system" class="preset-item-grip" title="拖动以排序">⋮⋮</div>
                 <div v-else class="preset-item-grip" style="visibility:hidden">⋮⋮</div>
                 <div class="preset-item-info" @click="fillPosture(p)">
                   <template v-if="renamingPostureKey === p._key">
@@ -344,10 +331,10 @@
                   <span class="preset-item-joints">{{ p.joint.map(v => v.toFixed(1)).join(', ') }}°</span>
                 </div>
                 <div class="preset-item-actions">
-                  <span v-if="p.system" class="preset-item-badge">SYS</span>
+                  <span v-if="p.system" class="preset-item-badge">系统</span>
                   <template v-else>
-                    <button class="btn-icon" title="Rename" @click.stop="startRenamePosture(p)">✎</button>
-                    <button class="btn-icon btn-icon--danger" title="Delete" @click="deletePostureItem(p._controllerIdx!)">✕</button>
+                    <button class="btn-icon" title="重命名" @click.stop="startRenamePosture(p)">✎</button>
+                    <button class="btn-icon btn-icon--danger" title="删除" @click="deletePostureItem(p._controllerIdx!)">✕</button>
                   </template>
                 </div>
               </div>
@@ -359,12 +346,12 @@
 
     <!-- Action Buttons -->
     <div class="action-bar mt-2">
-      <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ POWER ON</button>
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ POWER OFF</button>
+      <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ 上电</button>
+      <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ 下电</button>
       <span class="action-sep" />
       <!-- Speed Slider -->
       <div class="speed-control" :class="{ 'speed-control--disabled': !isConnected }">
-        <span class="speed-label">SPEED</span>
+        <span class="speed-label">速度</span>
         <input type="range" min="1" max="100" step="1" v-model.number="speedRatio"
           class="speed-slider" :disabled="!isConnected"
           @pointerdown="isDraggingSpeed = true"
@@ -373,9 +360,9 @@
         <span class="speed-value">{{ speedRatio }}%</span>
       </div>
       <span class="action-sep" />
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 HOME</button>
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop">⏹ STOP</button>
-      <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ E-STOP</button>
+      <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
+      <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop">⏹ 停止</button>
+      <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
     </div>
 
     <!-- Device Log Panel -->
@@ -383,16 +370,16 @@
       <div v-if="showLogs" class="log-panel card">
         <div class="log-panel-header">
           <div class="log-panel-title">
-            <span class="hud-label" style="margin-bottom:0">📋 DEVICE LOGS</span>
+            <span class="hud-label" style="margin-bottom:0">📋 设备日志</span>
             <div class="log-tabs">
-              <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'alarms' }]" @click="switchLogTab('alarms')">ALARMS</button>
-              <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'history' }]" @click="switchLogTab('history')">HISTORY</button>
+              <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'alarms' }]" @click="switchLogTab('alarms')">告警</button>
+              <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'history' }]" @click="switchLogTab('history')">历史</button>
             </div>
           </div>
           <div class="log-panel-actions">
             <span class="log-count">{{ logCountText }}</span>
             <button class="btn btn-primary btn-sm" @click="refreshVisibleLogs" :disabled="logRefreshDisabled">
-              {{ visibleLogLoading ? 'LOADING...' : 'REFRESH' }}
+              {{ visibleLogLoading ? '加载中...' : '刷新' }}
             </button>
             <button class="btn btn-secondary btn-sm" @click="showLogs = false">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -402,13 +389,13 @@
 
         <template v-if="logPanelTab === 'alarms'">
           <div class="log-list" ref="logListRef">
-            <div v-if="deviceLogs.length === 0" class="log-empty">No device logs loaded — click REFRESH</div>
+            <div v-if="deviceLogs.length === 0" class="log-empty">暂无设备日志 — 点击刷新</div>
             <div v-for="(entry, i) in deviceLogs" :key="i" :class="['log-entry', `log-entry--${entry.type}`]">
               <span class="log-time">{{ entry.date }} {{ entry.time }}</span>
               <span class="log-icon">{{ entry.type === 'alarm' ? '✗' : entry.type === 'warning' ? '!' : 'ℹ' }}</span>
               <div class="log-body">
-                <span class="log-title">{{ entry.type === 'alarm' ? 'ALARM' : 'WARNING' }} #{{ entry.id }}</span>
-                <span v-if="entry.level !== ''" class="log-level">LEVEL {{ entry.level }}</span>
+                <span class="log-title">{{ entry.type === 'alarm' ? '告警' : '警告' }} #{{ entry.id }}</span>
+                <span v-if="entry.level !== ''" class="log-level">等级 {{ entry.level }}</span>
                 <span class="log-desc">{{ entry.description }}</span>
                 <span v-if="entry.solution" class="log-solution">{{ entry.solution }}</span>
               </div>
@@ -422,7 +409,7 @@
               <input v-model="historyLogStart" type="date" class="history-input" />
               <input v-model="historyLogEnd" type="date" class="history-input" />
             </div>
-            <input v-model.trim="historyLogKeyword" type="search" class="history-input history-input--wide" placeholder="Keyword" @keyup.enter="fetchControlLogs" />
+            <input v-model.trim="historyLogKeyword" type="search" class="history-input history-input--wide" placeholder="关键词" @keyup.enter="fetchControlLogs" />
             <div class="history-type-row">
               <label v-for="level in historyTypeOptions" :key="level" class="history-type-chip">
                 <input v-model="historyLogTypes" type="checkbox" :value="level" />
@@ -430,11 +417,11 @@
               </label>
             </div>
             <div v-if="historyLogFiles.length > 0" class="history-file-summary">
-              {{ historyLogFiles.length }} files · {{ historyLogFiles.map(f => f.name).join(', ') }}
+              {{ historyLogFiles.length }} 个文件 · {{ historyLogFiles.map(f => f.name).join(', ') }}
             </div>
           </div>
           <div class="log-list history-log-list">
-            <div v-if="historyLogEntries.length === 0" class="log-empty">No history logs loaded — click REFRESH</div>
+            <div v-if="historyLogEntries.length === 0" class="log-empty">暂无历史日志 — 点击刷新</div>
             <div v-for="entry in historyLogEntries" :key="`${entry.file}:${entry.line}`" :class="['log-entry', 'history-log-entry', `log-entry--${entry.level}`]">
               <span class="log-time">{{ entry.file }}:{{ entry.line }}</span>
               <span class="log-icon">{{ historyLogIcon(entry.level) }}</span>
@@ -453,7 +440,7 @@
       <div v-if="showSettings" class="modal-overlay" @click.self="showSettings = false">
         <div class="modal settings-modal card">
           <div class="modal-header">
-            <h3>⚙ DEVICE SETTINGS</h3>
+            <h3>⚙ 设备设置</h3>
             <button class="modal-close" @click="showSettings = false">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
             </button>
@@ -479,28 +466,28 @@
                 <!-- Current Load -->
                 <div class="settings-section">
                   <div class="settings-section-header">
-                    <h4>CURRENT LOAD</h4>
-                    <button class="btn btn-primary btn-sm" @click="saveCurrentLoad" :disabled="!loadParamsEditable">APPLY</button>
+                    <h4>当前负载</h4>
+                    <button class="btn btn-primary btn-sm" @click="saveCurrentLoad" :disabled="!loadParamsEditable">应用</button>
                   </div>
                   <div class="load-fields">
                     <div class="load-field">
-                      <label>Name</label>
-                      <input :value="loadParamsForm.name" class="input-sm" readonly placeholder="(select a preset)" />
+                      <label>名称</label>
+                      <input :value="loadParamsForm.name" class="input-sm" readonly placeholder="（选择一个预设）" />
                     </div>
                     <div class="load-field">
-                      <label>Weight (kg)</label>
+                      <label>重量 (kg)</label>
                       <input v-model.number="loadParamsForm.loadValue" type="number" class="input-sm" step="0.001" min="0" />
                     </div>
                     <div class="load-field">
-                      <label>Center X (mm)</label>
+                      <label>质心 X (mm)</label>
                       <input v-model.number="loadParamsForm.centerX" type="number" class="input-sm" step="0.1" />
                     </div>
                     <div class="load-field">
-                      <label>Center Y (mm)</label>
+                      <label>质心 Y (mm)</label>
                       <input v-model.number="loadParamsForm.centerY" type="number" class="input-sm" step="0.1" />
                     </div>
                     <div class="load-field">
-                      <label>Center Z (mm)</label>
+                      <label>质心 Z (mm)</label>
                       <input v-model.number="loadParamsForm.centerZ" type="number" class="input-sm" step="0.1" />
                     </div>
                   </div>
@@ -509,21 +496,21 @@
                 <!-- Load Presets -->
                 <div class="settings-section">
                   <div class="settings-section-header">
-                    <h4>LOAD PRESETS</h4>
-                    <button class="btn btn-secondary btn-sm" @click="startAddPreset" :disabled="editingPresetIdx !== null">+ NEW</button>
+                    <h4>负载预设</h4>
+                    <button class="btn btn-secondary btn-sm" @click="startAddPreset" :disabled="editingPresetIdx !== null">+ 新增</button>
                   </div>
                   <div v-if="loadConfigs.length === 0 && !addingPreset" class="text-muted" style="padding:12px 0;font-size:0.75rem;">
-                    No presets on device — add one or set custom load above
+                    设备上暂无预设 — 请添加一个或在上方设置自定义负载
                   </div>
                   <table v-if="loadConfigs.length > 0 || addingPreset" class="load-config-table">
                     <thead>
                       <tr>
-                        <th>Name</th>
-                        <th>Weight</th>
+                        <th>名称</th>
+                        <th>重量</th>
                         <th>X</th>
                         <th>Y</th>
                         <th>Z</th>
-                        <th style="width:140px">Actions</th>
+                        <th style="width:140px">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -546,14 +533,14 @@
                           <td>{{ item.centerY }}</td>
                           <td>{{ item.centerZ }}</td>
                           <td class="table-actions">
-                            <button class="btn btn-secondary btn-xs" @click="applyPreset(item)">USE</button>
+                            <button class="btn btn-secondary btn-xs" @click="applyPreset(item)">使用</button>
                             <button class="btn btn-secondary btn-xs" @click="startEditPreset(i)">✎</button>
                             <button class="btn btn-secondary btn-xs" @click="deletePreset(i)">✕</button>
                           </td>
                         </template>
                       </tr>
                       <tr v-if="addingPreset" class="row--editing">
-                        <td><input v-model.trim="addPresetForm.name" class="input-xs" style="width:80px" placeholder="name" /></td>
+                        <td><input v-model.trim="addPresetForm.name" class="input-xs" style="width:80px" placeholder="名称" /></td>
                         <td><input v-model.number="addPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="0.001" placeholder="0" /></td>
                         <td><input v-model.number="addPresetForm.centerX" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
                         <td><input v-model.number="addPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
@@ -571,20 +558,20 @@
               <!-- System Settings -->
               <div v-else-if="settingsTab === 'system'">
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>ROBOT ALIAS</h4></div>
+                  <div class="settings-section-header"><h4>机器人别名</h4></div>
                   <div style="display:flex;gap:8px">
-                    <input v-model.trim="aliasInput" class="input-sm settings-alias-input" placeholder="Robot alias" @keyup.enter="saveAlias" />
-                    <button class="btn btn-primary btn-sm" @click="saveAlias">SAVE</button>
+                    <input v-model.trim="aliasInput" class="input-sm settings-alias-input" placeholder="机器人别名" @keyup.enter="saveAlias" />
+                    <button class="btn btn-primary btn-sm" @click="saveAlias">保存</button>
                   </div>
                 </div>
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>SYSTEM TIME</h4></div>
+                  <div class="settings-section-header"><h4>系统时间</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>Date</label><input v-model.trim="sysTimeForm.date" class="input-sm" placeholder="YYYY-MM-DD" /></div>
-                    <div class="load-field"><label>Time</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" /></div>
-                    <div class="load-field"><label>Timezone</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="UTC+8" /></div>
+                    <div class="load-field"><label>日期</label><input v-model.trim="sysTimeForm.date" class="input-sm" placeholder="YYYY-MM-DD" /></div>
+                    <div class="load-field"><label>时间</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" /></div>
+                    <div class="load-field"><label>时区</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="UTC+8" /></div>
                   </div>
-                  <button class="btn btn-primary btn-sm mt-2" @click="saveSystemTime">APPLY</button>
+                  <button class="btn btn-primary btn-sm mt-2" @click="saveSystemTime">应用</button>
                 </div>
               </div>
 
@@ -592,8 +579,8 @@
               <div v-else-if="settingsTab === 'users'">
                 <div class="settings-section">
                   <div class="settings-section-header">
-                    <h4>USERS</h4>
-                    <button class="btn btn-secondary btn-sm" @click="startAddUser">+ NEW</button>
+                    <h4>用户</h4>
+                    <button class="btn btn-secondary btn-sm" @click="startAddUser">+ 新增</button>
                   </div>
                   <table class="load-config-table" v-if="ctrlUserList.list.length > 0">
                     <thead><tr><th>名称</th><th>密码</th><th>需密码</th><th style="width:80px">操作</th></tr></thead>
@@ -639,10 +626,10 @@
                       </tr>
                     </tbody>
                   </table>
-                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">No users on controller</div>
+                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">控制器上暂无用户</div>
                 </div>
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>PERMISSIONS</h4></div>
+                  <div class="settings-section-header"><h4>权限</h4></div>
                   <div v-if="permConfigs.length > 0" style="overflow-x:auto">
                     <table class="load-config-table" style="min-width:700px">
                       <thead><tr><th>等级</th><th v-for="k in permKeys" :key="k" style="font-size:0.42rem;writing-mode:vertical-lr;text-orientation:mixed;height:90px;padding:2px">{{ permKeyLabels[k] || k }}</th></tr></thead>
@@ -654,16 +641,16 @@
                       </tbody>
                     </table>
                   </div>
-                  <button class="btn btn-primary btn-sm mt-2" @click="savePermissions">SAVE PERMISSIONS</button>
+                  <button class="btn btn-primary btn-sm mt-2" @click="savePermissions">保存权限</button>
                 </div>
               </div>
 
               <!-- Coordinate Management -->
               <div v-else-if="settingsTab === 'coordinates'">
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>TOOL COORDINATE</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('tool')">+ ADD</button></div>
+                  <div class="settings-section-header"><h4>工具坐标系</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('tool')">+ 添加</button></div>
                   <table class="load-config-table" v-if="toolCoords.length > 0">
-                    <thead><tr><th>Name</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>En</th><th style="width:80px">Act</th></tr></thead>
+                    <thead><tr><th>名称</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>启用</th><th style="width:80px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(c, i) in toolCoords" :key="i" :class="{ 'row--editing': editingCoordIdx === i && editingCoordType === 'tool' }">
                         <template v-if="editingCoordIdx === i && editingCoordType === 'tool'">
@@ -672,7 +659,7 @@
                           <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editCoordForm.r" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>En</span></label></td>
+                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>启用</span></label></td>
                           <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
                         </template>
                         <template v-else>
@@ -682,10 +669,10 @@
                       </tr>
                     </tbody>
                   </table>
-                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">No tool coordinates</div>
-                  <button class="btn btn-primary btn-sm mt-2" :disabled="toolCoords.length === 0" @click="saveCoords('tool')">SAVE</button>
+                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">暂无工具坐标系</div>
+                  <button class="btn btn-primary btn-sm mt-2" :disabled="toolCoords.length === 0" @click="saveCoords('tool')">保存</button>
                   <div v-if="addingCoord && addCoordType === 'tool'" class="coord-add-row">
-                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="name" />
+                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="名称" />
                     <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:60px" placeholder="x" step="0.1" />
                     <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:60px" placeholder="y" step="0.1" />
                     <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:60px" placeholder="z" step="0.1" />
@@ -695,9 +682,9 @@
                   </div>
                 </div>
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>USER COORDINATE</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('user')">+ ADD</button></div>
+                  <div class="settings-section-header"><h4>用户坐标系</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('user')">+ 添加</button></div>
                   <table class="load-config-table" v-if="userCoords.length > 0">
-                    <thead><tr><th>Name</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>En</th><th style="width:80px">Act</th></tr></thead>
+                    <thead><tr><th>名称</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>启用</th><th style="width:80px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(c, i) in userCoords" :key="i" :class="{ 'row--editing': editingCoordIdx === i && editingCoordType === 'user' }">
                         <template v-if="editingCoordIdx === i && editingCoordType === 'user'">
@@ -706,7 +693,7 @@
                           <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editCoordForm.r" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>En</span></label></td>
+                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>启用</span></label></td>
                           <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
                         </template>
                         <template v-else>
@@ -716,10 +703,10 @@
                       </tr>
                     </tbody>
                   </table>
-                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">No user coordinates</div>
-                  <button class="btn btn-primary btn-sm mt-2" :disabled="userCoords.length === 0" @click="saveCoords('user')">SAVE</button>
+                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">暂无用户坐标系</div>
+                  <button class="btn btn-primary btn-sm mt-2" :disabled="userCoords.length === 0" @click="saveCoords('user')">保存</button>
                   <div v-if="addingCoord && addCoordType === 'user'" class="coord-add-row">
-                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="name" />
+                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="名称" />
                     <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:60px" placeholder="x" step="0.1" />
                     <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:60px" placeholder="y" step="0.1" />
                     <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:60px" placeholder="z" step="0.1" />
@@ -730,54 +717,19 @@
                 </div>
               </div>
 
-              <!-- Trajectory Recording -->
-              <div v-else-if="settingsTab === 'recording'">
-                <div class="settings-section">
-                  <div class="settings-section-header"><h4>TRAJECTORY RECORD (CR TCP)</h4></div>
-                  <div class="track-controls" style="display:flex;align-items:center;gap:10px">
-                    <input v-model.trim="recTrackName" class="input-sm settings-alias-input" style="max-width:220px" placeholder="Track name" :disabled="recRecording" />
-                    <button v-if="!recRecording" class="btn btn-danger btn-sm" @click="recStart" :disabled="!isConnected || !recTrackName">
-                      ⏺ RECORD
-                    </button>
-                    <button v-else class="btn btn-secondary btn-sm" @click="recStop">
-                      ⏹ STOP ({{ recTrackName }})
-                    </button>
-                    <span v-if="recRecording" class="recording-indicator">●</span>
-                  </div>
-                  <div v-if="recTracks.length > 0" class="track-list mt-2">
-                    <div v-for="t in recTracks" :key="t.name" class="track-item">
-                      <template v-if="recRenaming === t.name">
-                        <input v-model.trim="recRenameValue" class="preset-rename-input" style="flex:1"
-                          @keyup.enter="recConfirmRename(t.name)" @keyup.escape="recRenaming = ''"
-                          @blur="recConfirmRename(t.name)" />
-                      </template>
-                      <span v-else class="track-item-name">{{ t.name }}</span>
-                      <span class="track-item-size">{{ (t.size / 1024).toFixed(1) }} KB</span>
-                      <span class="track-item-time">{{ fmtTrackTime(t.mtime) }}</span>
-                      <button class="btn btn-secondary btn-xs" @click="recPlay(t)" :disabled="!isConnected || recPlaying">
-                        {{ recPlaying && recPlayingTrack === t.name ? '▶▶...' : '▶' }}
-                      </button>
-                      <button class="btn btn-secondary btn-xs" @click="recStartRename(t.name)">✎</button>
-                      <button class="btn btn-secondary btn-xs" @click="recDelete(t.name)">✕</button>
-                    </div>
-                  </div>
-                  <div v-else class="text-muted" style="padding:4px 0;font-size:0.7rem">No recordings on controller</div>
-                </div>
-              </div>
-
               <!-- Custom Postures -->
               <div v-else-if="settingsTab === 'postures'">
                 <div class="settings-section">
                   <div class="settings-section-header">
-                    <h4>CUSTOM POSTURES (on controller)</h4>
+                    <h4>自定义姿态（控制器）</h4>
                     <div style="display:flex;gap:6px">
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent" :disabled="!isConnected">📋 READ CURRENT</button>
-                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture">+ ADD</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent" :disabled="!isConnected">📋 读取当前</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture">+ 添加</button>
                     </div>
                   </div>
-                  <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">No postures saved on controller</div>
+                  <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">控制器上暂无保存的姿态</div>
                   <table v-if="customPostures.length > 0" class="load-config-table">
-                    <thead><tr><th style="width:40px">#</th><th>J1</th><th>J2</th><th>J3</th><th>J4</th><th>J5</th><th>J6</th><th style="width:120px">Act</th></tr></thead>
+                    <thead><tr><th style="width:40px">#</th><th>J1</th><th>J2</th><th>J3</th><th>J4</th><th>J5</th><th>J6</th><th style="width:120px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(p, i) in customPostures" :key="i" :class="{ 'row--editing': editingPostureIdx === i }">
                         <template v-if="editingPostureIdx === i">
@@ -792,7 +744,7 @@
                           <td class="preset-name">{{ i }}</td>
                           <td v-for="v in p.joint" :key="v">{{ Number(v).toFixed(1) }}</td>
                           <td class="table-actions">
-                            <button class="btn btn-secondary btn-xs" @click="fillPosture(p)">GO</button>
+                            <button class="btn btn-secondary btn-xs" @click="fillPosture(p)">前往</button>
                             <button class="btn btn-secondary btn-xs" @click="startEditPosture(i)" :disabled="moving">✎</button>
                             <button class="btn btn-secondary btn-xs" @click="deletePosture(i)" :disabled="moving">✕</button>
                           </td>
@@ -813,10 +765,10 @@
                       <input v-model.number="sec.data[k]" type="number" class="input-sm" step="0.01" />
                     </div>
                   </div>
-                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">Not loaded</div>
+                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">未加载</div>
                   <div style="display:flex;gap:6px;margin-top:8px">
-                    <button class="btn btn-primary btn-sm" @click="loadMotionParams(sec.key)">LOAD</button>
-                    <button class="btn btn-secondary btn-sm" :disabled="!sec.data" @click="saveMotionParams(sec.key)">SAVE</button>
+                    <button class="btn btn-primary btn-sm" @click="loadMotionParams(sec.key)">读取</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!sec.data" @click="saveMotionParams(sec.key)">保存</button>
                   </div>
                 </div>
               </div>
@@ -828,41 +780,41 @@
                   <div class="settings-section-header"><h4>WiFi (AP)</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
                     <div class="load-field"><label>SSID</label><input v-model.trim="wifiForm.ssid" class="input-sm" /></div>
-                    <div class="load-field"><label>Password</label><input v-model.trim="wifiForm.passWd" class="input-sm" /></div>
-                    <div class="load-field" style="justify-content:flex-end"><label class="checkbox-xs" style="margin-top:18px"><input v-model="wifiForm.enable" type="checkbox" /><span>Enable</span></label></div>
+                    <div class="load-field"><label>密码</label><input v-model.trim="wifiForm.passWd" class="input-sm" /></div>
+                    <div class="load-field" style="justify-content:flex-end"><label class="checkbox-xs" style="margin-top:18px"><input v-model="wifiForm.enable" type="checkbox" /><span>启用</span></label></div>
                   </div>
                   <div style="display:flex;gap:6px;margin-top:8px">
-                    <button class="btn btn-primary btn-sm" @click="loadWiFi">LOAD</button>
-                    <button class="btn btn-secondary btn-sm" @click="saveWiFi">SAVE</button>
+                    <button class="btn btn-primary btn-sm" @click="loadWiFi">读取</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveWiFi">保存</button>
                   </div>
                 </div>
                 <!-- Ethernet -->
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>ETHERNET (IP)</h4></div>
+                  <div class="settings-section-header"><h4>以太网 (IP)</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>DHCP</label><label class="checkbox-xs" style="margin-top:2px"><input v-model="ethForm.dhcp" type="checkbox" /><span>Enable</span></label></div>
+                    <div class="load-field"><label>DHCP</label><label class="checkbox-xs" style="margin-top:2px"><input v-model="ethForm.dhcp" type="checkbox" /><span>启用</span></label></div>
                     <div class="load-field"><label>IP</label><input v-model.trim="ethForm.ip" class="input-sm" :disabled="ethForm.dhcp" /></div>
-                    <div class="load-field"><label>Mask</label><input v-model.trim="ethForm.mask" class="input-sm" :disabled="ethForm.dhcp" /></div>
-                    <div class="load-field"><label>Gateway</label><input v-model.trim="ethForm.gateway" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                    <div class="load-field"><label>子网掩码</label><input v-model.trim="ethForm.mask" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                    <div class="load-field"><label>网关</label><input v-model.trim="ethForm.gateway" class="input-sm" :disabled="ethForm.dhcp" /></div>
                     <div class="load-field"><label>DNS</label><input v-model.trim="ethForm.dns" class="input-sm" :disabled="ethForm.dhcp" /></div>
                   </div>
                   <div style="display:flex;gap:6px;margin-top:8px">
-                    <button class="btn btn-primary btn-sm" @click="loadEthernet">LOAD</button>
-                    <button class="btn btn-secondary btn-sm" @click="saveEthernet">SAVE</button>
+                    <button class="btn btn-primary btn-sm" @click="loadEthernet">读取</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveEthernet">保存</button>
                   </div>
                 </div>
                 <!-- Bus -->
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>BUS</h4></div>
+                  <div class="settings-section-header"><h4>总线</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>Baud Rate</label><input v-model.number="busForm.baudRate" type="number" class="input-sm" /></div>
-                    <div class="load-field"><label>Slave ID</label><input v-model.number="busForm.slaveId" type="number" class="input-sm" /></div>
-                    <div class="load-field"><label>Type</label><input v-model.trim="busForm.type" class="input-sm" /></div>
-                    <div class="load-field"><label>Data Bits</label><input v-model.number="busForm.dataBits" type="number" class="input-sm" /></div>
-                    <div class="load-field"><label>Stop Bits</label><input v-model.number="busForm.stopBits" type="number" class="input-sm" step="0.5" /></div>
-                    <div class="load-field"><label>Parity</label><input v-model.trim="busForm.parity" class="input-sm" /></div>
+                    <div class="load-field"><label>波特率</label><input v-model.number="busForm.baudRate" type="number" class="input-sm" /></div>
+                    <div class="load-field"><label>从站 ID</label><input v-model.number="busForm.slaveId" type="number" class="input-sm" /></div>
+                    <div class="load-field"><label>类型</label><input v-model.trim="busForm.type" class="input-sm" /></div>
+                    <div class="load-field"><label>数据位</label><input v-model.number="busForm.dataBits" type="number" class="input-sm" /></div>
+                    <div class="load-field"><label>停止位</label><input v-model.number="busForm.stopBits" type="number" class="input-sm" step="0.5" /></div>
+                    <div class="load-field"><label>校验位</label><input v-model.trim="busForm.parity" class="input-sm" /></div>
                   </div>
-                  <button class="btn btn-primary btn-sm mt-2" @click="saveBus">SAVE</button>
+                  <button class="btn btn-primary btn-sm mt-2" @click="saveBus">保存</button>
                 </div>
               </div>
 
@@ -870,31 +822,31 @@
               <div v-else-if="settingsTab === 'dobotplus'">
                 <div class="settings-section">
                   <div class="settings-section-header">
-                    <h4>INSTALLED PLUGINS</h4>
-                    <button class="btn btn-secondary btn-sm" @click="loadDobotPlusList" :disabled="loadingDobotPlus">🔄 REFRESH</button>
+                    <h4>已安装插件</h4>
+                    <button class="btn btn-secondary btn-sm" @click="loadDobotPlusList" :disabled="loadingDobotPlus">🔄 刷新</button>
                   </div>
-                  <div v-if="loadingDobotPlus" class="text-muted" style="padding:8px 0;font-size:0.7rem">Loading...</div>
+                  <div v-if="loadingDobotPlus" class="text-muted" style="padding:8px 0;font-size:0.7rem">加载中...</div>
                   <table v-else-if="dobotPlusList.length > 0" class="load-config-table">
-                    <thead><tr><th>Name</th><th>Port</th><th style="width:80px">Actions</th></tr></thead>
+                    <thead><tr><th>名称</th><th>端口</th><th style="width:80px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(name, i) in dobotPlusList" :key="i">
                         <td class="preset-name">{{ name }}</td>
                         <td>{{ dobotPlusPorts[name] || '—' }}</td>
                         <td class="table-actions">
-                          <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="openDobotPlusIframe(name)">OPEN</button>
+                          <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="openDobotPlusIframe(name)">打开</button>
                           <button class="btn btn-secondary btn-xs" @click="uninstallDobotPlusPlugin(name)">✕</button>
                         </td>
                       </tr>
                     </tbody>
                   </table>
-                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">No plugins installed</div>
+                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">暂无已安装插件</div>
                 </div>
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>INSTALL PLUGIN</h4></div>
+                  <div class="settings-section-header"><h4>安装插件</h4></div>
                   <div style="display:flex;gap:6px">
-                    <input v-model.trim="dobotPlusInstallName" class="input-sm settings-alias-input" placeholder="Plugin package name" @keyup.enter="installDobotPlusPlugin" />
+                    <input v-model.trim="dobotPlusInstallName" class="input-sm settings-alias-input" placeholder="插件包名" @keyup.enter="installDobotPlusPlugin" />
                     <button class="btn btn-primary btn-sm" :disabled="!dobotPlusInstallName || installingDobotPlus" @click="installDobotPlusPlugin">
-                      {{ installingDobotPlus ? 'INSTALLING...' : 'INSTALL' }}
+                      {{ installingDobotPlus ? '安装中...' : '安装' }}
                     </button>
                   </div>
                 </div>
@@ -902,7 +854,7 @@
                 <div v-if="dobotPlusIframeName" class="settings-section">
                   <div class="settings-section-header">
                     <h4>{{ dobotPlusIframeName }}</h4>
-                    <button class="btn btn-secondary btn-sm" @click="dobotPlusIframeName = ''">✕ CLOSE</button>
+                    <button class="btn btn-secondary btn-sm" @click="dobotPlusIframeName = ''">✕ 关闭</button>
                   </div>
                   <iframe
                     :src="`http://${device?.ip}:${dobotPlusPorts[dobotPlusIframeName]}`"
@@ -973,56 +925,6 @@ const isOnlineMode = ref(true)
 const moving = ref(false)
 const moveTargetInit = ref(false)
 const moveTarget = reactive<Record<string, number>>({ j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 })
-const moveCartTarget = reactive<Record<string, number>>({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
-const ikResult = ref('') // '' | 'ok' | 'fail'
-const ikMsg = ref('')
-
-let fkTimer: ReturnType<typeof setTimeout> | null = null
-let ikTimer: ReturnType<typeof setTimeout> | null = null
-
-async function onJointBlur() {
-  if (!isConnected.value || isMock) return
-  if (fkTimer) clearTimeout(fkTimer)
-  fkTimer = setTimeout(async () => {
-    const j = getMoveTargetJoints()
-    try {
-      const res = await api.forwardKinematics(deviceId, { joint: j })
-      if (res.success && res.data && res.data.errID === 0 && res.data.coordinate.length >= 6) {
-        const c = res.data.coordinate
-        moveCartTarget.x = Math.round(c[0] * 10) / 10
-        moveCartTarget.y = Math.round(c[1] * 10) / 10
-        moveCartTarget.z = Math.round(c[2] * 10) / 10
-        moveCartTarget.rx = Math.round(c[3] * 10) / 10
-        moveCartTarget.ry = Math.round(c[4] * 10) / 10
-        moveCartTarget.rz = Math.round(c[5] * 10) / 10
-      }
-    } catch { /* ignore */ }
-  }, 300)
-}
-
-async function onCartBlur() {
-  if (!isConnected.value || isMock) return
-  if (ikTimer) clearTimeout(ikTimer)
-  ikTimer = setTimeout(async () => {
-    const joints = state.value.joints as Record<string, number> | undefined
-    const c = moveCartTarget
-    try {
-      const res = await api.inverseKinematics(deviceId, {
-        coordinate: [c.x, c.y, c.z, c.rx, c.ry, c.rz],
-        jointNear: joints ? [joints.j1||0, joints.j2||0, joints.j3||0, joints.j4||0, joints.j5||0, joints.j6||0] : undefined,
-      })
-      if (res.success && res.data) {
-        if (res.data.errID === 0 && res.data.joint.length >= 6) {
-          const j = res.data.joint
-          for (let i = 1; i <= 6; i++) moveTarget['j'+i] = Math.round(j[i-1] * 10) / 10
-          ikResult.value = 'ok'; ikMsg.value = ''
-        } else {
-          ikResult.value = 'fail'; ikMsg.value = res.data.errMsg || `IK error #${res.data.errID}`
-        }
-      }
-    } catch { /* ignore */ }
-  }, 300)
-}
 const modelReady = ref(false)
 let last3DPose = ''
 
@@ -1098,14 +1000,13 @@ const showSettings = ref(false)
 const showDobotPlusBar = ref(false)
 const settingsTab = ref('system')
 const settingsTabs = [
-  { key: 'system', icon: '⚙', label: 'System' },
-  { key: 'users', icon: '👤', label: 'Users' },
-  { key: 'coordinates', icon: '📐', label: 'Coordinates' },
-  { key: 'load', icon: '⚖', label: 'Load Params' },
-  { key: 'recording', icon: '⏺', label: 'Recording' },
-  { key: 'postures', icon: '📌', label: 'Postures' },
-  { key: 'motion', icon: '🏃', label: 'Motion' },
-  { key: 'comm', icon: '🌐', label: 'Comm' },
+  { key: 'system', icon: '⚙', label: '系统' },
+  { key: 'users', icon: '👤', label: '用户' },
+  { key: 'coordinates', icon: '📐', label: '坐标系' },
+  { key: 'load', icon: '⚖', label: '负载参数' },
+  { key: 'postures', icon: '📌', label: '姿态' },
+  { key: 'motion', icon: '🏃', label: '运动' },
+  { key: 'comm', icon: '🌐', label: '通讯' },
   { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
 ]
 const loadingLogs = ref(false)
@@ -1129,9 +1030,9 @@ const logRefreshDisabled = computed(() => {
   return loadingHistoryLogs.value || historyLogTypes.value.length === 0
 })
 const logCountText = computed(() => {
-  if (logPanelTab.value === 'alarms') return `${deviceLogs.value.length} entries`
+  if (logPanelTab.value === 'alarms') return `${deviceLogs.value.length} 条`
   const suffix = historyLogLimited.value ? ` / ${historyLogTotal.value}` : ''
-  return `${historyLogEntries.value.length}${suffix} entries`
+  return `${historyLogEntries.value.length}${suffix} 条`
 })
 const robotModelType = computed(() => normalizeRobotModelType(device.value?.type || device.value?.name || 'MG6'))
 
@@ -1304,7 +1205,7 @@ async function fetchDeviceLogs() {
 
 async function fetchControlLogs() {
   if (historyLogTypes.value.length === 0) {
-    toastRef.value?.error('Select at least one log type')
+    toastRef.value?.error('请至少选择一种日志类型')
     return
   }
   loadingHistoryLogs.value = true
@@ -1322,18 +1223,18 @@ async function fetchControlLogs() {
       historyLogTotal.value = res.data.total
       historyLogLimited.value = res.data.limited
       if (res.data.limited) {
-        toastRef.value?.info(`Showing first ${res.data.entries.length} of ${res.data.total} matching log lines`)
+        toastRef.value?.info(`共匹配 ${res.data.total} 条日志，当前显示前 ${res.data.entries.length} 条`)
       } else if (res.data.entries.length === 0) {
         const message = res.data.files.length > 0
-          ? `No matching lines in ${res.data.files.length} log file(s)`
-          : 'No log files in selected date range'
+          ? `在 ${res.data.files.length} 个日志文件中未找到匹配行`
+          : '所选日期范围内无日志文件'
         toastRef.value?.info(message)
       }
     } else {
-      toastRef.value?.error(`History logs failed: ${res.error?.message}`)
+      toastRef.value?.error(`历史日志查询失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`History logs error: ${(err as Error).message}`)
+    toastRef.value?.error(`历史日志出错：${(err as Error).message}`)
   } finally {
     loadingHistoryLogs.value = false
   }
@@ -1523,28 +1424,13 @@ async function load() {
   } catch { /* ignore */ }
   loadPostures()
   loadDobotPlusList()
-  // Load switch states periodically
-  api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
-  api.getRemoteSwitch(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = !r.data.value })
-}
-
-async function refreshSwitchStates() {
-  if (!isConnected.value || isMock) return
-  try {
-    const [autoSw, remoteSw] = await Promise.all([
-      api.getAutoManualSwitch(deviceId),
-      api.getRemoteSwitch(deviceId),
-    ])
-    if (autoSw.success && autoSw.data) autoModeEnabled.value = autoSw.data.value
-    if (remoteSw.success && remoteSw.data) isOnlineMode.value = !remoteSw.data.value
-  } catch { /* best-effort */ }
 }
 
 async function doConnect() {
   if (isMock) {
     deviceStore.setConnected(deviceId, true, 'exclusive')
     enabled.value = true
-    toastRef.value?.success('[Mock] Device connected')
+    toastRef.value?.success('[Mock] 设备已连接')
     return
   }
   connecting.value = true
@@ -1552,14 +1438,14 @@ async function doConnect() {
     const res = await api.connectDevice(deviceId)
     if (res.success) {
       deviceStore.setConnected(deviceId, true)
-      toastRef.value?.success('Device connected — power on then enable')
+      toastRef.value?.success('设备已连接 — 请上电后使能')
     } else {
       const msg = res.error?.message ?? ''
       const code = res.error?.code
       if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
-        toastRef.value?.error(msg, { action: { label: 'FORCE RELEASE', handler: () => doForceRelease() } })
+        toastRef.value?.error(msg, { action: { label: '强制释放', handler: () => doForceRelease() } })
       } else {
-        toastRef.value?.error(`Connect failed: ${msg}`)
+        toastRef.value?.error(`连接失败：${msg}`)
       }
     }
   } finally { connecting.value = false }
@@ -1568,10 +1454,59 @@ async function doConnect() {
 async function doForceRelease() {
   const res = await api.forceReleaseDevice(deviceId)
   if (res.success) {
-    toastRef.value?.success('Ghost occupation released — try connecting again')
+    toastRef.value?.success('已释放占用 — 请重新尝试连接')
   } else {
-    toastRef.value?.error(`Force release failed: ${res.error?.message ?? 'unknown'}`)
+    toastRef.value?.error(`强制释放失败：${res.error?.message ?? '未知错误'}`)
   }
+}
+
+// ─── Auto/Manual Mode ─────────────────────────────
+
+async function toggleAutoModeEnabled() {
+  if (modeSwitching.value || !isConnected.value) return
+  modeSwitching.value = true
+  const newVal = !autoModeEnabled.value
+  try {
+    const res = await api.setAutoManualSwitch(deviceId, newVal)
+    if (res.success) {
+      autoModeEnabled.value = newVal
+      if (!newVal && isAutoMode.value) setMode('manual')
+    } else {
+      toastRef.value?.error(`切换失败：${res.error?.message ?? '未知错误'}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`切换失败：${(err as Error).message}`)
+  } finally { modeSwitching.value = false }
+}
+async function setMode(mode: 'auto' | 'manual') {
+  if (!isConnected.value || modeSwitching.value) return
+  if (!autoModeEnabled.value && mode === 'auto') { toastRef.value?.error('请先开启手动自动开关'); return }
+  modeSwitching.value = true
+  try {
+    const res = await api.setAutoManualMode(deviceId, mode)
+    if (res.success) {
+      isAutoMode.value = mode === 'auto'
+    } else {
+      toastRef.value?.error(`模式切换失败：${res.error?.message ?? '未知错误'}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`模式切换失败：${(err as Error).message}`)
+  } finally { modeSwitching.value = false }
+}
+async function setDeviceMode(mode: 'online' | 'tcp') {
+  if (isAutoMode.value) { toastRef.value?.error('自动模式下无法切换设备模式'); return }
+  if (modeSwitching.value) return
+  modeSwitching.value = true
+  try {
+    const res = await api.setRemoteSwitch(deviceId, mode === 'tcp')
+    if (res.success) {
+      isOnlineMode.value = mode === 'online'
+    } else {
+      toastRef.value?.error(`设备模式切换失败：${res.error?.message ?? '未知错误'}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`设备模式切换失败：${(err as Error).message}`)
+  } finally { modeSwitching.value = false }
 }
 
 // ─── Speed ────────────────────────────────────────
@@ -1588,7 +1523,7 @@ function onSpeedPointerUp() {
   if (speedDebounceTimer) clearTimeout(speedDebounceTimer)
   api.setDeviceSpeed(deviceId, speedRatio.value).then(res => {
     if (!res.success) {
-      toastRef.value?.error(`Set speed failed: ${res.error?.message}`)
+      toastRef.value?.error(`设置速度失败：${res.error?.message}`)
     }
   }).catch(() => {})
 }
@@ -1610,12 +1545,12 @@ async function doPowerOn() {
   try {
     const res = await api.powerOnDevice(deviceId)
     if (res.success) {
-      toastRef.value?.success('Servo powered on')
+      toastRef.value?.success('伺服已上电')
     } else {
-      toastRef.value?.error(`Power on failed: ${res.error?.message}`)
+      toastRef.value?.error(`上电失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Power on error: ${(err as Error).message}`)
+    toastRef.value?.error(`上电出错：${(err as Error).message}`)
   }
 }
 
@@ -1625,61 +1560,13 @@ async function doPowerOff() {
     if (res.success) {
       enabled.value = false
       deviceStore.setEnabled(deviceId, false)
-      toastRef.value?.info('Servo powered off')
+      toastRef.value?.info('伺服已下电')
     } else {
-      toastRef.value?.error(`Power off failed: ${res.error?.message}`)
+      toastRef.value?.error(`下电失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Power off error: ${(err as Error).message}`)
+    toastRef.value?.error(`下电出错：${(err as Error).message}`)
   }
-}
-
-async function toggleAutoModeEnabled() {
-  if (modeSwitching.value || !isConnected.value) return
-  modeSwitching.value = true
-  const newVal = !autoModeEnabled.value
-  try {
-    const res = await api.setAutoManualSwitch(deviceId, newVal)
-    if (res.success) {
-      autoModeEnabled.value = newVal
-      if (!newVal && isAutoMode.value) setMode('manual')
-    } else {
-      toastRef.value?.error(`开关切换失败: ${res.error?.message}`)
-    }
-  } catch (err) {
-    toastRef.value?.error(`开关错误: ${(err as Error).message}`)
-  } finally { modeSwitching.value = false }
-}
-async function setMode(mode: 'auto' | 'manual') {
-  if (!isConnected.value || modeSwitching.value) return
-  if (!autoModeEnabled.value && mode === 'auto') { toastRef.value?.error('请先开启手动自动开关'); return }
-  modeSwitching.value = true
-  try {
-    const res = await api.setAutoManualMode(deviceId, mode)
-    if (res.success) {
-      isAutoMode.value = mode === 'auto'
-    } else {
-      toastRef.value?.error(`切换失败: ${res.error?.message}`)
-    }
-  } catch (err) {
-    toastRef.value?.error(`切换错误: ${(err as Error).message}`)
-  } finally { modeSwitching.value = false }
-}
-async function setDeviceMode(mode: 'online' | 'tcp') {
-  if (isAutoMode.value) { toastRef.value?.error('自动模式下无法切换设备模式'); return }
-  if (modeSwitching.value) return
-  modeSwitching.value = true
-  try {
-    const res = await api.setRemoteSwitch(deviceId, mode === 'tcp')
-    if (res.success) {
-      isOnlineMode.value = mode === 'online'
-      toastRef.value?.success(`已切换至 ${mode === 'tcp' ? 'TCP远程' : '在线'} 模式`)
-    } else {
-      toastRef.value?.error(`切换失败: ${res.error?.message}`)
-    }
-  } catch (err) {
-    toastRef.value?.error(`切换错误: ${(err as Error).message}`)
-  } finally { modeSwitching.value = false }
 }
 
 async function toggleEnable() {
@@ -1693,7 +1580,7 @@ async function toggleEnable() {
 function checkEnabled(): boolean {
   if (isMock) return true
   if (!enabled.value) {
-    toastRef.value?.error('请先使能设备 (Enable robot first)')
+    toastRef.value?.error('请先使能设备')
     return false
   }
   return true
@@ -1702,17 +1589,17 @@ function checkEnabled(): boolean {
 async function doEnable() {
   enabling.value = true
   try {
-    toastRef.value?.info('Enabling... (may need teach pendant switch)')
+    toastRef.value?.info('使能中...（可能需要切换示教器开关）')
     const res = await api.enableDevice(deviceId)
     if (res.success) {
       enabled.value = true
       deviceStore.setEnabled(deviceId, true)
-      toastRef.value?.success('Robot enabled — ready for motion')
+      toastRef.value?.success('机器人已使能 — 可开始运动')
     } else {
-      toastRef.value?.error(`Enable failed: ${res.error?.message}`)
+      toastRef.value?.error(`使能失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Enable error: ${(err as Error).message}`)
+    toastRef.value?.error(`使能出错：${(err as Error).message}`)
   } finally {
     enabling.value = false
   }
@@ -1724,12 +1611,12 @@ async function doDisable() {
     if (res.success) {
       enabled.value = false
       deviceStore.setEnabled(deviceId, false)
-      toastRef.value?.info('Robot disabled')
+      toastRef.value?.info('机器人已去使能')
     } else {
-      toastRef.value?.error(`Disable failed: ${res.error?.message}`)
+      toastRef.value?.error(`去使能失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Disable error: ${(err as Error).message}`)
+    toastRef.value?.error(`去使能出错：${(err as Error).message}`)
   }
 }
 
@@ -1740,12 +1627,12 @@ async function doClearAlarm() {
     const res = await api.clearAlarm(deviceId)
     if (res.success) {
       currentAlarms.value = []
-      toastRef.value?.success('Alarms cleared')
+      toastRef.value?.success('告警已清除')
     } else {
-      toastRef.value?.error(`Clear alarm failed: ${res.error?.message}`)
+      toastRef.value?.error(`清除告警失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Clear alarm error: ${(err as Error).message}`)
+    toastRef.value?.error(`清除告警出错：${(err as Error).message}`)
   }
 }
 
@@ -1754,38 +1641,38 @@ async function doResetCollision() {
     const res = await api.resetCollision(deviceId)
     if (res.success) {
       isCollision.value = false
-      toastRef.value?.success('Collision reset')
+      toastRef.value?.success('碰撞已复位')
     } else {
-      toastRef.value?.error(`Reset collision failed: ${res.error?.message}`)
+      toastRef.value?.error(`复位碰撞失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Reset collision error: ${(err as Error).message}`)
+    toastRef.value?.error(`复位碰撞出错：${(err as Error).message}`)
   }
 }
 
 async function doLock() {
   const res = await api.lockDevice(deviceId, 300000)
-  if (res.success) { isLocked.value = true; toastRef.value?.success('Device locked') }
-  else { toastRef.value?.error(`Lock failed: ${res.error?.message}`) }
+  if (res.success) { isLocked.value = true; toastRef.value?.success('设备已锁定') }
+  else { toastRef.value?.error(`锁定失败：${res.error?.message}`) }
 }
 
 async function doRelease() {
   await api.releaseDevice(deviceId)
   isLocked.value = false
-  toastRef.value?.info('Lock released')
+  toastRef.value?.info('锁定已释放')
 }
 
 async function doSubscribe() {
   await api.subscribeDevice(deviceId)
   isSubscribed.value = true
   wsClient.subscribe(deviceId)
-  toastRef.value?.info('Subscribed to device state')
+  toastRef.value?.info('已订阅设备状态')
 }
 
 function doUnsubscribe() {
   isSubscribed.value = false
   wsClient.unsubscribe(deviceId)
-  toastRef.value?.info('Unsubscribed')
+  toastRef.value?.info('已取消订阅')
 }
 
 // ─── Jog Control ────────────────────────────────
@@ -1808,7 +1695,7 @@ async function applyJogMode(): Promise<boolean> {
     appliedJogMode.value = 'jog'
     return true
   }
-  toastRef.value?.error(`Jog mode failed: ${res.error?.message}`)
+  toastRef.value?.error(`设置点动模式失败：${res.error?.message}`)
   return false
 }
 
@@ -1816,13 +1703,13 @@ async function applyTeachInch(): Promise<boolean> {
   if (isMock) { appliedJogMode.value = 'step'; appliedTeachInch.value = jogInch.value; return true }
   const distance = Number(jogInch.value)
   if (!Number.isFinite(distance) || distance <= 0) {
-    toastRef.value?.error('Invalid inch distance')
+    toastRef.value?.error('步长无效')
     return false
   }
   if (appliedJogMode.value !== 'step') {
     const modeRes = await api.setJogMode(deviceId, 'step')
     if (!modeRes.success) {
-      toastRef.value?.error(`Step mode failed: ${modeRes.error?.message}`)
+      toastRef.value?.error(`设置步进模式失败：${modeRes.error?.message}`)
       return false
     }
     appliedJogMode.value = 'step'
@@ -1833,7 +1720,7 @@ async function applyTeachInch(): Promise<boolean> {
     appliedTeachInch.value = distance
     return true
   } else {
-    toastRef.value?.error(`Teach inch failed: ${res.error?.message}`)
+    toastRef.value?.error(`设置步长失败：${res.error?.message}`)
     return false
   }
 }
@@ -1844,7 +1731,7 @@ async function setTeachInchPreset(value: number) {
 }
 
 async function startJog(dir: string) {
-  if (!isConnected.value) { toastRef.value?.error('Device not connected'); return }
+  if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
   if (!checkEnabled()) return
 
   // 先停掉旧的 jog（防止重复启动）
@@ -1948,7 +1835,7 @@ function checkAmplitude() {
   const delta = Math.abs(current - start)
   ampTravel.value = delta
   if (delta >= ampLimit.value) {
-    toastRef.value?.error(`Amplitude limit reached: ${delta.toFixed(1)} >= ${ampLimit.value}`)
+    toastRef.value?.error(`已达幅度上限：${delta.toFixed(1)} >= ${ampLimit.value}`)
     stopJog()
   }
 }
@@ -1972,11 +1859,11 @@ function readCurrentJoints() {
   for (let j = 1; j <= 6; j++) {
     moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
   }
-  toastRef.value?.info('Current joint values loaded')
+  toastRef.value?.info('当前关节值已读取')
 }
 
 async function doMove() {
-  if (!isConnected.value) { toastRef.value?.error('Device not connected'); return }
+  if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
   if (!checkEnabled()) return
   if (moving.value) return
   moving.value = true
@@ -1991,22 +1878,22 @@ async function runMoveJointsTick() {
     const res = await api.moveJointsCommand(deviceId, joints, true)
     if (res.success) {
       if (res.data?.isAlarms) {
-        toastRef.value?.error('Move stopped by alarm')
+        toastRef.value?.error('因告警停止运动')
         await stopMoveJoints()
         return
       }
       if (res.data?.value) {
         await stopMoveJoints(false)
-        toastRef.value?.success(`Reached J[${joints.map(v => v.toFixed(1)).join(', ')}]`)
+        toastRef.value?.success(`已到达 J[${joints.map(v => v.toFixed(1)).join(', ')}]`)
         return
       }
       moveTimer.value = setTimeout(runMoveJointsTick, 200)
     } else {
-      toastRef.value?.error(`Move failed: ${res.error?.message}`)
+      toastRef.value?.error(`移动失败：${res.error?.message}`)
       await stopMoveJoints(false)
     }
   } catch (err) {
-    toastRef.value?.error(`Move error: ${(err as Error).message}`)
+    toastRef.value?.error(`移动出错：${(err as Error).message}`)
     await stopMoveJoints(false)
   }
 }
@@ -2026,7 +1913,7 @@ async function stopMoveJoints(showToast = true) {
     })
   }
   if (showToast && wasMoving) {
-    toastRef.value?.info('Move stopped')
+    toastRef.value?.info('运动已停止')
   }
 }
 
@@ -2034,30 +1921,30 @@ async function doHome() {
   if (!checkEnabled()) return
   try {
     const res = await api.homeDevice(deviceId)
-    if (res.success) { toastRef.value?.success('Homing started') }
-    else toastRef.value?.error(`Home failed: ${res.error?.message}`)
+    if (res.success) { toastRef.value?.success('开始回零') }
+    else toastRef.value?.error(`回零失败：${res.error?.message}`)
   } catch (err) {
-    toastRef.value?.error(`Home error: ${(err as Error).message}`)
+    toastRef.value?.error(`回零出错：${(err as Error).message}`)
   }
 }
 
 async function doStop() {
   try {
     const res = await api.stopDevice(deviceId)
-    if (res.success) { toastRef.value?.info('Motion stopped') }
-    else toastRef.value?.error(`Stop failed: ${res.error?.message}`)
+    if (res.success) { toastRef.value?.info('运动已停止') }
+    else toastRef.value?.error(`停止失败：${res.error?.message}`)
   } catch (err) {
-    toastRef.value?.error(`Stop error: ${(err as Error).message}`)
+    toastRef.value?.error(`停止出错：${(err as Error).message}`)
   }
 }
 
 async function doEstop() {
   try {
     const res = await api.estopDevice(deviceId)
-    if (res.success) { toastRef.value?.error('⚠ E-STOP ACTIVATED') }
-    else toastRef.value?.error(`E-Stop failed: ${res.error?.message}`)
+    if (res.success) { toastRef.value?.error('⚠ 急停已触发') }
+    else toastRef.value?.error(`急停失败：${res.error?.message}`)
   } catch (err) {
-    toastRef.value?.error(`E-Stop error: ${(err as Error).message}`)
+    toastRef.value?.error(`急停出错：${(err as Error).message}`)
   }
 }
 
@@ -2115,12 +2002,12 @@ async function saveCurrentLoad() {
   try {
     const res = await api.setLoadParams(deviceId, { ...loadParamsForm })
     if (res.success) {
-      toastRef.value?.success('Load params applied')
+      toastRef.value?.success('负载参数已应用')
     } else {
-      toastRef.value?.error(`Apply failed: ${res.error?.message}`)
+      toastRef.value?.error(`应用失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Apply error: ${(err as Error).message}`)
+    toastRef.value?.error(`应用出错：${(err as Error).message}`)
   }
 }
 
@@ -2134,10 +2021,10 @@ async function saveLoadConfig() {
   try {
     const res = await api.setLoadConfig(deviceId, [...loadConfigs.value])
     if (!res.success) {
-      toastRef.value?.error(`Save presets failed: ${res.error?.message}`)
+      toastRef.value?.error(`保存预设失败：${res.error?.message}`)
     }
   } catch (err) {
-    toastRef.value?.error(`Save presets error: ${(err as Error).message}`)
+    toastRef.value?.error(`保存预设出错：${(err as Error).message}`)
   }
 }
 
@@ -2152,17 +2039,17 @@ function cancelAddPreset() {
 
 async function confirmAddPreset() {
   if (!addPresetForm.name.trim()) {
-    toastRef.value?.error('Preset name required')
+    toastRef.value?.error('请填写预设名称')
     return
   }
   if (loadConfigs.value.some(c => c.name === addPresetForm.name.trim())) {
-    toastRef.value?.error('Preset name already exists')
+    toastRef.value?.error('预设名称已存在')
     return
   }
   loadConfigs.value.push({ ...addPresetForm, name: addPresetForm.name.trim() })
   addingPreset.value = false
   await saveLoadConfig()
-  toastRef.value?.success('Preset added')
+  toastRef.value?.success('预设已添加')
 }
 
 function startEditPreset(idx: number) {
@@ -2176,17 +2063,17 @@ function cancelEditPreset() {
 
 async function saveEditPreset(idx: number) {
   if (!editPresetForm.name.trim()) {
-    toastRef.value?.error('Preset name required')
+    toastRef.value?.error('请填写预设名称')
     return
   }
   if (loadConfigs.value.some((c, i) => i !== idx && c.name === editPresetForm.name.trim())) {
-    toastRef.value?.error('Preset name already exists')
+    toastRef.value?.error('预设名称已存在')
     return
   }
   loadConfigs.value[idx] = { ...editPresetForm, name: editPresetForm.name.trim() }
   editingPresetIdx.value = null
   await saveLoadConfig()
-  toastRef.value?.success('Preset updated')
+  toastRef.value?.success('预设已更新')
 }
 
 async function deletePreset(idx: number) {
@@ -2194,7 +2081,7 @@ async function deletePreset(idx: number) {
   loadConfigs.value.splice(idx, 1)
   if (editingPresetIdx.value === idx) editingPresetIdx.value = null
   await saveLoadConfig()
-  toastRef.value?.success(`Preset "${name}" deleted`)
+  toastRef.value?.success(`预设 "${name}" 已删除`)
 }
 
 // Watch: reload load data when settings panel opens
@@ -2206,10 +2093,10 @@ watch(showSettings, (val) => {
 
 const aliasInput = ref('')
 async function saveAlias() {
-  if (!aliasInput.value.trim()) { toastRef.value?.error('Alias required'); return }
+  if (!aliasInput.value.trim()) { toastRef.value?.error('请填写别名'); return }
   const res = await api.setDeviceAlias(deviceId, aliasInput.value.trim())
-  if (res.success) toastRef.value?.success('Alias saved')
-  else toastRef.value?.error(`Alias failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('别名已保存')
+  else toastRef.value?.error(`保存别名失败：${res.error?.message}`)
 }
 
 const sysTimeForm = reactive({ date: '', time: '', timeZone: '' })
@@ -2219,8 +2106,8 @@ async function loadSystemTime() {
 }
 async function saveSystemTime() {
   const res = await api.setSystemTime(deviceId, { ...sysTimeForm })
-  if (res.success) toastRef.value?.success('System time saved')
-  else toastRef.value?.error(`Time failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('系统时间已保存')
+  else toastRef.value?.error(`保存时间失败：${res.error?.message}`)
 }
 
 // ─── User Management ───────────────────────────
@@ -2287,8 +2174,8 @@ async function deleteUser(i: number) {
 }
 async function saveUserList() {
   const res = await api.setControllerUsers(deviceId, ctrlUserList.value)
-  if (res.success) toastRef.value?.success('User list saved')
-  else toastRef.value?.error(`Save users failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('用户列表已保存')
+  else toastRef.value?.error(`保存用户失败：${res.error?.message}`)
 }
 function togglePerm(level: number, key: string, checked: boolean) {
   const pc = permConfigs.value.find(p => p.level === level)
@@ -2296,8 +2183,8 @@ function togglePerm(level: number, key: string, checked: boolean) {
 }
 async function savePermissions() {
   const res = await api.setUserPermissions(deviceId, permConfigs.value)
-  if (res.success) toastRef.value?.success('Permissions saved')
-  else toastRef.value?.error(`Save permissions failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('权限已保存')
+  else toastRef.value?.error(`保存权限失败：${res.error?.message}`)
 }
 
 // ─── Coordinate Management ─────────────────────
@@ -2318,7 +2205,7 @@ async function loadCoords() {
 }
 function startAddCoord(type: string) { addingCoord.value = true; addCoordType.value = type; Object.assign(addCoordForm, { name: '', enable: true, x: 0, y: 0, z: 0, r: 0 }) }
 async function confirmAddCoord() {
-  if (!addCoordForm.name.trim()) { toastRef.value?.error('Name required'); return }
+  if (!addCoordForm.name.trim()) { toastRef.value?.error('请填写名称'); return }
   if (addCoordType.value === 'tool') toolCoords.value.push({ ...addCoordForm })
   else userCoords.value.push({ ...addCoordForm })
   addingCoord.value = false
@@ -2330,7 +2217,7 @@ function startEditCoord(type: string, idx: number) {
   Object.assign(editCoordForm, src)
 }
 async function saveEditCoord() {
-  if (!editCoordForm.name.trim()) { toastRef.value?.error('Name required'); return }
+  if (!editCoordForm.name.trim()) { toastRef.value?.error('请填写名称'); return }
   if (editingCoordType.value === 'tool') {
     toolCoords.value[editingCoordIdx.value] = { ...editCoordForm }
   } else {
@@ -2348,8 +2235,8 @@ async function saveCoords(type: string) {
   const data = { coordList: type === 'tool' ? toolCoords.value : userCoords.value }
   const fn = type === 'tool' ? api.setToolCoordinate : api.setUserCoordinate
   const res = await fn(deviceId, data)
-  if (res.success) toastRef.value?.success(`${type} coords saved`)
-  else toastRef.value?.error(`Save ${type} failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success(`${type === 'tool' ? '工具' : '用户'}坐标系已保存`)
+  else toastRef.value?.error(`保存${type === 'tool' ? '工具' : '用户'}坐标系失败：${res.error?.message}`)
 }
 
 // ─── Custom Postures ────────────────────────────
@@ -2424,7 +2311,7 @@ async function onPostureDrop(targetIdx: number) {
   const newIdx = tgtCtrl > srcCtrl ? tgtCtrl - 1 : tgtCtrl
   customPostures.value.splice(newIdx, 0, moved)
   await savePostures()
-  toastRef.value?.success('Postures reordered')
+  toastRef.value?.success('姿态已重新排序')
 }
 function onPostureDragEnd() { dragPostureIdx.value = -1; dragPostureOver.value = -1 }
 
@@ -2435,7 +2322,7 @@ function addPostureFromCurrent() {
   customPostures.value.push({ name, joint: [1,2,3,4,5,6].map(j => Math.round((joints['j'+j] ?? 0) * 10) / 10) })
   postureListExpanded.value = true
   savePostures()
-  toastRef.value?.info(`Posture "${name}" saved from current joints`)
+  toastRef.value?.info(`姿态 "${name}" 已从当前关节保存`)
 }
 function startEditPosture(i: number) { editingPostureIdx.value = i; Object.assign(editPostureForm, customPostures.value[i]) }
 async function saveEditPosture(i: number) {
@@ -2447,8 +2334,8 @@ async function deletePosture(i: number) { customPostures.value.splice(i, 1); awa
 function deletePostureItem(ctrlIdx: number) { deletePosture(ctrlIdx) }
 async function savePostures() {
   const res = await api.setCustomPostures(deviceId, customPostures.value)
-  if (res.success) toastRef.value?.success('Postures saved')
-  else toastRef.value?.error(`Save postures failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('姿态已保存')
+  else toastRef.value?.error(`保存姿态失败：${res.error?.message}`)
 }
 const newPostureName = ref('')
 function saveCurrentAsPosture() {
@@ -2459,10 +2346,10 @@ function saveCurrentAsPosture() {
     // Overwrite existing
     const idx = customPostures.value.findIndex(p => p.name === name)
     customPostures.value[idx] = { name, joint: [...joints] }
-    toastRef.value?.success(`Posture "${name}" updated`)
+    toastRef.value?.success(`姿态 "${name}" 已更新`)
   } else {
     customPostures.value.push({ name, joint: [...joints] })
-    toastRef.value?.success(`Posture "${name}" saved`)
+    toastRef.value?.success(`姿态 "${name}" 已保存`)
   }
   newPostureName.value = ''
   postureListExpanded.value = true
@@ -2489,7 +2376,7 @@ function confirmRenamePosture(p: PostureItem) {
     savePostures()
   }
   renamingPostureKey.value = ''
-  toastRef.value?.success(`Renamed to "${renamePostureValue.value.trim()}"`)
+  toastRef.value?.success(`已重命名为 "${renamePostureValue.value.trim()}"`)
 }
 
 function fillPosture(p: { joint: number[] }) {
@@ -2502,10 +2389,10 @@ const motionParamsData = reactive<Record<string, Record<string, number> | null>>
   playbackJoint: null, playbackCoordinate: null, teachJoint: null, teachCoordinate: null,
 })
 const motionSections = computed(() => [
-  { key: 'playbackJoint', label: 'PLAYBACK JOINT PARAMS', data: motionParamsData.playbackJoint },
-  { key: 'playbackCoordinate', label: 'PLAYBACK COORDINATE PARAMS', data: motionParamsData.playbackCoordinate },
-  { key: 'teachJoint', label: 'TEACH / JOG JOINT PARAMS', data: motionParamsData.teachJoint },
-  { key: 'teachCoordinate', label: 'TEACH / JOG COORDINATE PARAMS', data: motionParamsData.teachCoordinate },
+  { key: 'playbackJoint', label: '复现 - 关节参数', data: motionParamsData.playbackJoint },
+  { key: 'playbackCoordinate', label: '复现 - 坐标参数', data: motionParamsData.playbackCoordinate },
+  { key: 'teachJoint', label: '示教/点动 - 关节参数', data: motionParamsData.teachJoint },
+  { key: 'teachCoordinate', label: '示教/点动 - 坐标参数', data: motionParamsData.teachCoordinate },
 ])
 async function loadMotionParams(key: string) {
   const fnMap: Record<string, () => Promise<{ success: boolean; data?: Record<string, unknown>; error?: { code: number; message: string } }>> = {
@@ -2516,7 +2403,7 @@ async function loadMotionParams(key: string) {
   }
   const res = await fnMap[key]()
   if (res.success && res.data) motionParamsData[key] = res.data as Record<string, number>
-  else toastRef.value?.error(`Load ${key} failed: ${res.error?.message}`)
+  else toastRef.value?.error(`读取 ${key} 失败：${res.error?.message}`)
 }
 async function saveMotionParams(key: string) {
   const data = motionParamsData[key]
@@ -2528,8 +2415,8 @@ async function saveMotionParams(key: string) {
     teachCoordinate: (d) => api.setTeachCoordinateParams(deviceId, d),
   }
   const res = await fnMap[key](data)
-  if (res.success) toastRef.value?.success(`${key} saved`)
-  else toastRef.value?.error(`Save failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success(`${key} 已保存`)
+  else toastRef.value?.error(`保存失败：${res.error?.message}`)
 }
 
 // ─── Communication ─────────────────────────────
@@ -2537,8 +2424,8 @@ async function saveMotionParams(key: string) {
 const busForm = reactive({ type: '', baudRate: 115200, slaveId: 1, dataBits: 8, stopBits: 1, parity: 'none' })
 async function saveBus() {
   const res = await api.setBus(deviceId, { ...busForm })
-  if (res.success) toastRef.value?.success('Bus settings saved')
-  else toastRef.value?.error(`Bus save failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('总线设置已保存')
+  else toastRef.value?.error(`总线保存失败：${res.error?.message}`)
 }
 
 const wifiForm = reactive<Record<string, unknown>>({ ssid: '', passWd: '', enable: false })
@@ -2548,8 +2435,8 @@ async function loadWiFi() {
 }
 async function saveWiFi() {
   const res = await api.setWiFi(deviceId, { ...wifiForm })
-  if (res.success) toastRef.value?.success('WiFi settings saved')
-  else toastRef.value?.error(`WiFi save failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('WiFi 设置已保存')
+  else toastRef.value?.error(`WiFi 保存失败：${res.error?.message}`)
 }
 
 const ethForm = reactive({ dhcp: true, ip: '', mask: '', gateway: '', dns: '' })
@@ -2566,70 +2453,9 @@ async function loadEthernet() {
 }
 async function saveEthernet() {
   const res = await api.setEthernet(deviceId, { dhcp: ethForm.dhcp, ip: ethForm.ip, mask: ethForm.mask, gateway: ethForm.gateway, dns: ethForm.dns })
-  if (res.success) toastRef.value?.success('Ethernet settings saved')
-  else toastRef.value?.error(`Ethernet save failed: ${res.error?.message}`)
+  if (res.success) toastRef.value?.success('以太网设置已保存')
+  else toastRef.value?.error(`以太网保存失败：${res.error?.message}`)
 }
-
-// ─── Trajectory Recording ──────────────────────
-
-const recRecording = ref(false)
-const recTrackName = ref('')
-const recTracks = ref<api.TrackItem[]>([])
-const recPlaying = ref(false)
-const recPlayingTrack = ref('')
-
-async function recLoadTracks() {
-  const res = await api.listTracks(deviceId)
-  if (res.success && res.data) recTracks.value = res.data
-}
-async function recStart() {
-  if (!recTrackName.value.trim()) return
-  const res = await api.startRecord(deviceId, recTrackName.value.trim())
-  if (res.success) recRecording.value = true
-  else toastRef.value?.error(`Record start failed: ${res.error?.message}`)
-}
-async function recStop() {
-  const res = await api.stopRecord(deviceId)
-  if (res.success) { recRecording.value = false; await recLoadTracks() }
-}
-const recRenaming = ref('')
-const recRenameValue = ref('')
-function recStartRename(name: string) { recRenaming.value = name; recRenameValue.value = name }
-async function recConfirmRename(oldName: string) {
-  if (!recRenameValue.value.trim() || recRenameValue.value === oldName) { recRenaming.value = ''; return }
-  const res = await api.renameTrack(deviceId, oldName, recRenameValue.value.trim())
-  if (res.success) { recRenaming.value = ''; await recLoadTracks() }
-  else toastRef.value?.error(`Rename failed: ${res.error?.message}`)
-}
-async function recDelete(name: string) {
-  await api.deleteTrack(deviceId, name)
-  await recLoadTracks()
-}
-async function recPlay(t: api.TrackItem) {
-  if (!isConnected.value) return
-  recPlaying.value = true; recPlayingTrack.value = t.name
-  try {
-    const res = await api.getTrackPoints(deviceId, t.name)
-    if (res.success && res.data) {
-      for (let i = 0; i < res.data.length; i++) {
-        if (!recPlaying.value) break
-        const p = res.data[i]
-        await api.sendCRDashboard(deviceId, `MovJ(${p.j1},${p.j2},${p.j3},${p.j4},${p.j5},${p.j6})`)
-        await new Promise(r => setTimeout(r, 200))
-      }
-    }
-  } catch { /* ignore */ }
-  finally { recPlaying.value = false; recPlayingTrack.value = '' }
-}
-function fmtTrackTime(iso: string): string {
-  try { const d = new Date(iso); return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}` }
-  catch { return iso }
-}
-
-// Watch settings tab for recording
-watch(settingsTab, (tab) => {
-  if (tab === 'recording') recLoadTracks()
-})
 
 // ─── Dobot+ ─────────────────────────────────────
 
@@ -2662,26 +2488,26 @@ async function installDobotPlusPlugin() {
   try {
     const res = await api.manageDobotPlus(deviceId, dobotPlusInstallName.value.trim(), 'install')
     if (res.success) {
-      toastRef.value?.success(`Plugin "${dobotPlusInstallName.value}" installed`)
+      toastRef.value?.success(`插件 "${dobotPlusInstallName.value}" 已安装`)
       dobotPlusInstallName.value = ''
       await loadDobotPlusList()
     } else {
-      toastRef.value?.error(`Install failed: ${res.error?.message}`)
+      toastRef.value?.error(`安装失败：${res.error?.message}`)
     }
-  } catch (err) { toastRef.value?.error(`Install error: ${(err as Error).message}`) }
+  } catch (err) { toastRef.value?.error(`安装出错：${(err as Error).message}`) }
   finally { installingDobotPlus.value = false }
 }
 async function uninstallDobotPlusPlugin(name: string) {
   try {
     const res = await api.manageDobotPlus(deviceId, name, 'uninstall')
     if (res.success) {
-      toastRef.value?.success(`Plugin "${name}" uninstalled`)
+      toastRef.value?.success(`插件 "${name}" 已卸载`)
       if (dobotPlusIframeName.value === name) dobotPlusIframeName.value = ''
       await loadDobotPlusList()
     } else {
-      toastRef.value?.error(`Uninstall failed: ${res.error?.message}`)
+      toastRef.value?.error(`卸载失败：${res.error?.message}`)
     }
-  } catch (err) { toastRef.value?.error(`Uninstall error: ${(err as Error).message}`) }
+  } catch (err) { toastRef.value?.error(`卸载出错：${(err as Error).message}`) }
 }
 function openDobotPlusIframe(name: string) {
   dobotPlusIframeName.value = name
@@ -2703,7 +2529,6 @@ watch(settingsTab, (tab) => {
 // ─── Lifecycle ──────────────────────────────────
 
 let fallbackTimer: ReturnType<typeof setInterval> | null = null
-let switchTimer: ReturnType<typeof setInterval> | null = null
 let wsDisconnected = false
 
 onMounted(async () => {
@@ -2713,8 +2538,8 @@ onMounted(async () => {
   await load()
   if (!isMock && !isConnected.value) await doConnect()
   if (!isMock && isConnected.value) loadSpeed()
-  // Periodic switch state sync (every 30s)
-  switchTimer = setInterval(refreshSwitchStates, 30000)
+  api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
+  api.getRemoteSwitch(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = !r.data.value })
 
   // Mock 模式跳过 WS 订阅和 REST 兜底轮询，避免覆盖 mock 状态
   if (isMock) {
@@ -2747,6 +2572,7 @@ onMounted(async () => {
     deviceStore.setEnabled(deviceId, enabled.value)
     // Parse alarm info from WS ext payload
     if (ext) {
+      isAutoMode.value = (ext.autoManual as number) === 1
       // 只在控制器标记更新时才刷新 alarms/warnings
       // 控制器的 raw.alarms 仅在 isAlarmUpdate=true 时包含有效数据
       const isAlarmUpdate = (ext.isAlarmUpdate as boolean) || false
@@ -2776,13 +2602,15 @@ onMounted(async () => {
       } else {
         tcpDown.value = false
       }
-      // Auto/Manual mode
-      if (ext.autoManual !== undefined) {
-        isAutoMode.value = ext.autoManual === 1
-      }
     }
   })
-  wsClient.onOnline((id) => { if (id === deviceId) deviceStore.setConnected(deviceId, true) })
+  wsClient.onOnline((id) => {
+    if (id === deviceId) {
+      deviceStore.setConnected(deviceId, true)
+      api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
+      api.getRemoteSwitch(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = !r.data.value })
+    }
+  })
   wsClient.onOffline((id) => { if (id === deviceId) deviceStore.setOffline(deviceId) })
 
   // WS 断线兜底：低频 REST 轮询
@@ -2843,7 +2671,6 @@ onUnmounted(() => {
   window.removeEventListener('message', handle3DModelMessage)
   window.removeEventListener('blur', onWindowBlur)
   if (fallbackTimer) clearInterval(fallbackTimer)
-  if (switchTimer) clearInterval(switchTimer)
   stopJog()
   keysDown.clear()
   wsClient.unsubscribe(deviceId)
@@ -2851,7 +2678,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.device-page { padding: 40px 48px; max-width: 1600px; min-height: 100vh; outline: none; }
+.device-page { padding: 40px 48px; max-width: 1600px; margin-inline: auto; min-height: 100vh; outline: none; }
 .workspace-header {
   display: grid; grid-template-columns: minmax(360px, 1fr) auto minmax(360px, 1fr);
   align-items: center; gap: 16px; padding-bottom: 12px;
@@ -2859,26 +2686,27 @@ onUnmounted(() => {
 .workspace-header-left { display: flex; align-items: center; gap: 20px; min-width: 0; }
 .workspace-header-center { display: flex; align-items: center; justify-content: center; min-width: 0; }
 .workspace-header-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.back-btn { display: flex; align-items: center; gap: 6px; font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-muted); text-decoration: none; transition: color var(--duration-fast); padding: 6px 0; }
+.back-btn { display: flex; align-items: center; gap: 6px; font-family: var(--font-body); font-size: 0.82rem; font-weight: 500; color: var(--text-muted); text-decoration: none; transition: color var(--duration-fast); padding: 6px 0; }
 .back-btn:hover { color: var(--cyan-300); }
-.top-bar-device h2 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 700; color: var(--text-primary); letter-spacing: 0.06em; }
-.top-bar-ip { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); margin-top: 2px; display: block; }
+.top-bar-device h2 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; }
+.top-bar-ip { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; display: block; }
 .workspace-switch { display: flex; align-items: center; gap: 2px; }
 .workspace-switch-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 0 12px;
-  border: 1px solid var(--border); background: var(--void-surface); color: var(--text-muted);
-  font-family: var(--font-display); font-size: 0.55rem; font-weight: 800; letter-spacing: 0.08em;
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-muted);
+  font-family: var(--font-body); font-size: 0.72rem; font-weight: 500;
   text-decoration: none; white-space: nowrap;
 }
 .workspace-switch-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .workspace-switch-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .workspace-switch-btn:hover { border-color: var(--border-bright); color: var(--text-primary); }
-.workspace-switch-btn--active { border-color: var(--cyan-400); background: var(--cyan-800); color: var(--cyan-300); }
-.connection-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: var(--radius); font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em; border: 1px solid; }
-.connection-badge--online { border-color: var(--status-online); color: var(--status-online); background: var(--status-online-dim); box-shadow: 0 0 8px #00e67622; }
-.connection-badge--locked { border-color: var(--status-locked); color: var(--status-locked); background: var(--status-locked-dim); box-shadow: 0 0 8px #00e5ff22; }
-.connection-badge--virtual { border-color: #a855f7; color: #a855f7; background: rgba(168, 85, 247, 0.08); box-shadow: 0 0 8px #a855f722; }
-.connection-badge--warning { border-color: #f59e0b; color: #f59e0b; background: rgba(245, 158, 11, 0.08); box-shadow: 0 0 8px #f59e0b22; animation: pulse-warning 2s ease-in-out infinite; }
+.workspace-switch-btn:active { transform: translateY(1px); }
+.workspace-switch-btn--active { border-color: var(--cyan-500); background: var(--cyan-900); color: var(--cyan-300); }
+.connection-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: var(--radius); font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; border: 1px solid; }
+.connection-badge--online { border-color: var(--status-online); color: var(--status-online); background: var(--status-online-dim); }
+.connection-badge--locked { border-color: var(--status-locked); color: var(--status-locked); background: var(--status-locked-dim); }
+.connection-badge--virtual { border-color: var(--status-virtual); color: var(--status-virtual); background: var(--status-virtual-dim); }
+.connection-badge--warning { border-color: var(--status-warning); color: var(--status-warning); background: var(--status-warning-dim); }
 .connection-badge--offline { border-color: var(--status-offline); color: var(--status-offline); background: var(--status-offline-dim); }
 
 /* Enable Toggle Switch */
@@ -2886,12 +2714,11 @@ onUnmounted(() => {
 .toggle-switch input { display: none; }
 .toggle-track {
   width: 36px; height: 20px; border-radius: 10px;
-  background: var(--void-surface); border: 1px solid var(--border);
+  background: var(--surface-2); border: 1px solid var(--border);
   position: relative; transition: all var(--duration-fast);
 }
 .toggle-switch input:checked + .toggle-track {
-  background: var(--cyan-800); border-color: var(--cyan-400);
-  box-shadow: 0 0 8px var(--cyan-glow);
+  background: var(--cyan-900); border-color: var(--cyan-500);
 }
 .toggle-thumb {
   position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
@@ -2900,11 +2727,10 @@ onUnmounted(() => {
 }
 .toggle-switch input:checked + .toggle-track .toggle-thumb {
   left: 18px; background: var(--cyan-300);
-  box-shadow: 0 0 6px var(--cyan-glow);
 }
 .toggle-label {
-  font-family: var(--font-display); font-size: 0.5rem; font-weight: 700;
-  letter-spacing: 0.12em; color: var(--text-muted);
+  font-family: var(--font-body); font-size: 0.72rem; font-weight: 500;
+  color: var(--text-muted);
   min-width: 56px;
 }
 .toggle-switch input:checked ~ .toggle-label { color: var(--cyan-300); }
@@ -2924,74 +2750,76 @@ onUnmounted(() => {
   .status-grid { grid-template-columns: 1fr; }
   .model-panel { grid-column: auto; }
 }
-.hud-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.18em; color: var(--text-muted); margin-bottom: 16px; }
+.hud-label { font-family: var(--font-body); font-size: 0.72rem; font-weight: 600; color: var(--text-muted); margin-bottom: 16px; }
 .pose-readout { display: flex; flex-direction: column; gap: 6px; }
-.pose-axis-row { display: flex; align-items: baseline; gap: 12px; padding: 8px 12px; background: var(--void-surface); border-radius: var(--radius); }
-.pose-axis-label { font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; color: var(--text-muted); width: 20px; }
-.pose-axis-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 400; color: var(--cyan-300); flex: 1; text-align: right; text-shadow: 0 0 8px var(--cyan-glow); }
-.pose-axis-unit { font-size: 0.65rem; color: var(--text-muted); width: 24px; }
+.pose-axis-row { display: flex; align-items: baseline; gap: 12px; padding: 8px 12px; background: var(--surface-1); border-radius: var(--radius); }
+.pose-axis-label { font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; color: var(--text-muted); width: 20px; }
+.pose-axis-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 500; color: var(--text-primary); flex: 1; text-align: right; letter-spacing: -0.02em; }
+.pose-axis-unit { font-size: 0.72rem; color: var(--text-muted); width: 24px; }
 .model-panel { position: relative; padding: 0; overflow: hidden; }
 .model-panel-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 14px; border-bottom: 1px solid var(--border);
 }
-.model-subtitle { margin-top: 3px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--text-muted); }
-.model-frame-shell { position: relative; height: 320px; background: #202228; }
-.model-frame { display: block; width: 100%; height: 100%; border: 0; background: #202228; }
+.model-subtitle { margin-top: 3px; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+.model-frame-shell { position: relative; height: 320px; background: var(--void-deep); }
+.model-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--void-deep); }
 .model-loading {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px;
-  background: rgba(11, 15, 20, 0.78); color: var(--text-muted); pointer-events: none;
-  font-family: var(--font-display); font-size: 0.62rem; letter-spacing: 0.08em;
+  background: rgba(8,9,10,0.78); color: var(--text-muted); pointer-events: none;
+  font-family: var(--font-body); font-size: 0.78rem;
 }
 .loading-ring {
-  width: 18px; height: 18px; border: 2px solid rgba(34, 211, 238, 0.22);
+  width: 18px; height: 18px; border: 2px solid rgba(122, 162, 255, 0.22);
   border-top-color: var(--cyan-300); border-radius: 50%; animation: spin 0.8s linear infinite;
 }
 .joint-readout { display: flex; flex-direction: column; gap: 5px; }
 .joint-row { display: flex; align-items: center; gap: 10px; }
-.joint-label { font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; color: var(--text-muted); width: 22px; text-align: right; }
+.joint-label { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; color: var(--text-muted); width: 22px; text-align: right; }
 .joint-gauge { flex: 1; }
-.joint-gauge-track { height: 4px; background: var(--void-surface); border-radius: 2px; position: relative; overflow: hidden; }
-.joint-gauge-fill { height: 100%; background: linear-gradient(90deg, var(--cyan-700), var(--cyan-400)); border-radius: 2px; transition: width 0.3s var(--ease-out); box-shadow: 0 0 6px var(--cyan-glow); }
+.joint-gauge-track { height: 4px; background: var(--surface-2); border-radius: 2px; position: relative; overflow: hidden; }
+.joint-gauge-fill { height: 100%; background: linear-gradient(90deg, var(--cyan-700), var(--cyan-400)); border-radius: 2px; transition: width 0.3s var(--ease-out); }
 .joint-gauge-center { position: absolute; top: -3px; left: 50%; transform: translateX(-50%); width: 2px; height: 10px; background: var(--text-muted); border-radius: 1px; }
-.joint-value { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); width: 60px; text-align: right; }
+.joint-value { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-secondary); width: 60px; text-align: right; }
 
 .jog-panel-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
-.jog-settings { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.jog-settings { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .mode-switch-group { display: flex; align-items: center; gap: 6px; }
 .amp-limit { display: flex; align-items: center; gap: 4px; }
-.amp-limit-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); }
+.amp-limit-label { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); }
 .amp-input {
-  width: 48px; padding: 2px 6px; font-family: var(--font-mono); font-size: 0.7rem;
-  background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius);
+  width: 48px; padding: 2px 6px; font-family: var(--font-mono); font-size: 0.74rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text-primary); text-align: center; outline: none;
 }
-.amp-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
-.amp-limit-unit { font-family: var(--font-display); font-size: 0.45rem; letter-spacing: 0.08em; color: var(--text-muted); }
+.amp-input:focus { border-color: var(--accent); }
+.amp-limit-unit { font-family: var(--font-body); font-size: 0.62rem; color: var(--text-muted); }
 
 .jog-mode-selector { display: flex; gap: 2px; }
-.jog-mode-btn { padding: 4px 12px; border: 1px solid var(--border); background: transparent; cursor: pointer; font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); transition: all var(--duration-fast); }
+.jog-mode-btn { padding: 4px 12px; border: 1px solid var(--border); background: transparent; cursor: pointer; font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); transition: all var(--duration-fast); }
 .jog-mode-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .jog-mode-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
-.jog-mode-btn--active { background: var(--cyan-800); border-color: var(--cyan-500); color: var(--cyan-300); box-shadow: 0 0 8px #00e5ff22; }
+.jog-mode-btn--active { background: var(--cyan-900); border-color: var(--cyan-500); color: var(--cyan-300); }
+.jog-mode-btn:hover:not(.jog-mode-btn--active) { color: var(--text-primary); border-color: var(--border-bright); }
+.jog-mode-btn:active { transform: translateY(1px); }
 .inch-setting { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .inch-preset {
   min-width: 38px; height: 22px; padding: 0 6px; border: 1px solid var(--border);
-  background: var(--void-surface); color: var(--text-muted); border-radius: var(--radius);
-  cursor: pointer; font-family: var(--font-mono); font-size: 0.6rem;
+  background: var(--void-deep); color: var(--text-muted); border-radius: var(--radius);
+  cursor: pointer; font-family: var(--font-mono); font-size: 0.66rem;
 }
-.inch-preset--active { border-color: var(--cyan-400); color: var(--cyan-300); background: var(--cyan-800); }
+.inch-preset--active { border-color: var(--cyan-500); color: var(--cyan-300); background: var(--cyan-900); }
 
 /* Jog Grid — 六轴横排，每轴纵向一列 */
 .jog-grid { display: flex; gap: 8px; justify-content: center; padding: 8px 0; }
 .jog-axis-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 56px; }
-.jog-axis-name { font-family: var(--font-display); font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-secondary); }
-.jog-axis-val { font-family: var(--font-mono); font-size: 0.7rem; color: var(--cyan-300); text-shadow: 0 0 4px var(--cyan-glow); }
+.jog-axis-name { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
+.jog-axis-val { font-family: var(--font-mono); font-size: 0.74rem; color: var(--cyan-300); }
 /* 模拟键盘键位错位：↓ 按钮整排右移 */
 .jog-btn--down { transform: translateX(16px); }
 .jog-btn { width: 48px; height: 40px; display: flex; align-items: center; justify-content: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; color: var(--text-secondary); transition: all 80ms var(--ease-out); user-select: none; touch-action: none; }
-.jog-btn:hover:not(:disabled) { border-color: var(--border-bright); color: var(--text-primary); box-shadow: 0 0 8px #00e5ff11; }
-.jog-btn:active:not(:disabled), .jog-btn--active { background: var(--cyan-800); border-color: var(--cyan-400); color: var(--cyan-300); box-shadow: 0 0 16px var(--cyan-glow); }
+.jog-btn:hover:not(:disabled) { border-color: var(--border-bright); color: var(--text-primary); }
+.jog-btn:active:not(:disabled), .jog-btn--active { background: var(--cyan-900); border-color: var(--cyan-500); color: var(--cyan-300); }
 .jog-btn:active:not(:disabled):not(.jog-btn--down), .jog-btn--active:not(.jog-btn--down) { transform: scale(0.95); }
 .jog-btn--active.jog-btn--down { transform: translateX(16px) scale(0.95); }
 .jog-btn:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -3007,31 +2835,30 @@ onUnmounted(() => {
 }
 .speed-control--disabled { opacity: 0.35; pointer-events: none; }
 .speed-label {
-  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
-  letter-spacing: 0.12em; color: var(--text-muted); white-space: nowrap;
+  font-family: var(--font-body); font-size: 0.72rem; font-weight: 500;
+  color: var(--text-muted); white-space: nowrap;
 }
 .speed-slider {
   -webkit-appearance: none; appearance: none;
   width: 140px; height: 4px; border-radius: 2px; outline: none;
-  background: var(--void-surface); cursor: pointer;
+  background: var(--surface-2); cursor: pointer;
 }
 .speed-slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 50%;
   background: var(--cyan-400); border: 2px solid var(--cyan-300);
-  box-shadow: 0 0 8px var(--cyan-glow); cursor: pointer;
+  cursor: pointer;
   transition: transform 0.1s var(--ease-out);
 }
 .speed-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
 .speed-slider::-moz-range-thumb {
   width: 14px; height: 14px; border-radius: 50%;
   background: var(--cyan-400); border: 2px solid var(--cyan-300);
-  box-shadow: 0 0 8px var(--cyan-glow); cursor: pointer;
+  cursor: pointer;
 }
 .speed-value {
-  font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700;
-  color: var(--cyan-300); min-width: 42px; text-align: right;
-  text-shadow: 0 0 6px var(--cyan-glow);
+  font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600;
+  color: var(--text-primary); min-width: 42px; text-align: right;
 }
 .action-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
 
@@ -3039,21 +2866,21 @@ onUnmounted(() => {
 .move-panel-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .move-panel-actions { display: flex; gap: 6px; }
 .preset-name-input {
-  width: 160px; padding: 6px 8px; font-family: var(--font-mono); font-size: 0.7rem;
-  background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius);
+  width: 160px; padding: 6px 8px; font-family: var(--font-mono); font-size: 0.74rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text-primary); outline: none;
 }
-.preset-name-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
+.preset-name-input:focus { border-color: var(--accent); }
 .move-grid { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .move-field { display: flex; flex-direction: column; gap: 3px; min-width: 80px; }
-.move-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); }
+.move-label { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); }
 .move-input {
-  padding: 6px 8px; font-family: var(--font-mono); font-size: 0.8rem;
-  background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius);
-  color: var(--cyan-300); width: 80px; outline: none; text-align: right;
+  padding: 6px 8px; font-family: var(--font-mono); font-size: 0.82rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); width: 80px; outline: none; text-align: right;
 }
-.move-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
-.move-unit { font-family: var(--font-display); font-size: 0.45rem; color: var(--text-muted); letter-spacing: 0.08em; }
+.move-input:focus { border-color: var(--accent); }
+.move-unit { font-family: var(--font-body); font-size: 0.62rem; color: var(--text-muted); }
 .move-btn { align-self: flex-end; margin-left: auto; }
 
 /* Preset Management */
@@ -3069,11 +2896,11 @@ onUnmounted(() => {
   padding: 8px 10px; border-radius: var(--radius);
   border: 1px solid transparent; transition: all var(--duration-fast);
 }
-.preset-item:not(.preset-item--system):hover { border-color: var(--border); background: var(--void-surface); }
-.preset-item--selected { border-color: var(--cyan-700); background: var(--cyan-800); }
+.preset-item:not(.preset-item--system):hover { border-color: var(--border); background: var(--surface-1); }
+.preset-item--selected { border-color: var(--cyan-600); background: var(--cyan-900); }
 .preset-item--system { opacity: 0.6; cursor: default; }
 .preset-item--dragging { opacity: 0.4; }
-.preset-item--dragover { border-color: var(--cyan-400); box-shadow: 0 0 8px var(--cyan-glow); }
+.preset-item--dragover { border-color: var(--cyan-400); }
 .preset-item-grip {
   color: var(--text-muted); cursor: grab; font-size: 14px; letter-spacing: -2px;
   user-select: none; padding: 0 4px; line-height: 1;
@@ -3081,28 +2908,28 @@ onUnmounted(() => {
 .preset-item-grip:active { cursor: grabbing; }
 .preset-item-info { display: flex; flex-direction: column; min-width: 0; cursor: pointer; flex: 1; }
 .preset-item-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
-.preset-item-joints { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preset-item-joints { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preset-item-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .btn-icon {
   width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
-  background: none; border: 1px solid transparent; border-radius: 2px; cursor: pointer;
+  background: none; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 11px; color: var(--text-muted); transition: all var(--duration-fast);
 }
 .btn-icon:hover:not(:disabled) { border-color: var(--border); color: var(--text-primary); background: var(--surface-1); }
 .btn-icon:disabled { opacity: 0.25; cursor: not-allowed; }
 .btn-icon--danger:hover:not(:disabled) { color: var(--status-danger); border-color: var(--status-danger); }
 .preset-item-badge {
-  font-family: var(--font-display); font-size: 0.45rem; font-weight: 700; letter-spacing: 0.1em;
-  padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; color: var(--text-muted);
+  font-family: var(--font-body); font-size: 0.62rem; font-weight: 600;
+  padding: 1px 7px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted);
 }
-.preset-empty { text-align: center; padding: 16px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+.preset-empty { text-align: center; padding: 16px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted); }
 .modal-overlay--inline { position: absolute; inset: 0; border-radius: var(--radius-lg); }
 
 /* Modal (for rename preset) */
-.modal-overlay { position: fixed; inset: 0; background: rgba(4,10,20,0.85); backdrop-filter: blur(6px); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(8,9,10,0.72); backdrop-filter: blur(6px); z-index: 200; display: flex; align-items: center; justify-content: center; }
 .modal { width: 100%; max-width: 400px; padding: 28px; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; }
-.modal-header h3 { margin: 0; font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-primary); }
+.modal-header h3 { margin: 0; font-family: var(--font-display); font-size: 0.95rem; font-weight: 600; color: var(--text-primary); }
 .modal-close {
   background: none; border: 1px solid var(--border); border-radius: var(--radius);
   cursor: pointer; color: var(--text-muted); padding: 4px; display: flex;
@@ -3122,22 +2949,22 @@ onUnmounted(() => {
   display: flex; flex-direction: column; gap: 2px;
 }
 
-.settings-alias-input { padding: 5px 8px; font-family: var(--font-mono); font-size: 0.7rem; background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; flex: 1; }
-.settings-alias-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
+.settings-alias-input { padding: 5px 8px; font-family: var(--font-mono); font-size: 0.74rem; background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; flex: 1; }
+.settings-alias-input:focus { border-color: var(--accent); }
 .settings-nav-item {
   display: flex; align-items: center; gap: 8px; padding: 10px 16px;
   background: transparent; border: none; cursor: pointer;
-  font-family: var(--font-display); font-size: 0.58rem; font-weight: 600;
-  letter-spacing: 0.06em; color: var(--text-muted);
+  font-family: var(--font-body); font-size: 0.78rem; font-weight: 500;
+  color: var(--text-muted);
   transition: all 0.15s ease; text-align: left; width: 100%;
   border-left: 2px solid transparent;
 }
 .settings-nav-item:hover { color: var(--text-primary); background: var(--surface-1); }
 .settings-nav-item--active {
-  color: var(--cyan-300); background: var(--cyan-800);
-  border-left-color: var(--cyan-400);
+  color: var(--cyan-300); background: var(--cyan-900);
+  border-left-color: var(--cyan-500);
 }
-.settings-nav-icon { font-size: 0.85rem; flex-shrink: 0; }
+.settings-nav-icon { font-size: 0.95rem; flex-shrink: 0; }
 .settings-nav-label { white-space: nowrap; }
 .settings-content { flex: 1; overflow-y: auto; padding: 12px 24px 24px; min-height: 0; }
 .settings-placeholder { display: flex; align-items: center; justify-content: center; height: 200px; }
@@ -3145,33 +2972,33 @@ onUnmounted(() => {
 .settings-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
 .settings-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
 .settings-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.settings-section-header h4 { margin: 0; font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-secondary); }
+.settings-section-header h4 { margin: 0; font-family: var(--font-display); font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
 
 .load-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .load-field { display: flex; flex-direction: column; gap: 3px; }
-.load-field label { font-family: var(--font-display); font-size: 0.48rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); }
-.load-field .input-sm { width: 100%; padding: 5px 8px; font-family: var(--font-mono); font-size: 0.7rem; background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
-.load-field .input-sm:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
+.load-field label { font-family: var(--font-body); font-size: 0.66rem; font-weight: 500; color: var(--text-muted); }
+.load-field .input-sm { width: 100%; padding: 5px 8px; font-family: var(--font-mono); font-size: 0.74rem; background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
+.load-field .input-sm:focus { border-color: var(--accent); }
 .load-field .input-sm[readonly] { opacity: 0.55; cursor: default; user-select: none; }
 
-.load-config-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.68rem; }
-.load-config-table th { text-align: left; padding: 6px 6px; font-family: var(--font-display); font-size: 0.48rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
+.load-config-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.72rem; }
+.load-config-table th { text-align: left; padding: 6px 6px; font-family: var(--font-body); font-size: 0.66rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
 .load-config-table td { padding: 5px 6px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); vertical-align: middle; }
 .load-config-table .preset-name { color: var(--text-primary); font-weight: 600; }
-.load-config-table .row--editing td { background: var(--cyan-800); padding: 4px 6px; }
+.load-config-table .row--editing td { background: var(--cyan-900); padding: 4px 6px; }
 .table-actions { display: flex; gap: 4px; }
 .load-config-table td .btn + .btn { margin-left: 0; }
 .load-config-table .row--editing td:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .load-config-table .row--editing td:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 
-.input-xs { padding: 3px 5px; font-family: var(--font-mono); font-size: 0.65rem; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
-.input-xs:focus { border-color: var(--cyan-400); }
+.input-xs { padding: 3px 5px; font-family: var(--font-mono); font-size: 0.7rem; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
+.input-xs:focus { border-color: var(--accent); }
 
-.btn-xs { padding: 2px 7px; font-size: 0.6rem; height: 22px; }
+.btn-xs { padding: 2px 7px; font-size: 0.66rem; height: 22px; }
 
 .mt-2 { margin-top: 12px; }
 .text-muted { color: var(--text-muted); }
-.checkbox-xs { display: inline-flex; align-items: center; gap: 3px; font-size: 0.6rem; cursor: pointer; }
+.checkbox-xs { display: inline-flex; align-items: center; gap: 3px; font-size: 0.66rem; cursor: pointer; }
 .checkbox-xs input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--cyan-500); }
 
 .coord-add-row { display: flex; gap: 6px; align-items: center; padding: 8px 0; }
@@ -3179,84 +3006,67 @@ onUnmounted(() => {
 
 .dobotplus-iframe { width: 100%; height: 400px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: #fff; }
 
-/* Track Recording */
-.track-controls { display: flex; align-items: center; gap: 8px; }
-.recording-indicator { color: var(--status-danger); font-size: 0.8rem; animation: blink 1s infinite; }
-@keyframes blink { 50% { opacity: 0.3; } }
-.track-list { display: flex; flex-direction: column; gap: 3px; }
-.track-item { display: flex; align-items: center; gap: 12px; padding: 4px 8px; background: var(--void-surface); border-radius: var(--radius); font-size: 0.62rem; }
-.track-item-name { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-item-size { color: var(--text-muted); font-size: 0.55rem; min-width: 50px; }
-.track-item-time { color: var(--text-muted); font-size: 0.55rem; min-width: 80px; }
-
 .dobotplus-toolbar { position: relative; }
 .dobotplus-dropdown {
   position: absolute; top: 100%; right: 0; z-index: 250;
   min-width: 180px; margin-top: 4px; padding: 4px;
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
 }
 .dobotplus-dropdown-item {
   display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 12px;
   background: transparent; border: none; border-radius: var(--radius);
-  color: var(--text-secondary); font-family: var(--font-display); font-size: 0.62rem;
-  font-weight: 600; letter-spacing: 0.04em; cursor: pointer; text-align: left;
+  color: var(--text-secondary); font-family: var(--font-body); font-size: 0.78rem;
+  font-weight: 500; cursor: pointer; text-align: left;
 }
-.dobotplus-dropdown-item:hover { background: var(--cyan-800); color: var(--cyan-300); }
+.dobotplus-dropdown-item:hover { background: var(--surface-1); color: var(--cyan-300); }
 
-.field-group { display: flex; flex-direction: column; gap: 4px; }
-.field-label { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); }
-.btn-quick--sys { border-color: var(--cyan-700); color: var(--cyan-300); background: var(--cyan-800); }
+.field-group { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-family: var(--font-body); font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); }
+.btn-quick--sys { border-color: var(--cyan-700); color: var(--cyan-300); background: var(--cyan-900); }
 
-.ik-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em; align-self: flex-end; margin-bottom: 8px; white-space: nowrap; }
-.ik-label--ok { color: var(--status-success); }
-.ik-label--fail { color: var(--status-danger); }
-
-.move-actions-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; justify-content: flex-end; }
-.move-actions-row .ik-label { margin-right: auto; }
-
-.estop-btn { padding: 12px 28px; font-size: 13px; background: linear-gradient(180deg, #e01133 0%, #990022 100%); animation: glow-breath 2s ease-in-out infinite; }
-.estop-btn:hover:not(:disabled) { background: linear-gradient(180deg, #ff2244 0%, #bb0033 100%); animation: none; box-shadow: 0 0 32px #ff174466, 0 4px 12px rgba(0,0,0,0.6); }
+.estop-btn { padding: 12px 28px; font-size: 13px; background: var(--status-danger); border-color: transparent; color: #fff; box-shadow: var(--shadow-md); }
+.estop-btn:hover:not(:disabled) { background: #dc2626; border-color: transparent; box-shadow: var(--shadow-lg); }
 
 /* Quick Posture Buttons */
 .quick-posture-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
 .btn-quick-posture {
   min-width: 36px; height: 28px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--void-surface); color: var(--text-muted);
-  cursor: pointer; font-family: var(--font-display); font-size: 0.65rem; font-weight: 700;
+  background: var(--void-deep); color: var(--text-muted);
+  cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; font-weight: 600;
   transition: all 0.15s ease;
 }
-.btn-quick-posture:hover:not(:disabled) { border-color: var(--cyan-500); color: var(--cyan-300); background: var(--cyan-800); }
-.btn-quick-posture--moving { border-color: var(--status-danger); color: #ff6b6b; background: #ff174422; }
-.btn-quick-posture .qpi { font-size: 0.7rem; }
+.btn-quick-posture:hover:not(:disabled) { border-color: var(--cyan-500); color: var(--cyan-300); background: var(--cyan-900); }
+.btn-quick-posture--moving { border-color: var(--status-danger); color: var(--status-danger); background: var(--status-danger-dim); }
+.btn-quick-posture .qpi { font-size: 0.78rem; }
 
 .preset-rename-input {
-  padding: 1px 4px; font-family: var(--font-mono); font-size: 0.65rem;
+  padding: 1px 4px; font-family: var(--font-mono); font-size: 0.7rem;
   background: var(--surface-1); border: 1px solid var(--cyan-500); border-radius: var(--radius);
   color: var(--text-primary); outline: none; width: 80px;
 }
 
 /* Alarm Panel */
-.alarm-panel { border: 1px solid var(--status-danger); box-shadow: 0 0 16px #ff174422; }
+.alarm-panel { border: 1px solid var(--status-danger); }
 .alarm-panel-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .alarm-actions { display: flex; gap: 6px; }
 .alarm-list { display: flex; flex-direction: column; gap: 6px; }
-.alarm-item { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 0.65rem; }
-.alarm-item--error { background: #ff174411; border: 1px solid #ff174433; color: #ff6b6b; }
-.alarm-item--warn { background: #ffaa0011; border: 1px solid #ffaa0033; color: #ffd93d; }
+.alarm-item { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 0.7rem; }
+.alarm-item--error { background: var(--status-danger-dim); border: 1px solid var(--status-danger); color: var(--status-danger); }
+.alarm-item--warn { background: var(--status-warning-dim); border: 1px solid var(--status-warning); color: var(--status-warning); }
 .alarm-item-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.alarm-icon { font-size: 0.8rem; flex-shrink: 0; }
-.alarm-code { font-weight: 700; font-family: var(--font-display); font-size: 0.55rem; letter-spacing: 0.08em; }
-.alarm-level { padding: 2px 5px; border: 1px solid currentColor; border-radius: 3px; font-size: 0.5rem; opacity: 0.9; }
-.alarm-time { color: var(--text-muted); font-size: 0.55rem; }
+.alarm-icon { font-size: 0.85rem; flex-shrink: 0; }
+.alarm-code { font-weight: 700; font-family: var(--font-mono); font-size: 0.66rem; }
+.alarm-level { padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--radius-sm); font-size: 0.6rem; opacity: 0.9; }
+.alarm-time { color: var(--text-muted); font-size: 0.6rem; }
 .alarm-detail { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding-left: 22px; }
 .alarm-msg { color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; }
 .alarm-solution { color: var(--text-muted); line-height: 1.35; overflow-wrap: anywhere; }
 
 /* Warning button variant */
-.btn-warning { background: var(--void-surface); border-color: #ffaa00; color: #ffd93d; }
-.btn-warning:hover:not(:disabled) { background: #ffaa0022; box-shadow: 0 0 8px #ffaa0044; }
+.btn-warning { background: var(--surface-1); border-color: var(--status-warning); color: var(--status-warning); }
+.btn-warning:hover:not(:disabled) { background: var(--status-warning-dim); }
 
 /* Device Log Panel */
 .log-panel {
@@ -3272,73 +3082,74 @@ onUnmounted(() => {
 .log-panel-title { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .log-tabs { display: flex; gap: 2px; }
 .log-tab {
-  padding: 4px 10px; border: 1px solid var(--border); background: var(--void-surface);
-  color: var(--text-muted); cursor: pointer; font-family: var(--font-display);
-  font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em;
+  padding: 4px 10px; border: 1px solid var(--border); background: var(--void-deep);
+  color: var(--text-muted); cursor: pointer; font-family: var(--font-body);
+  font-size: 0.68rem; font-weight: 500;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
+.log-tab:hover:not(.log-tab--active) { background: var(--surface-1); color: var(--text-primary); }
+.log-tab:active { transform: translateY(1px); }
 .log-tab:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .log-tab:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
-.log-tab--active { border-color: var(--cyan-400); background: var(--cyan-800); color: var(--cyan-300); }
+.log-tab--active { border-color: var(--cyan-500); background: var(--cyan-900); color: var(--cyan-300); }
 .log-panel-actions { display: flex; align-items: center; gap: 8px; }
-.log-count { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); }
+.log-count { font-family: var(--font-mono); font-size: 0.66rem; color: var(--text-muted); }
 .history-log-controls { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .history-date-row, .history-type-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .history-input {
-  flex: 1; min-width: 0; padding: 6px 8px; font-family: var(--font-mono); font-size: 0.65rem;
-  background: var(--void-surface); border: 1px solid var(--border); border-radius: var(--radius);
+  flex: 1; min-width: 0; padding: 6px 8px; font-family: var(--font-mono); font-size: 0.7rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text-primary); outline: none;
 }
-.history-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
+.history-input:focus { border-color: var(--accent); }
 .history-input--wide { width: 100%; flex: none; }
 .history-type-chip { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
-.history-type-chip input { accent-color: var(--cyan-400); }
-.history-type-chip span { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.08em; color: var(--text-muted); }
+.history-type-chip input { accent-color: var(--cyan-500); }
+.history-type-chip span { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); }
 .history-file-summary {
-  font-family: var(--font-mono); font-size: 0.55rem; color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .log-list { flex: 1; overflow-y: auto; padding: 8px 12px; }
 .log-list::-webkit-scrollbar { width: 4px; }
-.log-list::-webkit-scrollbar-track { background: var(--void-surface); }
+.log-list::-webkit-scrollbar-track { background: transparent; }
 .log-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.log-empty { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); text-align: center; padding: 40px 0; }
+.log-empty { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted); text-align: center; padding: 40px 0; }
 .log-entry { display: flex; align-items: flex-start; gap: 8px; padding: 8px; border-radius: var(--radius); transition: background var(--duration-fast); }
-.log-entry:hover { background: var(--void-surface); }
-.log-entry--alarm { background: #ff174408; border: 1px solid #ff174422; margin-bottom: 4px; }
-.log-entry--warning { background: #ffaa0008; border: 1px solid #ffaa0022; margin-bottom: 4px; }
-.log-entry--error { background: #ff174408; border: 1px solid #ff174422; margin-bottom: 4px; }
-.log-entry--info { background: #00e5ff08; border: 1px solid #00e5ff22; margin-bottom: 4px; }
-.log-entry--user { background: #7ee78708; border: 1px solid #7ee78722; margin-bottom: 4px; }
-.log-entry--plain { background: #ffffff05; border: 1px solid #ffffff14; margin-bottom: 4px; }
-.log-time { font-family: var(--font-mono); font-size: 0.5rem; color: var(--text-muted); flex-shrink: 0; min-width: 70px; white-space: nowrap; }
-.log-icon { flex-shrink: 0; width: 16px; text-align: center; font-size: 0.7rem; }
-.log-entry--alarm .log-icon { color: #ff6b6b; }
-.log-entry--warning .log-icon { color: #ffd93d; }
-.log-entry--error .log-icon { color: #ff6b6b; }
+.log-entry:hover { background: var(--surface-1); }
+.log-entry--alarm { background: var(--status-danger-dim); border: 1px solid var(--status-danger); margin-bottom: 4px; }
+.log-entry--warning { background: var(--status-warning-dim); border: 1px solid var(--status-warning); margin-bottom: 4px; }
+.log-entry--error { background: var(--status-danger-dim); border: 1px solid var(--status-danger); margin-bottom: 4px; }
+.log-entry--info { background: var(--status-info-dim); border: 1px solid var(--cyan-700); margin-bottom: 4px; }
+.log-entry--user { background: var(--status-online-dim); border: 1px solid var(--status-online); margin-bottom: 4px; }
+.log-entry--plain { background: var(--surface-1); border: 1px solid var(--border); margin-bottom: 4px; }
+.log-time { font-family: var(--font-mono); font-size: 0.56rem; color: var(--text-muted); flex-shrink: 0; min-width: 70px; white-space: nowrap; }
+.log-icon { flex-shrink: 0; width: 16px; text-align: center; font-size: 0.75rem; }
+.log-entry--alarm .log-icon { color: var(--status-danger); }
+.log-entry--warning .log-icon { color: var(--status-warning); }
+.log-entry--error .log-icon { color: var(--status-danger); }
 .log-entry--info .log-icon { color: var(--cyan-300); }
-.log-entry--user .log-icon { color: #7ee787; }
+.log-entry--user .log-icon { color: var(--status-online); }
 .log-entry--plain .log-icon { color: var(--text-muted); }
 .log-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.log-title { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.06em; }
-.log-entry--alarm .log-title { color: #ff6b6b; }
-.log-entry--warning .log-title { color: #ffd93d; }
-.log-entry--error .log-title { color: #ff6b6b; }
+.log-title { font-family: var(--font-body); font-size: 0.72rem; font-weight: 600; }
+.log-entry--alarm .log-title { color: var(--status-danger); }
+.log-entry--warning .log-title { color: var(--status-warning); }
+.log-entry--error .log-title { color: var(--status-danger); }
 .log-entry--info .log-title { color: var(--cyan-300); }
-.log-entry--user .log-title { color: #7ee787; }
+.log-entry--user .log-title { color: var(--status-online); }
 .log-entry--plain .log-title { color: var(--text-muted); }
-.log-level { font-family: var(--font-mono); font-size: 0.5rem; color: var(--text-muted); }
-.log-desc { font-size: 0.6rem; color: var(--text-primary); line-height: 1.3; }
-.log-solution { font-size: 0.55rem; color: var(--text-muted); line-height: 1.3; padding-top: 2px; }
+.log-level { font-family: var(--font-mono); font-size: 0.56rem; color: var(--text-muted); }
+.log-desc { font-size: 0.66rem; color: var(--text-primary); line-height: 1.3; }
+.log-solution { font-size: 0.6rem; color: var(--text-muted); line-height: 1.3; padding-top: 2px; }
 .history-log-list { padding-top: 10px; }
 .history-log-entry .log-time { min-width: 92px; overflow: hidden; text-overflow: ellipsis; }
 .history-log-text {
-  font-family: var(--font-mono); font-size: 0.58rem; color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 0.64rem; color: var(--text-primary);
   line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse-warning { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-.status-dot--warning { background: #f59e0b; box-shadow: 0 0 4px #f59e0b; }
+.status-dot--warning { background: var(--status-warning); }
 
 .logs-slide-enter-active { transition: transform 0.25s var(--ease-out); }
 .logs-slide-leave-active { transition: transform 0.2s var(--ease-in); }
