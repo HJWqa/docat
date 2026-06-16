@@ -1497,23 +1497,23 @@ onBeforeUnmount(() => {
   align-items: center; gap: 16px; padding-bottom: 12px;
 }
 .workspace-header-left { display: flex; align-items: center; gap: 20px; min-width: 0; }
-.workspace-header-left h2 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 700; color: var(--text-primary); letter-spacing: 0.06em; }
+.workspace-header-left h2 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; }
 .workspace-header-center { display: flex; align-items: center; justify-content: center; min-width: 0; }
 .workspace-header-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.back-btn { display: flex; align-items: center; gap: 6px; font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-muted); text-decoration: none; transition: color var(--duration-fast); padding: 6px 0; white-space: nowrap; }
+.back-btn { display: flex; align-items: center; gap: 6px; font-family: var(--font-body); font-size: 0.82rem; font-weight: 500; color: var(--text-muted); text-decoration: none; transition: color var(--duration-fast); padding: 6px 0; }
 .back-btn:hover { color: var(--cyan-300); }
 .workspace-switch { display: flex; align-items: center; gap: 2px; }
 .workspace-switch-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 0 12px;
-  border: 1px solid var(--border); background: var(--void-surface); color: var(--text-muted);
-  font-family: var(--font-display); font-size: 0.55rem; font-weight: 800; letter-spacing: 0.08em;
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-muted);
+  font-family: var(--font-body); font-size: 0.72rem; font-weight: 500;
   text-decoration: none; white-space: nowrap;
 }
 .workspace-switch-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .workspace-switch-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .workspace-switch-btn:hover { border-color: var(--border-bright); color: var(--text-primary); }
 .workspace-switch-btn:active { transform: translateY(1px); }
-.workspace-switch-btn--active { border-color: var(--cyan-400); background: var(--cyan-800); color: var(--cyan-300); }
+.workspace-switch-btn--active { border-color: var(--cyan-500); background: var(--cyan-900); color: var(--cyan-300); }
 .programming-grid { display: grid; grid-template-columns: 300px minmax(520px, 1fr) 390px; gap: 16px; align-items: stretch; }
 .project-list-panel, .editor-panel, .run-panel { min-height: 700px; }
 .run-panel { display: flex; flex-direction: column; gap: 14px; }
