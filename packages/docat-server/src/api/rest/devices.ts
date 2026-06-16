@@ -554,6 +554,73 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  /** 设置/获取手动自动模式总开关 */
+  app.post<{ Params: { id: string }; Body: { value: boolean } }>(
+    '/api/devices/:id/autoManualSwitch',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setAutoManualSwitch(request.body.value)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/autoManualSwitch',
+    async (request, reply): Promise<ApiResponse<{ value: boolean }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const value = await entry.driver.getAutoManualSwitch()
+        return { success: true, data: { value } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 设置手动/自动模式 */
+  app.post<{ Params: { id: string }; Body: { mode: 'auto' | 'manual' } }>(
+    '/api/devices/:id/autoManualMode',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setAutoManualMode(request.body.mode)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 设置/获取远程模式开关 (TCP vs Online) */
+  app.post<{ Params: { id: string }; Body: { value: boolean } }>(
+    '/api/devices/:id/remoteSwitch',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setRemoteSwitch(request.body.value)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/remoteSwitch',
+    async (request, reply): Promise<ApiResponse<{ value: boolean }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const value = await entry.driver.getRemoteSwitch()
+        return { success: true, data: { value } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
   /** 使能（启用运动控制） */
   app.post<{ Params: { id: string } }>(
     '/api/devices/:id/enable',
@@ -1217,6 +1284,154 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  // ─── Trajectory Recording (CSV → Controller SFTP) ──
+
+  const TRAJECTORY_DIR = '/developOnly/process/trajectory'
+  const trackRecording = new Map<string, { timer: ReturnType<typeof setInterval>; ip: string; name: string; lines: string[] }>()
+
+  app.post<{ Params: { id: string }; Body: { name: string } }>(
+    '/api/devices/:id/tcp/record/start',
+    async (request, reply): Promise<ApiResponse<{ name: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        if (trackRecording.has(request.params.id)) {
+          return { success: false, error: { code: 40901, message: '已在录制中' } }
+        }
+
+        getCrTcp(request.params.id, config.ip) // ensure TCP connected
+        const name = request.body.name || `track_${Date.now()}`
+        const lines: string[] = ['timestamp,j1,j2,j3,j4,j5,j6']
+
+        const timer = setInterval(() => {
+          if (crTcpLatestFeed && crTcpLatestFeed.QActual) {
+            const joints = crTcpLatestFeed.QActual.map(v => v.toFixed(4)).join(',')
+            lines.push(`${Date.now()},${joints}`)
+          }
+        }, 100)
+
+        trackRecording.set(request.params.id, { timer, ip: config.ip, name, lines })
+        return { success: true, data: { name } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/record/stop',
+    async (request, reply): Promise<ApiResponse<{ name: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const rec = trackRecording.get(request.params.id)
+        if (!rec) return { success: false, error: { code: 40401, message: '没有正在进行的录制' } }
+
+        clearInterval(rec.timer)
+        trackRecording.delete(request.params.id)
+
+        // Write CSV to controller via SFTP
+        const sftp = new SftpTransport(rec.ip)
+        const content = rec.lines.join('\n')
+        await sftp.ensureDir(TRAJECTORY_DIR)
+        await sftp.writeText(`${TRAJECTORY_DIR}/${rec.name}.csv`, content)
+
+        return { success: true, data: { name: rec.name } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/record/status',
+    async (request, reply): Promise<ApiResponse<{ recording: boolean; name?: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const rec = trackRecording.get(request.params.id)
+        return { success: true, data: { recording: !!rec, name: rec?.name } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/tracks',
+    async (request, reply): Promise<ApiResponse<Array<{ name: string; size: number; mtime: string }>>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        const sftp = new SftpTransport(config.ip)
+        const entries = await sftp.list(TRAJECTORY_DIR).catch(() => [] as Array<{ name: string; size: number; modifyTime: number }>)
+        const files = entries
+          .filter(f => f.name.endsWith('.csv'))
+          .map(f => ({
+            name: f.name.replace(/\.csv$/i, ''),
+            size: f.size,
+            mtime: f.modifyTime ? new Date(f.modifyTime * 1000).toISOString() : '',
+          }))
+        return { success: true, data: files }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string; trackName: string }; Body: { newName: string } }>(
+    '/api/devices/:id/tcp/tracks/:trackName/rename',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        const sftp = new SftpTransport(config.ip)
+        await sftp.rename(
+          `${TRAJECTORY_DIR}/${request.params.trackName}.csv`,
+          `${TRAJECTORY_DIR}/${request.body.newName}.csv`
+        )
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.delete<{ Params: { id: string; trackName: string } }>(
+    '/api/devices/:id/tcp/tracks/:trackName',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        const sftp = new SftpTransport(config.ip)
+        await sftp.deleteFile(`${TRAJECTORY_DIR}/${request.params.trackName}.csv`)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string; trackName: string } }>(
+    '/api/devices/:id/tcp/tracks/:trackName',
+    async (request, reply): Promise<ApiResponse<Array<{ j1: number; j2: number; j3: number; j4: number; j5: number; j6: number }>>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+
+        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
+        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+
+        const sftp = new SftpTransport(config.ip)
+        const content = await sftp.readText(`${TRAJECTORY_DIR}/${request.params.trackName}.csv`)
+        const lines = content.trim().split('\n').slice(1)
+        const points = lines.map(line => {
+          const [ts, j1, j2, j3, j4, j5, j6] = line.split(',').map(Number)
+          return { j1, j2, j3, j4, j5, j6 }
+        })
+        return { success: true, data: points }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
   /** 设备级关节预设（所有用户可见） */
   app.get<{ Params: { id: string } }>(
     '/api/devices/:id/jointPresets',
@@ -1772,6 +1987,61 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
+    }
+  )
+
+  /** 笛卡尔直线移动 (MovL, 控制器内部 IK) */
+  app.post<{ Params: { id: string }; Body: { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number; user?: number; tool?: number } }>(
+    '/api/devices/:id/moveCartesian',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const b = request.body
+        const data = await entry.driver.moveCartesian({
+          x: b.x, y: b.y, z: b.z,
+          rx: b.rx ?? 0, ry: b.ry ?? 0, rz: b.rz ?? 0,
+          user: b.user, tool: b.tool,
+        })
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 正运动学求解（关节 → 笛卡尔） */
+  app.post<{ Params: { id: string }; Body: { joint: number[]; user?: number; tool?: number } }>(
+    '/api/devices/:id/forwardKinematics',
+    async (request, reply): Promise<ApiResponse<{ coordinate: number[]; errID: number; errMsg?: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.forwardKinematics(request.body)
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 逆运动学求解（不执行运动） */
+  app.post<{ Params: { id: string }; Body: { coordinate: number[]; jointNear?: number[]; user?: number; tool?: number } }>(
+    '/api/devices/:id/inverseKinematics',
+    async (request, reply): Promise<ApiResponse<{ joint: number[]; errID: number; errMsg?: string }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const b = request.body
+        const data = await entry.driver.inverseKinematics({
+          coordinate: b.coordinate,
+          jointNear: b.jointNear ?? [0,0,0,0,0,0],
+          user: b.user, tool: b.tool,
+        })
+        return { success: true, data }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )
 
