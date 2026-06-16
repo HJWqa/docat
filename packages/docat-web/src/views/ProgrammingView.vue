@@ -4,22 +4,22 @@
       <div class="workspace-header-left">
         <router-link :to="{ path: '/', query: $route.query }" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          仪表板
+          DASHBOARD
         </router-link>
         <div>
-          <h2>脚本编程</h2>
+          <h2>Programming</h2>
           <p class="header-subtitle">
-            {{ routeDevice ? `${routeDevice.name} · ${routeDevice.ip}` : '控制器项目 · SFTP 工作区' }}
+            {{ routeDevice ? `${routeDevice.name} · ${routeDevice.ip}` : 'CONTROLLER PROJECTS · SFTP WORKSPACE' }}
           </p>
         </div>
       </div>
       <div class="workspace-header-center">
         <div class="workspace-switch">
           <router-link :to="{ path: routeDeviceId ? `/device/${routeDeviceId}` : '/', query: $route.query }" class="workspace-switch-btn">
-            {{ routeDeviceId ? '控制' : '仪表板' }}
+            {{ routeDeviceId ? 'CONTROL' : 'DASHBOARD' }}
           </router-link>
           <router-link :to="{ path: routeDeviceId ? `/device/${routeDeviceId}/programming` : '/programming', query: $route.query }" class="workspace-switch-btn workspace-switch-btn--active">
-            编程
+            PROGRAMMING
           </router-link>
           <router-link v-if="routeDeviceId" :to="{ path: `/device/${routeDeviceId}/tcp`, query: $route.query }" class="workspace-switch-btn">
             TCP
@@ -28,36 +28,36 @@
       </div>
       <div class="workspace-header-actions">
         <button class="btn btn-secondary" @click="loadAll" :disabled="loading">
-          {{ loading ? '加载中...' : '刷新' }}
+          {{ loading ? 'LOADING...' : 'REFRESH' }}
         </button>
       </div>
     </header>
 
     <div class="programming-grid mt-2">
       <aside class="project-list-panel card">
-        <label class="field-label">设备</label>
+        <label class="field-label">DEVICE</label>
         <select v-model="selectedDeviceId" class="select-input" :disabled="Boolean(routeDeviceId)">
-          <option value="">选择设备</option>
+          <option value="">Select device</option>
           <option v-for="device in devices" :key="device.id" :value="device.id">
             {{ device.name }} · {{ device.ip }}
           </option>
         </select>
 
         <div class="create-row mt-1">
-          <input v-model.trim="newProjectName" class="input" placeholder="项目名称" />
+          <input v-model.trim="newProjectName" class="input" placeholder="Project name" />
           <select v-model="newProjectLanguage" class="select-input select-input--compact">
             <option value="lua">Lua</option>
             <option value="python">Python</option>
             <option value="blockly">Blockly</option>
           </select>
           <button class="btn btn-primary btn-sm" :disabled="!selectedDeviceId || !newProjectName || creating" @click="createProject">
-            {{ creating ? '新建中...' : '新建' }}
+            {{ creating ? 'NEW...' : 'NEW' }}
           </button>
         </div>
 
         <div v-if="recentProjects.length" class="project-section">
           <div class="panel-title-row">
-            <span class="hud-label" style="margin-bottom:0">最近</span>
+            <span class="hud-label" style="margin-bottom:0">RECENT</span>
             <span class="script-count">{{ recentProjects.length }}</span>
           </div>
           <button
@@ -73,7 +73,7 @@
 
         <div class="project-section">
           <div class="panel-title-row">
-            <span class="hud-label" style="margin-bottom:0">项目</span>
+            <span class="hud-label" style="margin-bottom:0">PROJECTS</span>
             <span class="script-count">{{ projects.length }}</span>
           </div>
           <div class="script-list list-loading-anchor">
@@ -85,18 +85,18 @@
               <button class="project-row-main" @click="openProject(project.name)" :disabled="opening">
                 <span class="script-row-name">{{ project.name }}</span>
                 <span class="script-row-meta">
-                  {{ openingProjectName === project.name ? '打开中...' : `${project.language.toUpperCase()} · ${project.files} 个文件` }}
+                  {{ openingProjectName === project.name ? 'OPENING...' : `${project.language.toUpperCase()} · ${project.files} files` }}
                 </span>
               </button>
               <div class="project-row-actions">
-                <button class="mini-action" @click="renameProjectFromList(project.name)" :disabled="opening || renaming">重命名</button>
-                <button class="mini-action mini-action--danger" @click="deleteProjectByName(project.name)" :disabled="opening || deletingProject">删除</button>
+                <button class="mini-action" @click="renameProjectFromList(project.name)" :disabled="opening || renaming">REN</button>
+                <button class="mini-action mini-action--danger" @click="deleteProjectByName(project.name)" :disabled="opening || deletingProject">DEL</button>
               </div>
             </div>
-            <div v-if="!projects.length" class="empty-list">暂无控制器项目</div>
+            <div v-if="!projects.length" class="empty-list">No controller projects</div>
             <div v-if="loadingProjects" class="panel-loading">
               <span class="loading-ring"></span>
-              <strong>正在加载项目</strong>
+              <strong>LOADING PROJECTS</strong>
             </div>
           </div>
         </div>
@@ -110,11 +110,11 @@
           </div>
           <div class="toolbar-actions">
             <div class="mode-toggle">
-              <button :class="['mode-btn', { 'mode-btn--active': openMode === 'source' }]" @click="openMode = 'source'">源码</button>
-              <button :class="['mode-btn', { 'mode-btn--active': openMode === 'all' }]" @click="openMode = 'all'">全部</button>
+              <button :class="['mode-btn', { 'mode-btn--active': openMode === 'source' }]" @click="openMode = 'source'">SOURCE</button>
+              <button :class="['mode-btn', { 'mode-btn--active': openMode === 'all' }]" @click="openMode = 'all'">ALL</button>
             </div>
             <button class="btn btn-primary btn-sm" @click="saveActiveFile" :disabled="!activeFile || !activeFile.editable || saving">
-              {{ saving ? '保存中...' : '保存' }}
+              {{ saving ? 'SAVING...' : 'SAVE' }}
             </button>
           </div>
         </div>
@@ -133,21 +133,21 @@
         <div v-if="activeProject && activeFile" ref="editorContainer" class="code-editor" />
 
         <div v-else-if="!activeProject" class="editor-empty">
-          <h3>未打开项目</h3>
-          <p>选择一个控制器项目以编辑其文件。</p>
+          <h3>NO PROJECT OPEN</h3>
+          <p>Select a controller project to edit its files.</p>
         </div>
 
         <div v-if="opening" class="editor-loading">
           <span class="loading-ring loading-ring--large"></span>
-          <strong>{{ openingProjectName ? `正在打开 ${openingProjectName}` : '正在打开项目' }}</strong>
+          <strong>{{ openingProjectName ? `OPENING ${openingProjectName}` : 'OPENING PROJECT' }}</strong>
         </div>
 
         <!-- Points panel below editor -->
         <div v-if="activeProject" class="points-bar">
           <div class="points-bar-header">
-            <span class="hud-label" style="margin-bottom:0">点位</span>
+            <span class="hud-label" style="margin-bottom:0">POINTS</span>
             <button class="btn btn-primary btn-sm" :disabled="!selectedDeviceId || savingPoint" @click="doSavePoint">
-              {{ savingPoint ? '保存中...' : '保存点位' }}
+              {{ savingPoint ? 'SAVING...' : 'SAVE POINT' }}
             </button>
           </div>
           <div v-if="projectPoints.length" class="points-bar-list">
@@ -169,37 +169,37 @@
               </template>
             </span>
           </div>
-          <div v-else class="points-bar-empty">暂无点位 — 示教并保存</div>
+          <div v-else class="points-bar-empty">No points — jog &amp; save</div>
         </div>
 
       </main>
 
       <aside class="run-panel card">
         <div v-if="activeProject" class="side-section">
-          <span class="hud-label">控制</span>
+          <span class="hud-label">CONTROL</span>
           <div class="run-actions">
           <button class="btn btn-success" :disabled="running || !selectedDeviceId" @click="runProject">
-            {{ running ? '启动中...' : '运行' }}
+            {{ running ? 'STARTING...' : 'RUN' }}
           </button>
           <button class="btn btn-danger" :disabled="stopping || !selectedDeviceId" @click="stopDebugger">
-            {{ stopping ? '停止中...' : '停止' }}
+            {{ stopping ? 'STOPPING...' : 'STOP' }}
           </button>
             <button class="btn btn-secondary" :disabled="pausing || !selectedDeviceId" @click="pauseDebugger">
-              {{ pausing ? '暂停中...' : '暂停' }}
+              {{ pausing ? 'PAUSING...' : 'PAUSE' }}
             </button>
             <button class="btn btn-secondary" :disabled="continuing || !selectedDeviceId" @click="continueDebugger">
-              {{ continuing ? '继续中...' : '继续' }}
+              {{ continuing ? 'CONTINUING...' : 'CONTINUE' }}
             </button>
           </div>
         </div>
 
         <div v-if="activeProject" class="runtime-panel side-section">
           <div class="panel-title-row">
-            <span class="hud-label" style="margin-bottom:0">运行日志</span>
-            <button class="btn btn-secondary btn-sm" @click="runtimeLogs = []">清空</button>
+            <span class="hud-label" style="margin-bottom:0">RUN LOG</span>
+            <button class="btn btn-secondary btn-sm" @click="runtimeLogs = []">CLEAR</button>
           </div>
           <div class="runtime-cursor">
-            <span>光标</span>
+            <span>Cursor</span>
             <strong>{{ runtimeCursorText || '--' }}</strong>
           </div>
           <div ref="runtimeLogContainer" class="runtime-log-list">
@@ -208,13 +208,13 @@
               <strong>{{ entry.level }}</strong>
               <p>{{ entry.text }}</p>
             </div>
-            <div v-if="!runtimeLogs.length" class="runtime-empty">暂无运行日志</div>
+            <div v-if="!runtimeLogs.length" class="runtime-empty">No runtime logs</div>
           </div>
         </div>
 
         <div v-if="activeProject" class="file-list side-section">
           <div class="panel-title-row">
-            <span class="hud-label" style="margin-bottom:0">文件</span>
+            <span class="hud-label" style="margin-bottom:0">FILES</span>
           </div>
           <button
             v-for="file in activeProject.fileList"
@@ -229,46 +229,46 @@
               class="file-delete"
               @click.stop="deleteFile(file.name)"
             >
-              删除
+              DEL
             </button>
           </button>
         </div>
 
         <div v-if="activeProject" class="project-tools side-section">
-          <span class="hud-label">文件工具</span>
-          <label class="field-label">重命名项目</label>
+          <span class="hud-label">FILE TOOLS</span>
+          <label class="field-label">RENAME PROJECT</label>
           <div class="inline-row">
             <input v-model.trim="renameName" class="input" />
             <button class="btn btn-secondary btn-sm" :disabled="!renameName || renaming" @click="renameProject">
-              重命名
+              RENAME
             </button>
           </div>
 
-          <label class="field-label mt-1">添加文件</label>
+          <label class="field-label mt-1">ADD FILE</label>
           <div class="inline-row">
             <input v-model.trim="newFileName" class="input" placeholder="file.lua" />
             <button class="btn btn-secondary btn-sm" :disabled="!newFileName || addingFile" @click="addFile">
-              添加
+              ADD
             </button>
           </div>
         </div>
 
         <div v-if="activeProject" class="side-section">
           <div class="panel-title-row">
-            <span class="hud-label" style="margin-bottom:0">项目</span>
-            <button class="btn btn-danger btn-sm" :disabled="deletingProject" @click="deleteProject">删除</button>
+            <span class="hud-label" style="margin-bottom:0">PROJECT</span>
+            <button class="btn btn-danger btn-sm" :disabled="deletingProject" @click="deleteProject">DELETE</button>
           </div>
           <div class="deploy-info">
             <div class="info-row">
-              <span>名称</span>
+              <span>Name</span>
               <strong>{{ activeProject.name }}</strong>
             </div>
             <div class="info-row">
-              <span>修改时间</span>
+              <span>Modified</span>
               <strong>{{ formatTime(activeProject.modifiedAt) }}</strong>
             </div>
             <div class="info-row">
-              <span>文件</span>
+              <span>Files</span>
               <strong>{{ activeProject.files }}</strong>
             </div>
           </div>
@@ -280,7 +280,7 @@
       <div class="modal-panel">
         <div class="panel-title-row">
           <span class="hud-label" style="margin-bottom:0">{{ dialogTitle }}</span>
-          <button class="mini-action" @click="closeDialog">关闭</button>
+          <button class="mini-action" @click="closeDialog">ESC</button>
         </div>
         <p class="modal-message">{{ dialog.message }}</p>
         <input
@@ -290,13 +290,13 @@
           @keyup.enter="confirmDialog"
         />
         <div class="modal-actions">
-          <button class="btn btn-secondary btn-sm" @click="closeDialog">取消</button>
+          <button class="btn btn-secondary btn-sm" @click="closeDialog">CANCEL</button>
           <button
             :class="['btn', dialogDanger ? 'btn-danger' : 'btn-primary', 'btn-sm']"
             :disabled="dialog.kind === 'rename-project' && !dialog.input"
             @click="confirmDialog"
           >
-            确认
+            CONFIRM
           </button>
         </div>
       </div>
@@ -432,9 +432,9 @@ const visibleFiles = computed(() => {
 })
 const activeFile = computed(() => activeProject.value?.fileList.find(file => file.name === activeFileName.value) ?? null)
 const dialogTitle = computed(() => {
-  if (dialog.value.kind === 'rename-project') return '重命名项目'
-  if (dialog.value.kind === 'delete-project') return '删除项目'
-  if (dialog.value.kind === 'delete-file') return '删除文件'
+  if (dialog.value.kind === 'rename-project') return 'RENAME PROJECT'
+  if (dialog.value.kind === 'delete-project') return 'DELETE PROJECT'
+  if (dialog.value.kind === 'delete-file') return 'DELETE FILE'
   return ''
 })
 const dialogDanger = computed(() => dialog.value.kind === 'delete-project' || dialog.value.kind === 'delete-file')
@@ -642,14 +642,14 @@ function configureMonaco() {
       { token: 'comment', foreground: '64748b', fontStyle: 'italic' },
     ],
     colors: {
-      'editor.background': '#0c0d0f',
+      'editor.background': '#05090d',
       'editor.foreground': '#d8e7ff',
       'editorLineNumber.foreground': '#496384',
       'editorLineNumber.activeForeground': '#22d3ee',
       'editorCursor.foreground': '#22d3ee',
       'editor.selectionBackground': '#164e63',
       'editor.lineHighlightBackground': '#0b1628',
-      'editorGutter.background': '#0c0d0f',
+      'editorGutter.background': '#05090d',
     },
   })
   if (monacoConfiguredForInstance) return
@@ -716,7 +716,7 @@ function initEditor() {
     language: fileToMonacoLanguage(activeFile.value),
     theme: 'docat-dark',
     automaticLayout: false,
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontFamily: "'JetBrains Mono', 'Share Tech Mono', monospace",
     fontSize: 13,
     lineHeight: 21,
     minimap: { enabled: false },
@@ -857,7 +857,7 @@ function updateBreakpointDecorations() {
     range: new monaco.Range(line, 1, line, 1),
     options: {
       glyphMarginClassName: 'breakpoint-glyph',
-      glyphMarginHoverMessage: { value: `断点：第 ${line} 行` },
+      glyphMarginHoverMessage: { value: `Breakpoint line ${line}` },
       overviewRuler: {
         color: '#f87171',
         position: monaco.editor.OverviewRulerLane.Left,
@@ -937,7 +937,7 @@ function handleRuntimeLog(deviceId: string, payload: unknown) {
   const text = typeof payload === 'object' && payload ? String((payload as RuntimeMessage).data ?? '') : String(payload ?? '')
   if (isRuntimeFinishText(text)) {
     clearExecutionLine()
-    runtimeCursorText.value = '已完成'
+    runtimeCursorText.value = 'FINISHED'
     return
   }
   const fileMatch = /([^/\s:]+\.(?:lua|py)):(\d+)/.exec(text)
@@ -954,10 +954,10 @@ function handleRuntimeCursor(deviceId: string, payload: unknown) {
   const cursor = parseRuntimeCursor(payload)
   if (isRuntimeFinishText(cursor.text)) {
     clearExecutionLine()
-    runtimeCursorText.value = '已完成'
+    runtimeCursorText.value = 'FINISHED'
     return
   }
-  runtimeCursorText.value = cursor.text || (cursor.line ? `第 ${cursor.line} 行` : '')
+  runtimeCursorText.value = cursor.text || (cursor.line ? `line ${cursor.line}` : '')
   if (cursor.fileName && activeProject.value?.fileList.some(file => file.name === cursor.fileName)) {
     selectFile(cursor.fileName)
   }
@@ -1002,7 +1002,7 @@ async function loadProjects() {
       api.listRecentProjects(selectedDeviceId.value),
     ])
     if (projectRes.success && projectRes.data) projects.value = projectRes.data
-    else toastRef.value?.error(`加载项目失败：${projectRes.error?.message}`)
+    else toastRef.value?.error(`Projects failed: ${projectRes.error?.message}`)
     if (recentRes.success && recentRes.data) recentProjects.value = recentRes.data
   } finally {
     loadingProjects.value = false
@@ -1031,7 +1031,7 @@ async function openProject(projectName: string) {
     chooseInitialFile(activeProject.value)
     syncEditor()
     loadPoints()
-    toastRef.value?.success(`[Mock] 已打开 ${projectName}`)
+    toastRef.value?.success(`[Mock] Opened ${projectName}`)
     return
   }
   opening.value = true
@@ -1049,7 +1049,7 @@ async function openProject(projectName: string) {
       syncEditor()
       loadPoints()
     } else {
-      toastRef.value?.error(`打开失败：${res.error?.message}`)
+      toastRef.value?.error(`Open failed: ${res.error?.message}`)
     }
   } finally {
     opening.value = false
@@ -1068,7 +1068,7 @@ async function createProject() {
     chooseInitialFile(activeProject.value)
     syncEditor()
     projectPoints.value = []
-    toastRef.value?.success('[Mock] 项目已创建')
+    toastRef.value?.success('[Mock] Project created')
     return
   }
   creating.value = true
@@ -1082,9 +1082,9 @@ async function createProject() {
       await loadProjects()
       syncEditor()
       projectPoints.value = []
-      toastRef.value?.success('项目已创建')
+      toastRef.value?.success('Project created')
     } else {
-      toastRef.value?.error(`创建失败：${res.error?.message}`)
+      toastRef.value?.error(`Create failed: ${res.error?.message}`)
     }
   } finally {
     creating.value = false
@@ -1114,7 +1114,7 @@ async function doSavePoint() {
   if (isMock) {
     const n = projectPoints.value.length + 1
     projectPoints.value.push({ id: crypto.randomUUID(), name: `P${n}`, pose: [0,0,0,0,0,0], joint: [0,0,0,0,0,0], tool: 0, user: 0 })
-    toastRef.value?.success(`[Mock] 已保存 P${n}`)
+    toastRef.value?.success(`[Mock] Saved P${n}`)
     return
   }
   savingPoint.value = true
@@ -1122,9 +1122,9 @@ async function doSavePoint() {
     const res = await api.savePoint(selectedDeviceId.value, activeProject.value.name)
     if (res.success && res.data) {
       projectPoints.value.push(res.data)
-      toastRef.value?.success(`已保存 ${res.data.name}`)
+      toastRef.value?.success(`Saved ${res.data.name}`)
     } else {
-      toastRef.value?.error(`保存点位失败：${res.error?.message}`)
+      toastRef.value?.error(`Save point failed: ${res.error?.message}`)
     }
   } finally { savingPoint.value = false }
 }
@@ -1137,9 +1137,9 @@ async function doDeletePoint(point: api.PointData) {
     const res = await api.deletePoint(selectedDeviceId.value, activeProject.value.name, point.id)
     if (res.success) {
       projectPoints.value = projectPoints.value.filter(p => p.id !== point.id)
-      toastRef.value?.success(`已删除 ${point.name}`)
+      toastRef.value?.success(`Deleted ${point.name}`)
     } else {
-      toastRef.value?.error(`删除失败：${res.error?.message}`)
+      toastRef.value?.error(`Delete failed: ${res.error?.message}`)
     }
   } finally { deletingPoint.value = false }
 }
@@ -1149,7 +1149,7 @@ async function doUpdatePoint(point: api.PointData) {
   if (isMock) {
     point.joint = [...editingJoints.value]
     editingPointId.value = ''
-    toastRef.value?.success(`[Mock] ${point.name} 已更新`)
+    toastRef.value?.success(`[Mock] ${point.name} updated`)
     return
   }
   updatingPoint.value = true
@@ -1159,9 +1159,9 @@ async function doUpdatePoint(point: api.PointData) {
       const idx = projectPoints.value.findIndex(p => p.id === point.id)
       if (idx >= 0) projectPoints.value[idx] = res.data
       editingPointId.value = ''
-      toastRef.value?.success(`${point.name} 已更新`)
+      toastRef.value?.success(`${point.name} updated`)
     } else {
-      toastRef.value?.error(`更新失败：${res.error?.message}`)
+      toastRef.value?.error(`Update failed: ${res.error?.message}`)
     }
   } finally { updatingPoint.value = false }
 }
@@ -1175,9 +1175,9 @@ watch(editingPointId, (id) => {
 
 async function saveActiveFile() {
   if (!selectedDeviceId.value || !activeProject.value || !activeFile.value) return
-  if (isMock) { toastRef.value?.info('[Mock] 文件已保存'); return }
+  if (isMock) { toastRef.value?.info('[Mock] File saved'); return }
   if (!activeFile.value.editable) {
-    toastRef.value?.error('生成的文件为只读')
+    toastRef.value?.error('Generated file is read-only')
     return
   }
   saving.value = true
@@ -1188,9 +1188,9 @@ async function saveActiveFile() {
       setDirty(fileName, false)
       updateActiveProject(res.data, fileName)
       await loadProjects()
-      toastRef.value?.success('文件已保存')
+      toastRef.value?.success('File saved')
     } else {
-      toastRef.value?.error(`保存失败：${res.error?.message}`)
+      toastRef.value?.error(`Save failed: ${res.error?.message}`)
     }
   } finally {
     saving.value = false
@@ -1204,7 +1204,7 @@ async function saveDirtyFiles() {
     if (!isDirty(file.name) || !file.editable) continue
     const res = await api.updateProjectFile(selectedDeviceId.value, activeProject.value.name, file.name, file.content)
     if (!res.success || !res.data) {
-      toastRef.value?.error(`保存失败：${res.error?.message}`)
+      toastRef.value?.error(`Save failed: ${res.error?.message}`)
       return false
     }
     setDirty(file.name, false)
@@ -1220,8 +1220,8 @@ async function runProject() {
     runtimeLogs.value = []
     runtimeCursorText.value = ''
     clearExecutionLine()
-    appendRuntimeLog({ level: 'client', data: '[Mock] 正在运行项目...' })
-    toastRef.value?.success('[Mock] 已启动（按 F6 停止）')
+    appendRuntimeLog({ level: 'client', data: '[Mock] Running project...' })
+    toastRef.value?.success('[Mock] Started (press F6 to stop)')
     return
   }
   running.value = true
@@ -1231,19 +1231,19 @@ async function runProject() {
     runtimeCursorText.value = ''
     clearExecutionLine()
     const breakpointLines = buildDebuggerBreakpoints()
-    appendRuntimeLog({ level: 'client', data: `断点 ${JSON.stringify(breakpointLines)}` })
+    appendRuntimeLog({ level: 'client', data: `Breakpoints ${JSON.stringify(breakpointLines)}` })
     const breakpointRes = await api.debuggerBreakPoint(selectedDeviceId.value, breakpointLines)
     if (!breakpointRes.success) {
-      toastRef.value?.error(`设置断点失败：${breakpointRes.error?.message}`)
+      toastRef.value?.error(`Breakpoints failed: ${breakpointRes.error?.message}`)
       return
     }
     const res = await api.runDeviceProject(selectedDeviceId.value, activeProject.value.name)
     if (res.success) {
       clearEditorMarkers()
-      toastRef.value?.success(`已启动 ${activeProject.value.name}`)
+      toastRef.value?.success(`Started ${activeProject.value.name}`)
     } else {
       if (res.error?.message) markEditorError(res.error.message)
-      toastRef.value?.error(`运行失败：${res.error?.message}`)
+      toastRef.value?.error(`Run failed: ${res.error?.message}`)
     }
   } finally {
     running.value = false
@@ -1252,16 +1252,16 @@ async function runProject() {
 
 async function stopDebugger() {
   if (!selectedDeviceId.value) return
-  if (isMock) { running.value = false; clearExecutionLine(); runtimeCursorText.value = '已停止'; toastRef.value?.info('[Mock] 已停止'); return }
+  if (isMock) { running.value = false; clearExecutionLine(); runtimeCursorText.value = 'STOPPED'; toastRef.value?.info('[Mock] Stopped'); return }
   stopping.value = true
   try {
     const res = await api.debuggerStop(selectedDeviceId.value)
     if (res.success) {
       clearExecutionLine()
-      runtimeCursorText.value = '已停止'
-      toastRef.value?.info('调试器已停止')
+      runtimeCursorText.value = 'STOPPED'
+      toastRef.value?.info('Debugger stopped')
     }
-    else toastRef.value?.error(`停止失败：${res.error?.message}`)
+    else toastRef.value?.error(`Stop failed: ${res.error?.message}`)
   } finally {
     stopping.value = false
   }
@@ -1272,8 +1272,8 @@ async function pauseDebugger() {
   pausing.value = true
   try {
     const res = await api.debuggerSuspend(selectedDeviceId.value)
-    if (res.success) toastRef.value?.info('调试器已暂停')
-    else toastRef.value?.error(`暂停失败：${res.error?.message}`)
+    if (res.success) toastRef.value?.info('Debugger paused')
+    else toastRef.value?.error(`Pause failed: ${res.error?.message}`)
   } finally {
     pausing.value = false
   }
@@ -1284,8 +1284,8 @@ async function continueDebugger() {
   continuing.value = true
   try {
     const res = await api.debuggerContinue(selectedDeviceId.value)
-    if (res.success) toastRef.value?.info('调试器已继续')
-    else toastRef.value?.error(`继续失败：${res.error?.message}`)
+    if (res.success) toastRef.value?.info('Debugger continued')
+    else toastRef.value?.error(`Continue failed: ${res.error?.message}`)
   } finally {
     continuing.value = false
   }
@@ -1302,7 +1302,7 @@ function renameProjectFromList(projectName: string) {
     projectName,
     fileName: '',
     input: projectName,
-    message: '请输入新的控制器项目名称。',
+    message: 'Enter a new controller project name.',
   }
 }
 
@@ -1319,9 +1319,9 @@ async function renameProjectByName(projectName: string, nextName: string) {
         renameName.value = res.data.name
       }
       await loadProjects()
-      toastRef.value?.success('项目已重命名')
+      toastRef.value?.success('Project renamed')
     } else {
-      toastRef.value?.error(`重命名失败：${res.error?.message}`)
+      toastRef.value?.error(`Rename failed: ${res.error?.message}`)
     }
   } finally {
     renaming.value = false
@@ -1338,9 +1338,9 @@ async function addFile() {
       newFileName.value = ''
       updateActiveProject(res.data, name)
       await loadProjects()
-      toastRef.value?.success('文件已添加')
+      toastRef.value?.success('File added')
     } else {
-      toastRef.value?.error(`添加失败：${res.error?.message}`)
+      toastRef.value?.error(`Add failed: ${res.error?.message}`)
     }
   } finally {
     addingFile.value = false
@@ -1354,7 +1354,7 @@ async function deleteFile(fileName: string) {
     projectName: activeProject.value.name,
     fileName,
     input: '',
-    message: `确认删除文件 ${fileName}？`,
+    message: `Delete file ${fileName}?`,
   }
 }
 
@@ -1365,9 +1365,9 @@ async function deleteFileConfirmed(projectName: string, fileName: string) {
     setDirty(fileName, false)
     updateActiveProject(res.data)
     await loadProjects()
-    toastRef.value?.success('文件已删除')
+    toastRef.value?.success('File deleted')
   } else {
-    toastRef.value?.error(`删除失败：${res.error?.message}`)
+    toastRef.value?.error(`Delete failed: ${res.error?.message}`)
   }
 }
 
@@ -1382,7 +1382,7 @@ function deleteProjectByName(projectName: string) {
     projectName,
     fileName: '',
     input: '',
-    message: `确认删除项目 ${projectName}？此操作将移除控制器上的项目文件夹。`,
+    message: `Delete project ${projectName}? This removes the controller project folder.`,
   }
 }
 
@@ -1403,9 +1403,9 @@ async function deleteProjectConfirmed(projectName: string) {
         syncEditor()
       }
       await loadProjects()
-      toastRef.value?.success('项目已删除')
+      toastRef.value?.success('Project deleted')
     } else {
-      toastRef.value?.error(`删除失败：${res.error?.message}`)
+      toastRef.value?.error(`Delete failed: ${res.error?.message}`)
     }
   } finally {
     deletingProject.value = false
@@ -1491,7 +1491,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.programming-page { padding: 40px 48px; max-width: 1700px; margin-inline: auto; min-height: 100vh; }
+.programming-page { padding: 40px 48px; max-width: 1700px; min-height: 100vh; }
 .workspace-header {
   display: grid; grid-template-columns: minmax(360px, 1fr) auto minmax(360px, 1fr);
   align-items: center; gap: 16px; padding-bottom: 12px;
@@ -1512,7 +1512,6 @@ onBeforeUnmount(() => {
 .workspace-switch-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .workspace-switch-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .workspace-switch-btn:hover { border-color: var(--border-bright); color: var(--text-primary); }
-.workspace-switch-btn:active { transform: translateY(1px); }
 .workspace-switch-btn--active { border-color: var(--cyan-400); background: var(--cyan-800); color: var(--cyan-300); }
 .programming-grid { display: grid; grid-template-columns: 300px minmax(520px, 1fr) 390px; gap: 16px; align-items: stretch; }
 .project-list-panel, .editor-panel, .run-panel { min-height: 700px; }
@@ -1588,10 +1587,10 @@ onBeforeUnmount(() => {
 .file-tab--dirty::after { content: '*'; margin-left: 4px; color: var(--amber-400); }
 .code-editor {
   width: 100%; height: 610px; overflow: hidden;
-  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  background: #05090d; border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text-primary); outline: none;
 }
-.code-editor:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.code-editor:focus { border-color: var(--cyan-400); box-shadow: 0 0 8px var(--cyan-glow); }
 .code-editor :deep(.monaco-editor),
 .code-editor :deep(.overflow-guard) { border-radius: var(--radius); }
 .code-editor :deep(.execution-line) { background: rgba(251, 191, 36, 0.16); }
@@ -1616,7 +1615,7 @@ onBeforeUnmount(() => {
 .select-input { width: 100%; margin-top: 6px; }
 .select-input--compact { width: 96px; margin-top: 0; flex: 0 0 auto; }
 .select-input:disabled { opacity: 0.78; cursor: not-allowed; }
-.input:focus, .select-input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.input:focus, .select-input:focus { border-color: var(--cyan-400); box-shadow: 0 0 6px var(--cyan-glow); }
 .run-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .deploy-info { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--void-surface); }
 .info-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -1655,7 +1654,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono); font-size: 0.55rem; color: var(--text-secondary);
 }
 .runtime-log-row span { color: var(--text-muted); white-space: nowrap; overflow: hidden; }
-.runtime-log-row strong { color: var(--cyan-300); font-weight: 600; }
+.runtime-log-row strong { color: var(--cyan-300); text-transform: uppercase; font-weight: 500; }
 .runtime-log-row p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .runtime-log-row--special strong { color: var(--amber-300); }
 .runtime-log-row--popup strong { color: var(--green-300); }

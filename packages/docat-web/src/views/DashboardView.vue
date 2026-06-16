@@ -3,26 +3,26 @@
     <!-- Header -->
     <header class="page-header">
       <div>
-        <h2>总览</h2>
-        <p class="header-subtitle">系统状态 · 设备管理</p>
+        <h2>Dashboard</h2>
+        <p class="header-subtitle">SYSTEM STATUS · DEVICE MANAGEMENT</p>
       </div>
       <div class="header-actions">
         <router-link to="/programming" class="btn btn-secondary">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4M10 4l4 4-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 2L7 14" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-          编程
+          PROGRAMMING
         </router-link>
         <button class="btn btn-secondary" @click="scan" :disabled="scanning">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
-          {{ scanning ? '扫描中...' : '扫描网络' }}
+          {{ scanning ? 'SCANNING...' : 'SCAN NETWORK' }}
         </button>
         <button class="btn btn-primary" @click="showAdd = true">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" stroke-width="2"/><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="2"/></svg>
-          添加设备
+          ADD DEVICE
         </button>
         <div class="user-menu-wrapper">
           <button class="btn btn-secondary" @click="showUserDropdown = !showUserDropdown">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-            {{ currentUser?.username?.toUpperCase() || '用户' }}
+            {{ currentUser?.username?.toUpperCase() || 'USER' }}
             <svg width="10" height="10" viewBox="0 0 16 16" fill="none" :style="{ transform: showUserDropdown ? 'rotate(180deg)' : '' }" style="transition:transform 0.15s"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <Transition name="menu">
@@ -33,20 +33,20 @@
               </div>
               <button class="dropdown-item" @click="showChangePassword = true; showUserDropdown = false">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="4" r="2" stroke="currentColor" stroke-width="1.2"/></svg>
-                修改密码
+                CHANGE PASSWORD
               </button>
               <button class="dropdown-item" @click="showSwitchUser = true; showUserDropdown = false">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/><circle cx="12" cy="6" r="2" stroke="currentColor" stroke-width="1.2"/><path d="M1 13c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M12 11a3 3 0 013 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-                切换用户
+                SWITCH USER
               </button>
               <router-link v-if="currentUser?.role === 'admin'" to="/users" class="dropdown-item" @click="showUserDropdown = false">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-                用户管理
+                USER MANAGEMENT
               </router-link>
               <div class="dropdown-divider" />
               <button class="dropdown-item dropdown-item--danger" @click="doLogout">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l4-4-4-4M15 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                登出
+                LOGOUT
               </button>
             </div>
           </Transition>
@@ -58,22 +58,22 @@
     <div class="stats-row mt-2">
       <div class="stat-tile">
         <div class="stat-value">{{ devices.length }}</div>
-        <div class="stat-label">已注册</div>
+        <div class="stat-label">REGISTERED</div>
         <div class="stat-bar"><div class="stat-bar-fill" :style="{ width: '100%' }" /></div>
       </div>
       <div class="stat-tile stat-tile--online">
         <div class="stat-value">{{ deviceStore.connectedCount }}</div>
-        <div class="stat-label">在线</div>
+        <div class="stat-label">ONLINE</div>
         <div class="stat-bar"><div class="stat-bar-fill" :style="{ width: pct(deviceStore.connectedCount) }" /></div>
       </div>
       <div class="stat-tile stat-tile--locked">
         <div class="stat-value">{{ deviceStore.lockedCount }}</div>
-        <div class="stat-label">已锁定</div>
+        <div class="stat-label">LOCKED</div>
         <div class="stat-bar"><div class="stat-bar-fill" :style="{ width: pct(deviceStore.lockedCount) }" /></div>
       </div>
       <div class="stat-tile stat-tile--offline">
         <div class="stat-value">{{ offlineCount }}</div>
-        <div class="stat-label">离线</div>
+        <div class="stat-label">OFFLINE</div>
         <div class="stat-bar"><div class="stat-bar-fill" :style="{ width: pct(offlineCount) }" /></div>
       </div>
     </div>
@@ -83,7 +83,7 @@
       <div v-if="scanResults.length" class="card mt-2">
         <div class="card-section-header">
           <span class="status-dot status-dot--connected" />
-          <span class="card-section-title">网络扫描结果</span>
+          <span class="card-section-title">NETWORK SCAN RESULTS</span>
           <span class="card-section-count">{{ scanResults.length }}</span>
         </div>
         <div class="scan-list mt-1">
@@ -91,13 +91,13 @@
             <div class="scan-row-info">
               <span class="status-dot" :class="d.status === 'unconnected' ? 'status-dot--connected' : 'status-dot--disconnected'" />
               <div class="scan-row-details">
-                <span class="scan-row-name">{{ d.alias || d.type || '未知设备' }}</span>
+                <span class="scan-row-name">{{ d.alias || d.type || 'Unknown Device' }}</span>
                 <span class="scan-row-meta">{{ d.portName }} · {{ d.type }} · {{ d.controllerTypeExt }}</span>
               </div>
             </div>
             <button class="btn btn-sm" :class="d.status === 'unconnected' ? 'btn-success' : 'btn-secondary'"
               :disabled="d.status !== 'unconnected'" @click="addFromScan(d)">
-              {{ d.status === 'unconnected' ? '注册' : d.status.toUpperCase() }}
+              {{ d.status === 'unconnected' ? 'REGISTER' : d.status.toUpperCase() }}
             </button>
           </div>
         </div>
@@ -108,7 +108,7 @@
     <div class="mt-3">
       <div class="card-section-header">
         <span class="status-dot status-dot--connected" />
-        <span class="card-section-title">已注册设备</span>
+        <span class="card-section-title">REGISTERED DEVICES</span>
         <span class="card-section-count">{{ devices.length }}</span>
       </div>
 
@@ -132,16 +132,16 @@
               <div class="device-card-actions">
                 <template v-if="!deviceStore.isConnected(d.id)">
                   <button class="btn btn-sm btn-success flex-1" @click.stop="doConnect(d.id, 'exclusive')">
-                    连接
+                    CONNECT
                   </button>
-                  <button class="btn btn-sm btn-secondary" @click.stop="doConnect(d.id, 'virtual')" title="虚拟连接：不占用设备，仅 HTTP">
+                  <button class="btn btn-sm btn-secondary" @click.stop="doConnect(d.id, 'virtual')" title="Virtual connect: no device claim, HTTP only">
                     vCONN
                   </button>
                 </template>
                 <button v-else class="btn btn-sm btn-secondary flex-1" @click.stop="doDisconnect(d.id)">
-                  断开
+                  DISCONNECT
                 </button>
-                <button class="btn btn-sm btn-secondary" @click.stop="doEdit(d)" title="编辑设备">
+                <button class="btn btn-sm btn-secondary" @click.stop="doEdit(d)" title="Edit device">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
                 <button class="btn btn-sm btn-danger" @click.stop="doDelete(d)">
@@ -157,8 +157,8 @@
         <div class="empty-hex">
           <svg width="60" height="60" viewBox="0 0 48 48" fill="none"><polygon points="24,6 42,16 42,32 24,42 6,32 6,16" stroke="currentColor" stroke-width="1"/></svg>
         </div>
-        <h3>暂无已注册设备</h3>
-        <p>扫描网络或手动添加设备以开始监控</p>
+        <h3>NO DEVICES REGISTERED</h3>
+        <p>Scan the network or manually add a device to begin monitoring</p>
       </div>
     </div>
 
@@ -166,20 +166,20 @@
     <Transition name="fade">
       <div v-if="showDelete" class="modal-overlay" @click.self="showDelete = null">
         <div class="modal card">
-          <div class="modal-header"><h3>确认移除</h3>
+          <div class="modal-header"><h3>CONFIRM REMOVAL</h3>
             <button class="modal-close" @click="showDelete = null">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
             </button>
           </div>
           <p class="mt-1" style="color:var(--text-secondary);font-size:14px;">
-            确定从注册表中移除设备 <strong>{{ deletingDevice?.name || deletingDevice?.ip }}</strong> 吗？
+            Remove device <strong>{{ deletingDevice?.name || deletingDevice?.ip }}</strong> from the registry?
           </p>
           <p style="color:var(--text-muted);font-size:12px;margin-top:6px;">
-            此操作不会影响物理设备 — 仅从 docat 中移除注册记录。
+            This does not affect the physical device — it only removes the registration from docat.
           </p>
           <div class="modal-actions mt-2">
-            <button class="btn btn-secondary flex-1" @click="showDelete = null">取消</button>
-            <button class="btn btn-danger flex-1" @click="confirmDelete">移除</button>
+            <button class="btn btn-secondary flex-1" @click="showDelete = null">CANCEL</button>
+            <button class="btn btn-danger flex-1" @click="confirmDelete">REMOVE</button>
           </div>
         </div>
       </div>
@@ -196,19 +196,19 @@
     <Transition name="fade">
       <div v-if="showAdd" class="modal-overlay" @click.self="showAdd = false">
         <div class="modal card">
-          <div class="modal-header"><h3>注册设备</h3>
+          <div class="modal-header"><h3>REGISTER DEVICE</h3>
             <button class="modal-close" @click="showAdd = false">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
             </button>
           </div>
           <form @submit.prevent="addDevice" class="modal-form mt-1">
-            <div class="field-group"><label class="field-label">IP 地址</label><input v-model="newIp" class="input" placeholder="192.168.5.1" /></div>
-            <div class="field-group mt-1"><label class="field-label">设备名称</label><input v-model="newName" class="input" placeholder="产线 A — CR5" /></div>
-            <div class="field-group mt-1"><label class="field-label">型号 <span class="field-hint">（自动检测）</span></label><input v-model="newType" class="input" placeholder="留空则自动检测" /></div>
-            <label class="checkbox-row mt-2"><input v-model="newAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">服务启动时自动连接</span></label>
+            <div class="field-group"><label class="field-label">IP ADDRESS</label><input v-model="newIp" class="input" placeholder="192.168.5.1" /></div>
+            <div class="field-group mt-1"><label class="field-label">DEVICE NAME</label><input v-model="newName" class="input" placeholder="Production Line A — CR5" /></div>
+            <div class="field-group mt-1"><label class="field-label">TYPE <span class="field-hint">(AUTO-DETECT)</span></label><input v-model="newType" class="input" placeholder="Leave empty for auto-detection" /></div>
+            <label class="checkbox-row mt-2"><input v-model="newAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">AUTO-CONNECT ON SERVER START</span></label>
             <div class="modal-actions mt-2">
-              <button type="button" class="btn btn-secondary flex-1" @click="showAdd = false">取消</button>
-              <button type="submit" class="btn btn-primary flex-1" :disabled="!newIp || !newName">注册</button>
+              <button type="button" class="btn btn-secondary flex-1" @click="showAdd = false">CANCEL</button>
+              <button type="submit" class="btn btn-primary flex-1" :disabled="!newIp || !newName">REGISTER</button>
             </div>
           </form>
         </div>
@@ -219,18 +219,18 @@
     <Transition name="fade">
       <div v-if="editingDevice" class="modal-overlay" @click.self="editingDevice = null">
         <div class="modal card">
-          <div class="modal-header"><h3>编辑设备</h3>
+          <div class="modal-header"><h3>EDIT DEVICE</h3>
             <button class="modal-close" @click="editingDevice = null">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
             </button>
           </div>
           <form @submit.prevent="saveEdit" class="modal-form mt-1">
-            <div class="field-group"><label class="field-label">IP 地址</label><input v-model="editIp" class="input" placeholder="192.168.5.1" /></div>
-            <div class="field-group mt-1"><label class="field-label">设备名称</label><input v-model="editName" class="input" placeholder="产线 A — CR5" /></div>
-            <label class="checkbox-row mt-2"><input v-model="editAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">服务启动时自动连接</span></label>
+            <div class="field-group"><label class="field-label">IP ADDRESS</label><input v-model="editIp" class="input" placeholder="192.168.5.1" /></div>
+            <div class="field-group mt-1"><label class="field-label">DEVICE NAME</label><input v-model="editName" class="input" placeholder="Production Line A — CR5" /></div>
+            <label class="checkbox-row mt-2"><input v-model="editAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">AUTO-CONNECT ON SERVER START</span></label>
             <div class="modal-actions mt-2">
-              <button type="button" class="btn btn-secondary flex-1" @click="editingDevice = null">取消</button>
-              <button type="submit" class="btn btn-primary flex-1" :disabled="!editIp || !editName">保存</button>
+              <button type="button" class="btn btn-secondary flex-1" @click="editingDevice = null">CANCEL</button>
+              <button type="submit" class="btn btn-primary flex-1" :disabled="!editIp || !editName">SAVE</button>
             </div>
           </form>
         </div>
@@ -279,7 +279,7 @@ const currentUser = computed(() => userStore.currentUser)
 function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); userStore.reset(); router.push('/login') }
 
 async function onPasswordChanged() {
-  toastRef.value?.success('密码修改成功')
+  toastRef.value?.success('Password changed successfully')
 }
 
 async function onUserSwitched() {
@@ -288,7 +288,7 @@ async function onUserSwitched() {
   const res = await api.me()
   if (res.success && res.data) {
     userStore.setCurrentUser(res.data)
-    toastRef.value?.success(`已切换到 ${res.data.username}`)
+    toastRef.value?.success(`Switched to ${res.data.username}`)
   }
 }
 
@@ -306,10 +306,8 @@ function getStatusClass(deviceId: string): StatusClass {
 }
 function getStatusLabel(deviceId: string): string {
   const cls = getStatusClass(deviceId)
-  if (cls === 'virtual') return '虚拟连接'
-  if (cls === 'online') return '在线'
-  if (cls === 'locked') return '已锁定'
-  return '离线'
+  if (cls === 'virtual') return 'vCONNECTED'
+  return cls.toUpperCase()
 }
 
 async function load() {
@@ -343,14 +341,14 @@ async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive'
   const res = await api.connectDevice(id, mode)
   if (res.success) {
     deviceStore.setConnected(id, true, mode)
-    toastRef.value?.success(mode === 'virtual' ? '虚拟连接成功（未占用设备）' : '设备已连接')
+    toastRef.value?.success(mode === 'virtual' ? 'Virtual connected (no claim)' : 'Device connected')
   } else {
     const msg = res.error?.message ?? ''
     const code = res.error?.code
     if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
-      toastRef.value?.error(`${msg}`, { action: { label: '强制释放', handler: () => doForceRelease(id) } })
+      toastRef.value?.error(`${msg}`, { action: { label: 'FORCE RELEASE', handler: () => doForceRelease(id) } })
     } else {
-      toastRef.value?.error(`连接失败：${msg}`)
+      toastRef.value?.error(`Connect failed: ${msg}`)
     }
   }
 }
@@ -358,16 +356,16 @@ async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive'
 async function doForceRelease(id: string) {
   const res = await api.forceReleaseDevice(id)
   if (res.success) {
-    toastRef.value?.success('残留占用已释放 — 请重新尝试连接')
+    toastRef.value?.success('Ghost occupation released — try connecting again')
   } else {
-    toastRef.value?.error(`强制释放失败：${res.error?.message ?? '未知错误'}`)
+    toastRef.value?.error(`Force release failed: ${res.error?.message ?? 'unknown'}`)
   }
 }
 
 async function doDisconnect(id: string) {
   await api.disconnectDevice(id)
   deviceStore.setOffline(id)
-  toastRef.value?.info('设备已断开')
+  toastRef.value?.info('Device disconnected')
 }
 
 function doEdit(device: DeviceConfig) {
@@ -386,10 +384,10 @@ async function saveEdit() {
   })
   if (res.success) {
     editingDevice.value = null
-    toastRef.value?.success('设备已更新')
+    toastRef.value?.success('Device updated')
     await load()
   } else {
-    toastRef.value?.error(`更新失败：${res.error?.message}`)
+    toastRef.value?.error(`Update failed: ${res.error?.message}`)
   }
 }
 
@@ -402,10 +400,10 @@ async function confirmDelete() {
   const res = await api.deleteDevice(d.id)
   if (res.success) {
     deviceStore.setOffline(d.id)
-    toastRef.value?.success(`已移除"${d.name}"`)
+    toastRef.value?.success(`"${d.name}" removed`)
     await load()
   } else {
-    toastRef.value?.error(`失败：${res.error?.message}`)
+    toastRef.value?.error(`Failed: ${res.error?.message}`)
   }
 }
 
@@ -418,96 +416,94 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.dashboard { padding: 40px 48px; max-width: 1400px; margin-inline: auto; min-height: 100vh; }
+.dashboard { padding: 40px 48px; max-width: 1400px; min-height: 100vh; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
-.header-subtitle { font-family: var(--font-body); font-size: 0.82rem; color: var(--text-muted); margin-top: 6px; }
+.header-subtitle { font-family: var(--font-mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.15em; color: var(--text-muted); margin-top: 4px; }
 .header-actions { display: flex; gap: 8px; }
 .stats-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .stat-tile { flex: 1; min-width: 140px; max-width: 240px; padding: 24px; background: var(--surface-0); border: 1px solid var(--border); border-radius: var(--radius-lg); position: relative; overflow: hidden; }
-.stat-value { font-family: var(--font-mono); font-size: 2.4rem; font-weight: 500; color: var(--text-primary); line-height: 1; letter-spacing: -0.02em; }
-.stat-label { font-family: var(--font-body); font-size: 0.72rem; font-weight: 500; color: var(--text-muted); margin-top: 8px; }
+.stat-value { font-family: var(--font-mono); font-size: 2.4rem; font-weight: 400; color: var(--text-primary); line-height: 1; }
+.stat-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); margin-top: 6px; }
 .stat-bar { height: 2px; background: var(--border); margin-top: 12px; border-radius: 1px; }
 .stat-bar-fill { height: 100%; border-radius: 1px; transition: width 0.5s var(--ease-out); }
 .stat-tile--online .stat-value { color: var(--status-online); }
-.stat-tile--online .stat-bar-fill { background: var(--status-online); }
+.stat-tile--online .stat-bar-fill { background: var(--status-online); box-shadow: 0 0 6px var(--status-online); }
 .stat-tile--locked .stat-value { color: var(--status-locked); }
-.stat-tile--locked .stat-bar-fill { background: var(--status-locked); }
+.stat-tile--locked .stat-bar-fill { background: var(--status-locked); box-shadow: 0 0 6px var(--status-locked); }
 .stat-tile--offline .stat-value { color: var(--text-muted); }
 .stat-tile--offline .stat-bar-fill { background: var(--text-muted); }
 .card-section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.card-section-title { font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; color: var(--text-muted); flex: 1; }
-.card-section-count { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+.card-section-title { font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); flex: 1; }
+.card-section-count { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
 .scan-list { display: flex; flex-direction: column; gap: 4px; }
-.scan-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--surface-1); border-radius: var(--radius); border: 1px solid transparent; transition: border-color var(--duration-fast); }
-.scan-row:hover { border-color: var(--border-bright); background: var(--surface-1); }
-.scan-row:active { transform: scale(0.997); }
+.scan-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--void-surface); border-radius: var(--radius); border: 1px solid transparent; transition: border-color var(--duration-fast); }
+.scan-row:hover { border-color: var(--border); }
 .scan-row-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .scan-row-details { display: flex; flex-direction: column; min-width: 0; }
 .scan-row-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.scan-row-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scan-row-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .device-card { cursor: pointer; padding: 0; overflow: hidden; transition: transform var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out); }
-.device-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.device-card:active { transform: translateY(0) scale(0.995); }
-.device-accent { height: 2px; width: 100%; transition: height var(--duration-fast); }
+.device-card:hover { transform: translateY(-2px); }
+.device-accent { height: 2px; width: 100%; transition: height var(--duration-fast), box-shadow var(--duration-fast); }
 .device-card:hover .device-accent { height: 3px; }
-.device-accent--online { background: var(--status-online); }
-.device-accent--locked { background: var(--status-locked); }
-.device-accent--virtual { background: var(--status-virtual); }
+.device-accent--online { background: var(--status-online); box-shadow: 0 0 8px var(--status-online); }
+.device-accent--locked { background: var(--status-locked); box-shadow: 0 0 8px var(--status-locked); }
+.device-accent--virtual { background: #a855f7; box-shadow: 0 0 8px #a855f7; }
 .device-accent--offline { background: var(--status-offline); }
 .device-card-body { padding: 20px; }
 .device-card-top { display: flex; justify-content: space-between; align-items: center; }
-.device-model-badge { font-family: var(--font-body); font-size: 0.68rem; font-weight: 600; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); }
-.device-card-name { font-family: var(--font-display); font-size: 1.05rem; font-weight: 600; color: var(--text-primary); margin-top: 12px; letter-spacing: -0.01em; }
-.device-card-ip { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.device-model-badge { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.12em; padding: 2px 8px; border: 1px solid var(--border); border-radius: 2px; color: var(--text-muted); }
+.device-card-name { font-family: var(--font-display); font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-top: 12px; letter-spacing: 0.06em; }
+.device-card-ip { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 .device-card-actions { display: flex; gap: 6px; margin-top: 16px; }
 .empty-state { text-align: center; padding: 80px 20px; }
 .empty-hex { color: var(--border); margin-bottom: 16px; }
-.empty-state h3 { font-family: var(--font-display); color: var(--text-muted); font-size: 0.95rem; }
-.empty-state p { color: var(--text-muted); font-size: 0.82rem; margin-top: 8px; }
-.modal-overlay { position: fixed; inset: 0; background: rgba(8,9,10,0.72); backdrop-filter: blur(6px); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.empty-state h3 { font-family: var(--font-display); color: var(--text-muted); font-size: 0.8rem; letter-spacing: 0.12em; }
+.empty-state p { color: var(--text-muted); font-size: 0.75rem; margin-top: 8px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(4,10,20,0.85); backdrop-filter: blur(6px); z-index: 100; display: flex; align-items: center; justify-content: center; }
 .modal { width: 100%; max-width: 460px; padding: 28px; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; }
 .modal-close { background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 4px; transition: color var(--duration-fast); }
 .modal-close:hover { color: var(--text-primary); }
 .modal-form { display: flex; flex-direction: column; }
 .modal-actions { display: flex; gap: 8px; }
-.field-group { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-family: var(--font-body); font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); }
+.field-group { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 700; letter-spacing: 0.15em; color: var(--text-muted); }
 .field-hint { font-weight: 400; color: var(--text-muted); opacity: 0.6; }
 .checkbox-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.checkbox { appearance: none; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--void-deep); cursor: pointer; position: relative; transition: border-color var(--duration-fast); }
-.checkbox:checked { border-color: var(--accent); background: var(--accent); }
-.checkbox:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-.checkbox-label { font-family: var(--font-body); font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); }
+.checkbox { appearance: none; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 2px; background: var(--void-deep); cursor: pointer; position: relative; transition: border-color var(--duration-fast); }
+.checkbox:checked { border-color: var(--cyan-300); background: var(--cyan-700); }
+.checkbox:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid var(--cyan-300); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.checkbox-label { font-family: var(--font-display); font-size: 0.55rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-secondary); }
 h3 { margin: 0; }
 
 /* Virtual (purple) status */
-.status-dot--virtual { background: var(--status-virtual); }
-.badge-virtual { border-color: var(--status-virtual); color: var(--status-virtual); background: var(--status-virtual-dim); }
+.status-dot--virtual { background: #a855f7; box-shadow: 0 0 4px #a855f7; }
+.badge-virtual { border-color: #a855f7; color: #a855f7; background: rgba(168, 85, 247, 0.08); }
 
 /* User Menu Dropdown */
 .user-menu-wrapper { position: relative; }
 .dropdown-menu {
   position: absolute; top: 100%; right: 0; margin-top: 6px;
   min-width: 220px; padding: 6px; z-index: 80;
-  background: var(--surface-2); border: 1px solid var(--border);
+  background: var(--surface-0); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow-lg);
 }
 .dropdown-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
 .dropdown-username { font-size: 13px; font-weight: 500; color: var(--text-primary); }
-.dropdown-role { font-family: var(--font-body); font-size: 0.68rem; font-weight: 600; color: var(--text-muted); padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.dropdown-role { font-family: var(--font-display); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px; }
 .dropdown-item {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; border-radius: var(--radius);
-  font-family: var(--font-body); font-size: 0.82rem; font-weight: 500;
-  color: var(--text-secondary);
+  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
+  letter-spacing: 0.1em; color: var(--text-secondary);
   background: none; border: none; cursor: pointer; text-decoration: none;
   transition: all var(--duration-fast); width: 100%; text-align: left;
 }
 .dropdown-item:hover { background: var(--surface-1); color: var(--text-primary); }
 .dropdown-item--danger { color: var(--status-danger); }
-.dropdown-item--danger:hover { background: var(--status-danger-dim); color: var(--status-danger); }
+.dropdown-item--danger:hover { background: #ff174411; color: #ff6b6b; }
 .dropdown-divider { height: 1px; background: var(--border); margin: 4px 8px; }
 .menu-enter-active { transition: all 0.15s var(--ease-out); }
 .menu-leave-active { transition: all 0.1s var(--ease-in); }

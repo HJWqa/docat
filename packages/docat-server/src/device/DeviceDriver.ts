@@ -33,6 +33,16 @@ export abstract class DeviceDriver {
   abstract enable(): Promise<void>
   abstract disable(): Promise<void>
 
+  // ─── 模式切换 ──────────────────────────────────
+  abstract setAutoManualSwitch(value: boolean): Promise<void>
+  abstract getAutoManualSwitch(): Promise<boolean>
+  abstract setAutoManualMode(mode: 'auto' | 'manual'): Promise<void>
+  abstract setRemoteSwitch(value: boolean): Promise<void>
+  abstract getRemoteSwitch(): Promise<boolean>
+  /** 远程控制模式切换: 'tp' = 在线模式, 'tcp' = TCP模式 */
+  abstract setRemoteControl(mode: 'tp' | 'tcp'): Promise<void>
+  abstract getRemoteControl(): Promise<'tp' | 'tcp'>
+
   // ─── 告警 ──────────────────────────────────────
   abstract getAlarms(): Promise<Array<{ id: number; level: number; description: string; solution: string; date: string; time: string }>>
   abstract getWarnings(): Promise<Array<{ id: number; level: number; description: string; solution: string; date: string; time: string }>>
@@ -46,6 +56,9 @@ export abstract class DeviceDriver {
   abstract moveTo(pose: MoveParams): Promise<void>
   abstract moveJoints(joints: number[]): Promise<void>
   abstract moveJointsCommand(joints: number[], value: boolean): Promise<Record<string, unknown>>
+  abstract moveCartesian(params: { x: number; y: number; z: number; rx: number; ry: number; rz: number; user?: number; tool?: number }): Promise<Record<string, unknown>>
+  abstract inverseKinematics(params: { coordinate: number[]; jointNear: number[]; user?: number; tool?: number }): Promise<{ joint: number[]; errID: number; errMsg?: string }>
+  abstract forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }>
   abstract home(): Promise<void>
   abstract stop(): Promise<void>
   abstract emergencyStop(): Promise<void>

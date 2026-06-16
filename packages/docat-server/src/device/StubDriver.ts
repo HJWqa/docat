@@ -108,6 +108,67 @@ export class StubDriver extends DeviceDriver {
     })
   }
 
+  // ─── 模式切换 ──────────────────────────────────
+
+  async setAutoManualSwitch(value: boolean): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post', url: '/settings/function/autoManualSwitch', portName: this.ip,
+      params: { value }, timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set autoManualSwitch failed: ${reply.message}`)
+  }
+
+  async getAutoManualSwitch(): Promise<boolean> {
+    const reply = await this.http.send({
+      method: 'get', url: '/settings/function/autoManualSwitch', portName: this.ip, timeout: 5000,
+    })
+    if (reply.status && reply.data) return !!(reply.data as Record<string, unknown>).value
+    return false
+  }
+
+  async setAutoManualMode(mode: 'auto' | 'manual'): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post', url: '/settings/function/autoManual', portName: this.ip,
+      params: { autoManual: mode }, timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set auto/manual mode failed: ${reply.message}`)
+  }
+
+  async setRemoteSwitch(value: boolean): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post', url: '/settings/function/remoteSwitch', portName: this.ip,
+      params: { value }, timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set remoteSwitch failed: ${reply.message}`)
+  }
+
+  async getRemoteSwitch(): Promise<boolean> {
+    const reply = await this.http.send({
+      method: 'get', url: '/settings/function/remoteSwitch', portName: this.ip, timeout: 5000,
+    })
+    if (reply.status && reply.data) return !!(reply.data as Record<string, unknown>).value
+    return false
+  }
+
+  async setRemoteControl(mode: 'tp' | 'tcp'): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post', url: '/settings/function/remoteControl', portName: this.ip,
+      params: { mode }, timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set remoteControl failed: ${reply.message}`)
+  }
+
+  async getRemoteControl(): Promise<'tp' | 'tcp'> {
+    const reply = await this.http.send({
+      method: 'get', url: '/settings/function/remoteControl', portName: this.ip, timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      const mode = (reply.data as Record<string, unknown>).mode
+      return mode === 'tcp' ? 'tcp' : 'tp'
+    }
+    return 'tp'
+  }
+
   // ─── 负载参数 ──────────────────────────────────
 
   async getLoadParams(): Promise<LoadParams> {
@@ -448,6 +509,40 @@ export class StubDriver extends DeviceDriver {
 
   async moveJointsCommand(_joints: number[], _value: boolean): Promise<Record<string, unknown>> {
     return { status: true }
+  }
+
+  async moveCartesian(params: { x: number; y: number; z: number; rx: number; ry: number; rz: number; user?: number; tool?: number }): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'post', url: '/interface/movL', portName: this.ip,
+      params: { x: params.x, y: params.y, z: params.z, rx: params.rx, ry: params.ry, rz: params.rz, user: params.user ?? -1, tool: params.tool ?? -1 },
+      timeout: 30000,
+    })
+    return { status: reply.status, message: reply.message, data: reply.data }
+  }
+
+  async forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }> {
+    const reply = await this.http.send({
+      method: 'post', url: '/interface/forwardCal', portName: this.ip,
+      params: { joint: params.joint, user: params.user ?? 0, tool: params.tool ?? 0 }, timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      const d = reply.data as Record<string, unknown>
+      return { coordinate: (d.coordinate as number[]) || [], errID: (d.errID as number) ?? -1, errMsg: d.errMsg as string | undefined }
+    }
+    return { coordinate: [], errID: -1, errMsg: reply.message || 'FK request failed' }
+  }
+
+  async inverseKinematics(params: { coordinate: number[]; jointNear: number[]; user?: number; tool?: number }): Promise<{ joint: number[]; errID: number; errMsg?: string }> {
+    const reply = await this.http.send({
+      method: 'post', url: '/interface/inverseCal', portName: this.ip,
+      params: { useJointNear: true, jointNear: params.jointNear, coordinate: params.coordinate, user: params.user ?? 0, tool: params.tool ?? 0 },
+      timeout: 10000,
+    })
+    if (reply.status && reply.data) {
+      const d = reply.data as Record<string, unknown>
+      return { joint: (d.joint as number[]) || [], errID: (d.errID as number) ?? -1, errMsg: d.errMsg as string | undefined }
+    }
+    return { joint: [], errID: -1, errMsg: reply.message || 'IK request failed' }
   }
 
   async home(): Promise<void> {

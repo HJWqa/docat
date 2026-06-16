@@ -27,6 +27,12 @@
       </div>
     </header>
 
+    <!-- TCP Mode Warning -->
+    <div v-if="tcpModeError && connected" class="tcp-mode-warning">
+      ⚠ 设备未处于 TCP 控制模式 — Dashboard 命令无法执行。
+      请通过示教器设置 → 控制模式，切换为 <strong>TCP/IP 模式</strong>
+    </div>
+
     <div class="tcp-layout">
       <!-- Row 1: Connect + Dashboard -->
       <div class="tcp-top-row">
@@ -110,13 +116,16 @@
                 @pointerdown="startJog(`J${j}-`)" @pointerup="stopJog" @pointerleave="stopJog">−</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-sm move-go" :disabled="!connected" @click="moveToJoints">关节运动</button>
+          <div class="move-actions">
+            <button class="btn btn-primary btn-sm" :disabled="!connected" @click="moveToJoints">关节运动</button>
+          </div>
         </div>
         <div class="move-section">
           <div class="move-row-label">坐标</div>
           <div v-for="(axis, ai) in ['X','Y','Z','RX','RY','RZ']" :key="'c'+ai" class="move-field">
             <label>{{ axis }}</label>
-            <input v-model.number="moveCoord[axis.toLowerCase()]" type="number" step="0.1" class="move-input" />
+            <input v-model.number="moveCoord[axis.toLowerCase()]" type="number" step="0.1" class="move-input"
+              @blur="onCoordIkBlur" />
             <div class="move-jog-btns">
               <button class="btn btn-secondary jog-btn" :disabled="!connected"
                 @pointerdown="startJog(`${axis}+`)" @pointerup="stopJog" @pointerleave="stopJog">+</button>
@@ -124,7 +133,11 @@
                 @pointerdown="startJog(`${axis}-`)" @pointerup="stopJog" @pointerleave="stopJog">−</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-sm move-go" :disabled="!connected" @click="moveToCoord">直线运动</button>
+          <div class="move-actions">
+            <button class="btn btn-primary btn-sm" :disabled="!connected" @click="moveToCoord">直线运动</button>
+            <span v-if="coordIkOk" class="check-label check-label--ok">✓</span>
+            <span v-if="coordIkFail" class="check-label check-label--fail">✗ {{ coordIkMsg }}</span>
+          </div>
         </div>
       </div>
 
@@ -215,16 +228,81 @@ const feedback = ref<FeedData | null>(null)
 // Move
 const moveJoints = reactive<Record<string, number>>({ j1:0,j2:0,j3:0,j4:0,j5:0,j6:0 })
 const moveCoord = reactive<Record<string, number>>({ x:0,y:0,z:0,rx:0,ry:0,rz:0 })
+const coordIkOk = ref(false)
+const coordIkFail = ref(false)
+const coordIkMsg = ref('')
 
 // Log
 interface LogEntry { type: 'send' | 'recv'; text: string }
 const tcpLog = ref<LogEntry[]>([])
 
+// Recording
+const recording = ref(false)
+const trackName = ref('')
+const tracks = ref<api.TrackItem[]>([])
+const playing = ref(false)
+const playingTrack = ref('')
+
+async function loadTracks() {
+  const res = await api.listTracks(deviceId)
+  if (res.success && res.data) tracks.value = res.data
+}
+async function startRecording() {
+  if (!trackName.value.trim()) return
+  const res = await api.startRecord(deviceId, trackName.value.trim())
+  if (res.success) {
+    recording.value = true
+    tcpLog.value.push({ type:'send', text:`录制开始: ${trackName.value}` })
+  } else {
+    toastRef.value?.error(`录制开始失败: ${res.error?.message}`)
+  }
+}
+async function stopRecording() {
+  const res = await api.stopRecord(deviceId)
+  if (res.success) {
+    recording.value = false
+    tcpLog.value.push({ type:'send', text:`录制停止: ${res.data?.name}` })
+    await loadTracks()
+  }
+}
+async function deleteTrackFile(name: string) {
+  await api.deleteTrack(deviceId, name)
+  await loadTracks()
+}
+async function playTrack(t: api.TrackItem) {
+  if (!connected.value) return
+  playing.value = true; playingTrack.value = t.name
+  try {
+    const res = await api.getTrackPoints(deviceId, t.name)
+    if (res.success && res.data) {
+      const points = res.data
+      tcpLog.value.push({ type:'send', text:`PLAY START: ${t.name} (${points.length} pts)` })
+      for (let i = 0; i < points.length; i++) {
+        if (!playing.value) break
+        const p = points[i]
+        await api.sendCRDashboard(deviceId, `MovJ(${p.j1},${p.j2},${p.j3},${p.j4},${p.j5},${p.j6})`)
+        tcpLog.value.push({ type:'send', text:`PLAY [${i+1}/${points.length}] MovJ(${p.j1.toFixed(1)},${p.j2.toFixed(1)},${p.j3.toFixed(1)},${p.j4.toFixed(1)},${p.j5.toFixed(1)},${p.j6.toFixed(1)})` })
+        await new Promise(r => setTimeout(r, 200))
+      }
+      tcpLog.value.push({ type:'send', text:`PLAY END: ${t.name}` })
+    }
+  } catch (err) {
+    tcpLog.value.push({ type:'recv', text:`Playback error: ${(err as Error).message}` })
+  } finally { playing.value = false; playingTrack.value = '' }
+}
+
+function fmtTrackTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`
+  } catch { return iso }
+}
+
 function fmtHex(v: number | undefined): string {
   return v !== undefined ? '0x' + v.toString(16).toUpperCase().padStart(4, '0') : '—'
 }
 function modeLabel(m: number | undefined): string {
-  const map: Record<number, string> = { 1:'INIT',2:'BRAKE_OPEN',3:'OFF',4:'DISABLED',5:'ENABLED',6:'BACKDRIVE',7:'RUNNING',8:'MOVING',9:'FW_UPD',10:'ERROR',11:'PAUSED',12:'JOG',13:'ESTOP' }
+  const map: Record<number, string> = { 1:'初始化',2:'刹车释放',3:'关闭',4:'已禁用',5:'已使能',6:'回驱',7:'运行中',8:'移动中',9:'固件更新',10:'错误',11:'已暂停',12:'点动',13:'急停' }
   return m !== undefined ? (map[m] || `?${m}`) : '—'
 }
 function modeClass(m: number | undefined): string {
@@ -233,9 +311,15 @@ function modeClass(m: number | undefined): string {
   return ''
 }
 
+const tcpModeError = ref(false) // 设备未切换到 TCP 模式
+
 async function connectTcp() {
   connecting.value = true
+  tcpModeError.value = false
   try {
+    // 先切换到 TCP 远程控制模式
+    try { await api.setRemoteControl(deviceId, 'tcp') } catch { /* 可能已在 TCP 模式 */ }
+    await new Promise(r => setTimeout(r, 500))
     await pollStatus()
     // 轮询直到连上或超时（10s）
     const start = Date.now()
@@ -245,6 +329,13 @@ async function connectTcp() {
     }
     if (!connected.value) {
       toastRef.value?.error('连接超时 — 请检查设备端口 29999/30004 是否可达')
+    } else {
+      // 连接成功，验证 TCP 模式
+      const testRes = await api.sendCRDashboard(deviceId, 'RobotMode()')
+      if (testRes.success && testRes.data?.reply && testRes.data.reply.includes('Not Tcp')) {
+        tcpModeError.value = true
+        toastRef.value?.error('设备未切换到 TCP 模式！请通过示教器或设置将控制模式切换为 TCP')
+      }
     }
     if (!pollTimer) pollTimer = setInterval(pollStatus, 500)
   } finally {
@@ -253,8 +344,10 @@ async function connectTcp() {
 }
 async function disconnectTcp() {
   await api.disconnectCRTcp(deviceId)
-  connected.value = false; feedback.value = null
+  connected.value = false; feedback.value = null; tcpModeError.value = false
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  // 断开后切回在线模式
+  try { await api.setRemoteControl(deviceId, 'tp') } catch { /* 忽略 */ }
 }
 async function toggleAutoReconnect() {
   autoReconnect.value = !autoReconnect.value
@@ -283,6 +376,9 @@ async function sendCommand() {
   try {
     const res = await api.sendCRDashboard(deviceId, cmd)
     const reply = res.success ? res.data?.reply || '(空)' : `错误: ${res.error?.message}`
+    if (reply.includes('Not Tcp')) {
+      tcpModeError.value = true
+    }
     tcpLog.value.push({ type: 'recv', text: reply })
   } catch (err) {
     tcpLog.value.push({ type: 'recv', text: `错误: ${(err as Error).message}` })
@@ -312,8 +408,40 @@ function moveToJoints() {
   sendCommandStr(`MovJ(${j.j1},${j.j2},${j.j3},${j.j4},${j.j5},${j.j6})`)
 }
 function moveToCoord() {
+  coordIkOk.value = false; coordIkFail.value = false
   const c = moveCoord
   sendCommandStr(`MovL(${c.x},${c.y},${c.z},${c.rx},${c.ry},${c.rz})`)
+}
+
+let coordIkTimer: ReturnType<typeof setTimeout> | null = null
+async function onCoordIkBlur() {
+  if (!connected.value) return
+  if (coordIkTimer) clearTimeout(coordIkTimer)
+  coordIkTimer = setTimeout(async () => {
+    const c = moveCoord
+    const f = feedback.value
+    const jointNear = f?.QActual ? `{${f.QActual.map(v=>v.toFixed(3)).join(',')}}` : ''
+    const cmd = `InverseKin(${c.x},${c.y},${c.z},${c.rx},${c.ry},${c.rz},user=0,tool=0,useJointNear=1,JointNear=${jointNear})`
+    try {
+      const res = await api.sendCRDashboard(deviceId, cmd)
+      const reply = res.success ? (res.data?.reply || '') : ''
+      tcpLog.value.push({ type:'send', text:'IK' }, { type:'recv', text:reply.substring(0, 80) || 'Error' })
+      if (reply.includes('Not Tcp')) { tcpModeError.value = true; return }
+      const nums = (reply.match(/-?\d+\.?\d*/g) || []).map(Number)
+      if (nums.length >= 6) {
+        coordIkOk.value = true; coordIkFail.value = false
+        moveJoints.j1 = Math.round(nums[0] * 10) / 10
+        moveJoints.j2 = Math.round(nums[1] * 10) / 10
+        moveJoints.j3 = Math.round(nums[2] * 10) / 10
+        moveJoints.j4 = Math.round(nums[3] * 10) / 10
+        moveJoints.j5 = Math.round(nums[4] * 10) / 10
+        moveJoints.j6 = Math.round(nums[5] * 10) / 10
+      } else {
+        coordIkOk.value = false; coordIkFail.value = true
+        coordIkMsg.value = reply.substring(0, 60) || '不可达'
+      }
+    } catch { /* ignore */ }
+  }, 400)
 }
 
 onMounted(async () => {
@@ -321,6 +449,7 @@ onMounted(async () => {
   if (res.success && res.data) {
     device.value = res.data.find(d => d.id === deviceId) ?? null
   }
+  loadTracks()
 })
 
 onUnmounted(() => {
@@ -357,6 +486,9 @@ onUnmounted(() => {
 
 /* Layout */
 .tcp-layout { padding: 16px; max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+
+/* TCP Mode Warning Banner */
+.tcp-mode-warning { margin: 12px 20px 0; padding: 12px 20px; border: 1px solid var(--status-warning-dim); border-radius: var(--radius); background: var(--status-warning-dim); color: var(--status-warning); font-size: 0.75rem; font-weight: 500; }
 
 /* Card */
 .card { background: var(--surface-0); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 18px; }
@@ -401,6 +533,10 @@ onUnmounted(() => {
 .move-jog-btns { display: flex; gap: 1px; }
 .jog-btn { width: 26px; height: 18px; padding: 0; font-size: 0.6rem; line-height: 1; display: flex; align-items: center; justify-content: center; }
 .move-go { align-self: flex-end; margin-bottom: 2px; }
+.move-actions { display: flex; align-items: center; gap: 6px; align-self: flex-end; margin-bottom: 2px; }
+.check-label { font-family: var(--font-body); font-size: 0.75rem; font-weight: 500; }
+.check-label--ok { color: var(--status-success); }
+.check-label--fail { color: var(--status-danger); }
 
 /* Row 3: Feedback + Log */
 .tcp-bottom-row { display: flex; gap: 12px; height: 280px; }
@@ -425,4 +561,17 @@ onUnmounted(() => {
 .log-arrow--recv { color: var(--text-muted); }
 .log-text { color: var(--text-secondary); word-break: break-all; line-height: 1.4; }
 .log-empty { color: var(--text-muted); padding: 8px 0; font-style: italic; }
+
+/* Track Recording */
+.tcp-track { }
+.track-controls { display: flex; align-items: center; gap: 8px; }
+.recording-indicator { color: var(--status-danger); font-size: 0.8rem; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+.track-list { display: flex; flex-direction: column; gap: 3px; }
+.track-item { display: flex; align-items: center; gap: 12px; padding: 4px 8px; background: var(--void-surface); border-radius: var(--radius); font-size: 0.62rem; }
+.track-item-name { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-item-size { color: var(--text-muted); font-size: 0.55rem; min-width: 50px; }
+.track-item-time { color: var(--text-muted); font-size: 0.55rem; min-width: 80px; }
+.mt-2 { margin-top: 10px; }
+.text-muted { color: var(--text-muted); }
 </style>

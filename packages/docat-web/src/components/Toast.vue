@@ -74,10 +74,10 @@ defineExpose({
 .toast-msg { flex: 1; font-size: 13px; color: var(--text-primary); }
 .toast-action {
   flex-shrink: 0;
-  font-family: var(--font-body); font-size: 0.78rem; font-weight: 600;
-  color: var(--status-danger);
-  background: none; border: 1px solid var(--status-danger); border-radius: var(--radius-sm);
-  padding: 4px 12px; cursor: pointer;
+  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
+  letter-spacing: 0.1em; color: var(--status-danger);
+  background: none; border: 1px solid var(--status-danger); border-radius: 2px;
+  padding: 4px 10px; cursor: pointer;
   transition: all var(--duration-fast);
 }
 .toast-action:hover { background: var(--status-danger); color: #fff; }
