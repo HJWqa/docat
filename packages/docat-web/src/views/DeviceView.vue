@@ -1494,11 +1494,16 @@ async function setMode(mode: 'auto' | 'manual') {
   } finally { modeSwitching.value = false }
 }
 async function setDeviceMode(mode: 'online' | 'tcp') {
+  if (!isConnected.value) { toastRef.value?.error('请先连接设备'); return }
+  // 参考 OpenDobot46: checkNotRunningOrAutoModeTipThrottle
+  // 文档要求手动/自动模式激活时无法切换设备模式
   if (isAutoMode.value) { toastRef.value?.error('自动模式下无法切换设备模式'); return }
   if (modeSwitching.value) return
   modeSwitching.value = true
   try {
-    const res = await api.setRemoteSwitch(deviceId, mode === 'tcp')
+    // 使用 /settings/function/remoteControl 端点（非 remoteSwitch）
+    // 参考 OpenDobot46: POST { mode: 'tp' | 'tcp' }
+    const res = await api.setRemoteControl(deviceId, mode)
     if (res.success) {
       isOnlineMode.value = mode === 'online'
     } else {
@@ -2539,7 +2544,7 @@ onMounted(async () => {
   if (!isMock && !isConnected.value) await doConnect()
   if (!isMock && isConnected.value) loadSpeed()
   api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
-  api.getRemoteSwitch(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = !r.data.value })
+  api.getRemoteControl(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = r.data.mode === 'online' })
 
   // Mock 模式跳过 WS 订阅和 REST 兜底轮询，避免覆盖 mock 状态
   if (isMock) {
@@ -2608,7 +2613,7 @@ onMounted(async () => {
     if (id === deviceId) {
       deviceStore.setConnected(deviceId, true)
       api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
-      api.getRemoteSwitch(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = !r.data.value })
+      api.getRemoteControl(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = r.data.mode === 'online' })
     }
   })
   wsClient.onOffline((id) => { if (id === deviceId) deviceStore.setOffline(deviceId) })

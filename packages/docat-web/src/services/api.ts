@@ -202,6 +202,14 @@ export async function getRemoteSwitch(id: string): Promise<ApiResponse<{ value: 
   return request('GET', `/api/devices/${id}/remoteSwitch`)
 }
 
+export async function setRemoteControl(id: string, mode: 'online' | 'tcp'): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/remoteControl`, { mode })
+}
+
+export async function getRemoteControl(id: string): Promise<ApiResponse<{ mode: 'online' | 'tcp' }>> {
+  return request('GET', `/api/devices/${id}/remoteControl`)
+}
+
 export interface DeviceAlarm {
   id: number; level: number; description: string; solution: string; date: string; time: string
 }

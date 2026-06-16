@@ -39,6 +39,8 @@ export abstract class DeviceDriver {
   abstract setAutoManualMode(mode: 'auto' | 'manual'): Promise<void>
   abstract setRemoteSwitch(value: boolean): Promise<void>
   abstract getRemoteSwitch(): Promise<boolean>
+  abstract setRemoteControl(mode: 'online' | 'tcp'): Promise<void>
+  abstract getRemoteControl(): Promise<'online' | 'tcp'>
 
   // ─── 告警 ──────────────────────────────────────
   abstract getAlarms(): Promise<Array<{ id: number; level: number; description: string; solution: string; date: string; time: string }>>

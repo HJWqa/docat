@@ -150,6 +150,25 @@ export class StubDriver extends DeviceDriver {
     return false
   }
 
+  async setRemoteControl(mode: 'online' | 'tcp'): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post', url: '/settings/function/remoteControl', portName: this.ip,
+      params: { mode: mode === 'tcp' ? 'tcp' : 'tp' }, timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set remoteControl failed: ${reply.message}`)
+  }
+
+  async getRemoteControl(): Promise<'online' | 'tcp'> {
+    const reply = await this.http.send({
+      method: 'get', url: '/settings/function/remoteControl', portName: this.ip, timeout: 5000,
+    })
+    if (reply.status && reply.data) {
+      const mode = (reply.data as Record<string, unknown>).mode
+      return mode === 'tcp' ? 'tcp' : 'online'
+    }
+    return 'online'
+  }
+
   // ─── 负载参数 ──────────────────────────────────
 
   async getLoadParams(): Promise<LoadParams> {

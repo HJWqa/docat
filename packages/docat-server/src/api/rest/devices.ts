@@ -621,6 +621,35 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  /** 设置/获取远程控制模式 (Online vs TCP)
+   *  对应机器人 /settings/function/remoteControl 端点
+   *  参考 OpenDobot46: RemoteModeType.Online = 'tp', RemoteModeType.TCP = 'tcp' */
+  app.post<{ Params: { id: string }; Body: { mode: 'online' | 'tcp' } }>(
+    '/api/devices/:id/remoteControl',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        await entry.driver.setRemoteControl(request.body.mode)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/remoteControl',
+    async (request, reply): Promise<ApiResponse<{ mode: 'online' | 'tcp' }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const mode = await entry.driver.getRemoteControl()
+        return { success: true, data: { mode } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
   /** 使能（启用运动控制） */
   app.post<{ Params: { id: string } }>(
     '/api/devices/:id/enable',
