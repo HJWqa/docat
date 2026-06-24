@@ -627,6 +627,34 @@ export async function setEthernet(id: string, params: Record<string, unknown>): 
   return request('POST', `/api/devices/${id}/ethernet`, params)
 }
 
+// ─── Trajectory / Tracks (via controller SFTP) ─
+
+export async function startTrackRecording(id: string, name: string, interval?: number): Promise<ApiResponse<{ name: string }>> {
+  return request('POST', `/api/devices/${id}/tcp/record/start`, { name, interval })
+}
+
+export async function stopTrackRecording(id: string): Promise<ApiResponse<{ name: string }>> {
+  return request('POST', `/api/devices/${id}/tcp/record/stop`)
+}
+
+export interface TrackFileItem { name: string; size: number; mtime: string }
+
+export async function listTracks(id: string): Promise<ApiResponse<TrackFileItem[]>> {
+  return request('GET', `/api/devices/${id}/tcp/tracks`)
+}
+
+export async function renameTrack(id: string, trackName: string, newName: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}/rename`, { newName })
+}
+
+export async function deleteTrack(id: string, trackName: string): Promise<ApiResponse<null>> {
+  return request('DELETE', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
+}
+
+export async function getTrackContent(id: string, trackName: string): Promise<ApiResponse<string>> {
+  return request('GET', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
+}
+
 // ─── Dobot+ ────────────────────────────────────
 
 export async function listDobotPlus(id: string): Promise<ApiResponse<string[]>> {
@@ -682,18 +710,6 @@ export async function stopRecord(id: string): Promise<ApiResponse<{ name: string
 }
 export async function getRecordStatus(id: string): Promise<ApiResponse<{ recording: boolean; name?: string }>> {
   return request('GET', `/api/devices/${id}/tcp/record/status`)
-}
-export async function listTracks(id: string): Promise<ApiResponse<TrackItem[]>> {
-  return request('GET', `/api/devices/${id}/tcp/tracks`)
-}
-export async function deleteTrack(id: string, trackName: string): Promise<ApiResponse<null>> {
-  return request('DELETE', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
-}
-export async function renameTrack(id: string, trackName: string, newName: string): Promise<ApiResponse<null>> {
-  return request('POST', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}/rename`, { newName })
-}
-export async function getTrackPoints(id: string, trackName: string): Promise<ApiResponse<TrackPoint[]>> {
-  return request('GET', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
 }
 
 // ─── Scripts ────────────────────────────────────

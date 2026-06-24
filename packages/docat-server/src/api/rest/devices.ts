@@ -1318,7 +1318,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
   const TRAJECTORY_DIR = '/developOnly/process/trajectory'
   const trackRecording = new Map<string, { timer: ReturnType<typeof setInterval>; ip: string; name: string; lines: string[] }>()
 
-  app.post<{ Params: { id: string }; Body: { name: string } }>(
+  app.post<{ Params: { id: string }; Body: { name: string; interval?: number } }>(
     '/api/devices/:id/tcp/record/start',
     async (request, reply): Promise<ApiResponse<{ name: string }>> => {
       try {
@@ -1333,14 +1333,16 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
 
         getCrTcp(request.params.id, config.ip) // ensure TCP connected
         const name = request.body.name || `track_${Date.now()}`
-        const lines: string[] = ['timestamp,j1,j2,j3,j4,j5,j6']
+        const interval = request.body.interval || 100
+        const lines: string[] = ['timestamp,j1,j2,j3,j4,j5,j6,x,y,z,rx,ry,rz']
 
         const timer = setInterval(() => {
-          if (crTcpLatestFeed && crTcpLatestFeed.QActual) {
-            const joints = crTcpLatestFeed.QActual.map(v => v.toFixed(4)).join(',')
-            lines.push(`${Date.now()},${joints}`)
+          if (crTcpLatestFeed && crTcpLatestFeed.ToolVectorActual) {
+            const joints = (crTcpLatestFeed.QActual || []).map(v => v.toFixed(4)).join(',')
+            const pose = crTcpLatestFeed.ToolVectorActual.map(v => v.toFixed(4)).join(',')
+            lines.push(`${Date.now()},${joints},${pose}`)
           }
-        }, 100)
+        }, interval)
 
         trackRecording.set(request.params.id, { timer, ip: config.ip, name, lines })
         return { success: true, data: { name } }

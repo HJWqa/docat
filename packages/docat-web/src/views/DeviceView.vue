@@ -80,10 +80,10 @@
       <div class="card pose-card">
         <div class="hud-label">位姿</div>
         <div class="pose-readout">
-          <div v-for="axis in ['x','y','z','r']" :key="axis" class="pose-axis-row">
+          <div v-for="axis in ['x','y','z','rx','ry','rz']" :key="axis" class="pose-axis-row">
             <span class="pose-axis-label">{{ axis.toUpperCase() }}</span>
             <span class="pose-axis-value">{{ getPoseVal(axis) }}</span>
-            <span class="pose-axis-unit">{{ axis === 'r' ? '°' : 'mm' }}</span>
+            <span class="pose-axis-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
           </div>
         </div>
       </div>
@@ -250,7 +250,7 @@
         </div>
       </div>
 
-      <!-- Move To Position (joint angles) -->
+      <!-- Move To Position (joint + pose) -->
       <div class="card move-panel">
         <div class="move-panel-header">
           <span class="hud-label" style="margin-bottom:0">移动至关节</span>
@@ -276,6 +276,19 @@
           <button v-if="moving" class="btn btn-danger move-stop-btn" @click="() => stopMoveJoints()">
             停止
           </button>
+        </div>
+        <!-- Pose targets -->
+        <div class="move-grid" style="margin-top:10px">
+          <div v-for="axis in ['x','y','z','rx','ry','rz']" :key="axis" class="move-field">
+            <label class="move-label">{{ axis.toUpperCase() }}</label>
+            <input v-model.number="targetPose[axis]" type="number" step="0.1" class="move-input" />
+            <span class="move-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentPoseToTarget">读取当前位姿</button>
+          <button class="btn btn-primary move-btn" :disabled="!isConnected || poseMoving" @click="moveToPose">
+            {{ poseMoving ? '移动中...' : '移动' }}
+          </button>
+          <button v-if="poseMoving" class="btn btn-danger move-stop-btn" @click="doStop">停止</button>
         </div>
 
         <!-- Postures (system + controller) -->
@@ -363,7 +376,60 @@
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop">⏹ 停止</button>
       <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
+      <button :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="showTrajectory = !showTrajectory" :disabled="!isConnected">
+        📍 轨迹
+      </button>
     </div>
+
+    <!-- Trajectory Panel -->
+    <Transition name="logs-slide">
+      <div v-if="showTrajectory" class="log-panel card">
+        <div class="log-panel-header">
+          <div class="log-panel-title">
+            <span class="hud-label" style="margin-bottom:0">📍 轨迹录制 (控制器存储)</span>
+            <span v-if="trajPoints.length > 0" class="preset-count-badge">{{ trajPoints.length }}</span>
+          </div>
+          <div class="log-panel-actions">
+            <template v-if="!trajRecording">
+              <input v-model.trim="trajRecordName" class="preset-name-input" type="text" placeholder="文件名" style="width:100px" />
+              <button class="btn btn-primary btn-sm" :disabled="!isConnected || !trajRecordName" @click="startTrajRecord">⏺ 录制</button>
+            </template>
+            <button v-else class="btn btn-danger btn-sm" @click="stopTrajRecord">⏹ 停止</button>
+            <button class="btn btn-secondary btn-sm" @click="loadTracksList">🔄 刷新</button>
+            <button class="btn btn-secondary btn-sm" @click="showTrajectory = false">✕</button>
+          </div>
+        </div>
+        <!-- Saved tracks on controller -->
+        <div v-if="savedTracks.length > 0" class="track-list-bar">
+          <span style="font-size:0.55rem;color:var(--text-muted);margin-right:6px">控制器文件:</span>
+          <button v-for="t in savedTracks" :key="t.name"
+            :class="['btn btn-sm', loadedTrackName === t.name ? 'btn-primary' : 'btn-secondary']"
+            style="font-size:0.6rem;padding:2px 8px"
+            @click="loadTrackPoints(t.name)" :title="`${t.size} bytes · ${t.mtime}`">
+            {{ t.name }}
+          </button>
+        </div>
+        <!-- Loaded track points -->
+        <div class="log-list" style="max-height:250px">
+          <div v-if="trajPoints.length === 0" class="log-empty">选择控制器上的轨迹文件加载，或开始新录制</div>
+          <table v-else class="traj-table">
+            <thead>
+              <tr><th>#</th><th>X</th><th>Y</th><th>Z</th><th>RX</th><th>RY</th><th>RZ</th><th style="width:100px">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(pt, i) in trajPoints" :key="i" :class="{ 'row--moving': trajMovingIdx === i }">
+                <td>{{ i + 1 }}</td>
+                <td>{{ pt.x.toFixed(2) }}</td><td>{{ pt.y.toFixed(2) }}</td><td>{{ pt.z.toFixed(2) }}</td>
+                <td>{{ pt.rx.toFixed(2) }}</td><td>{{ pt.ry.toFixed(2) }}</td><td>{{ pt.rz.toFixed(2) }}</td>
+                <td class="table-actions">
+                  <button class="btn btn-secondary btn-xs" @click="goToTrajPoint(i)" :disabled="trajMovingIdx >= 0">GO</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Device Log Panel -->
     <Transition name="logs-slide">
@@ -1356,6 +1422,49 @@ function onWindowBlur() {
 }
 
 // ─── Helpers ─────────────────────────────────────
+
+// ─── Move To Pose ──────────────────────────────
+
+const targetPose = reactive<Record<string, number>>({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
+const poseMoving = ref(false)
+
+function readCurrentPoseToTarget() {
+  const pt = getCurrentCartesian()
+  if (!pt) return
+  targetPose.x = pt.x; targetPose.y = pt.y; targetPose.z = pt.z
+  targetPose.rx = pt.rx; targetPose.ry = pt.ry; targetPose.rz = pt.rz
+  toastRef.value?.info('当前位姿已读取')
+}
+
+async function moveToPose() {
+  if (!checkEnabled()) return
+  const pt: TrajPoint = {
+    x: Number(targetPose.x || 0),
+    y: Number(targetPose.y || 0),
+    z: Number(targetPose.z || 0),
+    rx: Number(targetPose.rx || 0),
+    ry: Number(targetPose.ry || 0),
+    rz: Number(targetPose.rz || 0),
+  }
+  const check = checkPoseLegal(pt)
+  if (!check.legal) {
+    toastRef.value?.error(`安全校验失败: ${check.reason}`)
+    return
+  }
+  poseMoving.value = true
+  try {
+    const res = await api.moveDevice(deviceId, { x: pt.x, y: pt.y, z: pt.z, r: pt.rx, mode: 'movJ' })
+    if (res.success) {
+      toastRef.value?.success('已到达指定位姿')
+    } else {
+      toastRef.value?.error(`移动失败: ${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`移动错误: ${(err as Error).message}`)
+  } finally {
+    poseMoving.value = false
+  }
+}
 
 function getPoseVal(axis: string): string {
   const pose = state.value.pose as Record<string, number> | undefined
@@ -2523,6 +2632,120 @@ watch(settingsTab, (tab) => {
   if (tab === 'dobotplus') loadDobotPlusList()
 })
 
+// ─── Trajectory Recording (controller SFTP) ────
+
+interface TrajPoint {
+  x: number; y: number; z: number
+  rx: number; ry: number; rz: number
+}
+
+const showTrajectory = ref(false)
+const trajRecording = ref(false)
+const trajRecordName = ref('')
+const trajPoints = ref<TrajPoint[]>([])
+const trajMovingIdx = ref(-1)
+const savedTracks = ref<api.TrackFileItem[]>([])
+const loadedTrackName = ref('')
+
+const WORKSPACE_LIMITS = {
+  x: { min: -550, max: 550 }, y: { min: -550, max: 550 }, z: { min: -100, max: 600 },
+  rx: { min: -180, max: 180 }, ry: { min: -180, max: 180 }, rz: { min: -180, max: 180 },
+}
+
+function getCurrentCartesian() {
+  const s = state.value as Record<string, unknown>
+  const pose = s?.pose as Record<string, number> | undefined
+  if (!pose) return null
+  return {
+    x: pose.x ?? 0, y: pose.y ?? 0, z: pose.z ?? 0,
+    rx: (pose as Record<string, number>).rx ?? (pose as Record<string, number>).r ?? 0,
+    ry: (pose as Record<string, number>).ry ?? 0,
+    rz: (pose as Record<string, number>).rz ?? 0,
+  }
+}
+
+function checkPoseLegal(pt: TrajPoint): { legal: boolean; reason?: string } {
+  const limits: Array<{ key: keyof typeof WORKSPACE_LIMITS; value: number }> = [
+    { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
+    { key: 'rx', value: pt.rx }, { key: 'ry', value: pt.ry }, { key: 'rz', value: pt.rz },
+  ]
+  for (const { key, value } of limits) {
+    const lim = WORKSPACE_LIMITS[key]
+    if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+  }
+  if (emergencyStop.value) return { legal: false, reason: '急停中' }
+  if (isCollision.value) return { legal: false, reason: '碰撞检测触发' }
+  return { legal: true }
+}
+
+async function loadTracksList() {
+  const res = await api.listTracks(deviceId)
+  if (res.success && res.data) savedTracks.value = res.data
+}
+
+async function startTrajRecord() {
+  if (!trajRecordName.value.trim()) return
+  const res = await api.startTrackRecording(deviceId, trajRecordName.value.trim())
+  if (res.success) {
+    trajRecording.value = true
+    toastRef.value?.info(`录制开始 → ${trajRecordName.value}.csv`)
+  } else {
+    toastRef.value?.error(`录制失败: ${res.error?.message}`)
+  }
+}
+
+async function stopTrajRecord() {
+  const res = await api.stopTrackRecording(deviceId)
+  trajRecording.value = false
+  if (res.success) {
+    toastRef.value?.success(`录制停止 → ${res.data?.name}.csv`)
+    trajRecordName.value = ''
+    await loadTracksList()
+  }
+}
+
+async function loadTrackPoints(trackName: string) {
+  const res = await api.getTrackContent(deviceId, trackName)
+  if (res.success && res.data) {
+    const lines = res.data.trim().split('\n')
+    const header = lines[0].split(',')
+    // Find indices of x,y,z,rx,ry,rz columns
+    const xIdx = header.indexOf('x'), yIdx = header.indexOf('y'), zIdx = header.indexOf('z')
+    const rxIdx = header.indexOf('rx'), ryIdx = header.indexOf('ry'), rzIdx = header.indexOf('rz')
+    if (xIdx < 0) { toastRef.value?.error('CSV 文件没有位姿列'); return }
+    trajPoints.value = []
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',')
+      trajPoints.value.push({
+        x: Number(cols[xIdx] || 0), y: Number(cols[yIdx] || 0), z: Number(cols[zIdx] || 0),
+        rx: Number(cols[rxIdx] || 0), ry: Number(cols[ryIdx] || 0), rz: Number(cols[rzIdx] || 0),
+      })
+    }
+    loadedTrackName.value = trackName
+    toastRef.value?.success(`已加载 ${trackName} (${trajPoints.value.length} 个点)`)
+  } else {
+    toastRef.value?.error(`加载失败: ${res.error?.message}`)
+  }
+}
+
+async function goToTrajPoint(i: number) {
+  if (!checkEnabled()) return
+  const pt = trajPoints.value[i]
+  if (!pt) return
+  const check = checkPoseLegal(pt)
+  if (!check.legal) { toastRef.value?.error(`安全校验失败: ${check.reason}`); return }
+  trajMovingIdx.value = i
+  try {
+    const res = await api.moveDevice(deviceId, { x: pt.x, y: pt.y, z: pt.z, r: pt.rx, mode: 'movJ' })
+    if (res.success) toastRef.value?.success(`已到达轨迹点 #${i + 1}`)
+    else toastRef.value?.error(`移动失败: ${res.error?.message}`)
+  } catch (err) { toastRef.value?.error(`移动错误: ${(err as Error).message}`) }
+  finally { trajMovingIdx.value = -1 }
+}
+
+// Auto-load tracks list when panel opens
+watch(showTrajectory, (v) => { if (v) loadTracksList() })
+
 // Watch settings tab to auto-load
 watch(settingsTab, (tab) => {
   if (tab === 'system') loadSystemTime()
@@ -2761,6 +2984,7 @@ onUnmounted(() => {
 .pose-axis-label { font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; color: var(--text-muted); width: 20px; }
 .pose-axis-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 500; color: var(--text-primary); flex: 1; text-align: right; letter-spacing: -0.02em; }
 .pose-axis-unit { font-size: 0.72rem; color: var(--text-muted); width: 24px; }
+
 .model-panel { position: relative; padding: 0; overflow: hidden; }
 .model-panel-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -3025,6 +3249,12 @@ onUnmounted(() => {
   font-weight: 500; cursor: pointer; text-align: left;
 }
 .dobotplus-dropdown-item:hover { background: var(--surface-1); color: var(--cyan-300); }
+
+/* Trajectory recording */
+.traj-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.65rem; }
+.traj-table th { text-align: left; padding: 4px 6px; font-family: var(--font-display); font-size: 0.48rem; font-weight: 700; letter-spacing: 0.08em; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; background: var(--void-surface); }
+.traj-table td { padding: 3px 6px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.traj-table .row--moving td { background: #ff174422; color: #ff6b6b; }
 
 .field-group { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-family: var(--font-body); font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); }
