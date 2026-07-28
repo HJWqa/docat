@@ -51,11 +51,20 @@ export abstract class DeviceDriver {
   // ─── 运动控制 ──────────────────────────────────
   abstract setJogMode(mode: 'jog' | 'step'): Promise<void>
   abstract setTeachInch(distance: number): Promise<void>
+  /** 切换点动坐标系：joint / cartesian / tool */
+  abstract setJogCoordinate(mode: 'joint' | 'cartesian' | 'tool'): Promise<void>
   abstract jog(params: JogParams): Promise<void>
+  /** 仅清除点动按钮（panel/jog 全 false），比 stop 更轻、更适合即走即停 */
+  abstract stopJog(): Promise<void>
   abstract moveTo(pose: MoveParams): Promise<void>
   abstract moveJoints(joints: number[]): Promise<void>
   abstract moveJointsCommand(joints: number[], value: boolean): Promise<Record<string, unknown>>
-  abstract moveCartesian(params: { x: number; y: number; z: number; rx: number; ry: number; rz: number; user?: number; tool?: number }): Promise<Record<string, unknown>>
+  abstract moveCartesian(params: {
+    x: number; y: number; z: number
+    rx: number; ry: number; rz: number
+    user?: number; tool?: number
+    jointNear?: number[]
+  }): Promise<Record<string, unknown>>
   abstract inverseKinematics(params: { coordinate: number[]; jointNear: number[]; user?: number; tool?: number }): Promise<{ joint: number[]; errID: number; errMsg?: string }>
   abstract forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }>
   abstract home(): Promise<void>
@@ -170,6 +179,19 @@ export abstract class DeviceDriver {
   /** 获取 Dobot+ 插件端口分配 */
   abstract getDobotPlusPorts(): Promise<Record<string, unknown>>
 
+  /**
+   * 调用 Dobot+ 插件 HTTP API
+   * 实际请求发往插件端口，路径形如 /dobotPlus/{pluginName}/{fn}
+   */
+  abstract callDobotPlus(
+    pluginName: string,
+    fn: string,
+    data?: unknown,
+  ): Promise<unknown>
+
+  /** DobotES01 吸盘：吸取 / 释放 / 清错 / 状态 */
+  abstract controlDobotES01(action: 'grip' | 'release' | 'clearAlarm' | 'status'): Promise<unknown>
+
   // ─── 通讯设置 ──────────────────────────────────
 
   /** 设置总线通讯参数 */
@@ -205,10 +227,26 @@ export interface LoadParams {
   loadValue: number
 }
 
-/** 自定义姿态 */
+/** 自定义姿态（关节 或 笛卡尔） */
+export type CustomPostureType = 'joint' | 'cartesian'
+
+export interface CustomPosturePose {
+  x: number
+  y: number
+  z: number
+  rx: number
+  ry: number
+  rz: number
+}
+
 export interface CustomPosture {
   name: string
+  /** joint（默认）| cartesian */
+  type?: CustomPostureType
+  /** 关节角 J1..J6；cartesian 时可为空/占位 */
   joint: number[]
+  /** 笛卡尔位姿；仅 type=cartesian 时有效 */
+  pose?: CustomPosturePose
 }
 
 /** 系统时间 */

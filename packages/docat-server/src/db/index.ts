@@ -191,6 +191,19 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 005_preset_sort_order applied')
   }
 
+  // ─── 006: 预设支持笛卡尔坐标 ───────────────────
+  if (!applied.has('006_preset_cartesian')) {
+    db.exec(`
+      ALTER TABLE device_joint_presets ADD COLUMN type TEXT NOT NULL DEFAULT 'joint';
+      ALTER TABLE device_joint_presets ADD COLUMN pose TEXT;
+    `)
+    // 已有行全部视为 joint；pose 可空
+    db.prepare("UPDATE device_joint_presets SET type = 'joint' WHERE type IS NULL OR type = ''").run()
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('006_preset_cartesian')").run()
+    console.log('[DB] Migration 006_preset_cartesian applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 

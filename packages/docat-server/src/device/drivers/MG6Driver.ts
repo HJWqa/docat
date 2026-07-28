@@ -113,7 +113,11 @@ export class MG6Driver extends DeviceDriver {
   rawExchange: Partial<MG6ExchangeData> = {}
 
   private http: HttpTransport
+  /** Dobot+ 管理通道（list/install/ports） */
+  private httpPlus: HttpTransport
   private isPoweringOn = false
+  /** 插件名 → 动态 HTTP 端口缓存 */
+  private pluginPortCache = new Map<string, number>()
 
   constructor(id: string, ip: string, modelName: string = 'MG6') {
     super()
@@ -121,6 +125,7 @@ export class MG6Driver extends DeviceDriver {
     this.ip = ip
     this.modelName = modelName
     this.http = new HttpTransport(ip, 22000)
+    this.httpPlus = new HttpTransport(ip, 22001)
   }
 
   // ─── 连接 ──────────────────────────────────────
@@ -167,9 +172,23 @@ export class MG6Driver extends DeviceDriver {
     if (!getReply.status) throw new Error(`Get teach inch failed: ${getReply.message}`)
   }
 
+  async setJogCoordinate(mode: 'joint' | 'cartesian' | 'tool'): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/coordinate',
+      portName: this.ip,
+      params: { mode },
+      timeout: 3000,
+    })
+    if (!reply.status) throw new Error(`Set jog coordinate failed: ${reply.message}`)
+  }
+
   async jog(params: JogParams): Promise<void> {
+    // 对齐 OpenDobot KEYWORD_2_INDEX：
+    // X/Y/Z/RX/RY/RZ → 0..5；J1..J6 → 0..5
     const axisMap: Record<string, number> = {
-      x: 0, y: 1, z: 2, r: 3, rx: 4, ry: 5,
+      x: 0, y: 1, z: 2, rx: 3, ry: 4, rz: 5,
+      r: 3, // 兼容旧别名 → RX
       j1: 0, j2: 1, j3: 2, j4: 3, j5: 4, j6: 5,
     }
     const idx = axisMap[params.axis] ?? 0
@@ -182,37 +201,141 @@ export class MG6Driver extends DeviceDriver {
       negBtns[idx] = true
     }
 
-    await this.http.send({
+    // 点动要低延迟：超时不宜过长
+    const reply = await this.http.send({
       method: 'post',
       url: '/panel/jog',
       portName: this.ip,
       params: { posBtns, negBtns },
-      timeout: 5000,
+      timeout: 800,
+    })
+    if (!reply.status) throw new Error(`Jog failed: ${reply.message}`)
+  }
+
+  async stopJog(): Promise<void> {
+    // 官方 stopJog：清空全部 pos/neg 按钮，立即停止点动
+    await this.http.send({
+      method: 'post',
+      url: '/panel/jog',
+      portName: this.ip,
+      params: {
+        posBtns: [false, false, false, false, false, false],
+        negBtns: [false, false, false, false, false, false],
+      },
+      timeout: 500,
     })
   }
 
   async moveTo(pose: MoveParams): Promise<void> {
-    // MG6 joint target movement uses repeated /interface/jointMovJ start checks.
-    // If pose contains joint angles, use them directly
-    const joints = (pose as unknown as Record<string, unknown>).joints as number[] | undefined
-      || [pose.x, pose.y, pose.z, pose.r ?? 0, 0, 0]
-    await this.moveJoints(joints)
+    // 兼容旧接口：若显式给 joints 则关节运动，否则按笛卡尔 movL
+    const extra = pose as unknown as Record<string, unknown>
+    const joints = extra.joints as number[] | undefined
+    if (Array.isArray(joints) && joints.length >= 6) {
+      await this.moveJoints(joints)
+      return
+    }
+    // 旧调用曾把 x/y/z/r 误当关节角，这里改为笛卡尔
+    await this.moveCartesian({
+      x: pose.x,
+      y: pose.y,
+      z: pose.z,
+      rx: pose.r ?? Number(extra.rx ?? 0),
+      ry: Number(extra.ry ?? 0),
+      rz: Number(extra.rz ?? 0),
+      user: pose.user,
+      tool: pose.tool,
+    })
   }
 
-  async moveCartesian(params: { x: number; y: number; z: number; rx: number; ry: number; rz: number; user?: number; tool?: number }): Promise<Record<string, unknown>> {
-    const reply = await this.http.send({
-      method: 'post',
-      url: '/interface/movL',
-      portName: this.ip,
-      params: {
-        x: params.x, y: params.y, z: params.z,
-        rx: params.rx, ry: params.ry, rz: params.rz,
-        user: params.user ?? -1,
-        tool: params.tool ?? -1,
-      },
-      timeout: 30000,
+  /**
+   * 笛卡尔直线运动（MovL）
+   * 官方协议：{ value, joint, pose:[x,y,z,rx,ry,rz], user, tool }
+   * - joint: 近邻关节（用于选解），不是目标
+   * - pose: 目标笛卡尔位姿
+   * - 需轮询 value=true 直到到达，最后 value=false 结束
+   */
+  async moveCartesian(params: {
+    x: number; y: number; z: number
+    rx: number; ry: number; rz: number
+    user?: number; tool?: number
+    jointNear?: number[]
+  }): Promise<Record<string, unknown>> {
+    const user = params.user ?? 0
+    const tool = params.tool ?? 0
+    const pose = [
+      Number(params.x), Number(params.y), Number(params.z),
+      Number(params.rx), Number(params.ry), Number(params.rz),
+    ]
+    const jointNear = (params.jointNear && params.jointNear.length >= 6)
+      ? params.jointNear.map(j => Number(j))
+      : [
+          this.state.joints.j1 ?? 0,
+          this.state.joints.j2 ?? 0,
+          this.state.joints.j3 ?? 0,
+          this.state.joints.j4 ?? 0,
+          this.state.joints.j5 ?? 0,
+          this.state.joints.j6 ?? 0,
+        ]
+
+    // 先做 IK 可达性检查，给出明确错误而不是关节限位误报
+    const ik = await this.inverseKinematics({
+      coordinate: pose,
+      jointNear,
+      user,
+      tool,
     })
-    return { status: reply.status, message: reply.message, data: reply.data }
+    if (ik.errID !== 0) {
+      throw new Error(ik.errMsg || `笛卡尔目标不可达 (errID=${ik.errID})`)
+    }
+
+    const start = Date.now()
+    let last: Record<string, unknown> = {}
+    try {
+      while (Date.now() - start < 30000) {
+        const reply = await this.http.send({
+          method: 'post',
+          url: '/interface/movL',
+          portName: this.ip,
+          params: {
+            value: true,
+            joint: jointNear,
+            pose,
+            user,
+            tool,
+          },
+          timeout: 3000,
+        })
+        if (!reply.status) {
+          throw new Error(`MovL failed: ${reply.message}`)
+        }
+        last = (reply.data as Record<string, unknown> | undefined) || {}
+        if (last.status === false) {
+          throw new Error(String(last.message || last.errormessage || 'MovL rejected by controller'))
+        }
+        // value=true 表示已到达；isAlarms 表示告警中止
+        if (last.value === true || last.isAlarms === true) break
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+      if (Date.now() - start >= 30000 && last.value !== true) {
+        throw new Error('MovL timed out')
+      }
+      return last
+    } finally {
+      // 结束运动指令
+      await this.http.send({
+        method: 'post',
+        url: '/interface/movL',
+        portName: this.ip,
+        params: {
+          value: false,
+          joint: jointNear,
+          pose,
+          user,
+          tool,
+        },
+        timeout: 3000,
+      }).catch(() => {})
+    }
   }
 
   async forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }> {
@@ -297,17 +420,8 @@ export class MG6Driver extends DeviceDriver {
   }
 
   async stop(): Promise<void> {
-    // Stop all jog
-    await this.http.send({
-      method: 'post',
-      url: '/panel/jog',
-      portName: this.ip,
-      params: {
-        posBtns: [false, false, false, false, false, false],
-        negBtns: [false, false, false, false, false, false],
-      },
-      timeout: 3000,
-    }).catch(() => {})
+    // 通用停止：至少清掉点动按钮
+    await this.stopJog().catch(() => {})
   }
 
   async emergencyStop(): Promise<void> {
@@ -530,32 +644,45 @@ export class MG6Driver extends DeviceDriver {
   // ─── 自定义姿态 ────────────────────────────────
 
   async getCustomPostures(): Promise<CustomPosture[]> {
-    try {
-      const reply = await this.http.send({
-        method: 'get',
-        url: '/settings/function/customPose',
-        portName: this.ip,
-        timeout: 5000,
-      })
-      if (reply.status && Array.isArray(reply.data)) {
-        return (reply.data as Array<Record<string, unknown>>).map(item => ({
-          name: String(item.name ?? ''),
-          joint: Array.isArray(item.joint) ? item.joint.map(Number) : [],
-        }))
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/customPose',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    // E6 等机型返回 405 Unsupported method — 由上层回退本地存储
+    if (!reply.status) {
+      if (/Unsupported method/i.test(reply.message ?? '') || reply.code === 4002) {
+        throw new Error(`Get customPose failed: Unsupported method`)
       }
-    } catch { /* ignore */ }
+      return []
+    }
+    if (Array.isArray(reply.data)) {
+      return (reply.data as Array<Record<string, unknown>>).map(item => ({
+        name: String(item.name ?? ''),
+        joint: Array.isArray(item.joint) ? item.joint.map(Number) : [],
+      }))
+    }
     return []
   }
 
   async setCustomPostures(postures: CustomPosture[]): Promise<void> {
+    // 控制器 customPose 只接受关节姿态；笛卡尔由 docat 本地库保存
+    const payload = postures
+      .filter(p => (p.type ?? 'joint') === 'joint')
+      .map((p, i) => ({
+        name: String(p.name ?? '').trim() || `P${i + 1}`,
+        joint: (Array.isArray(p.joint) ? p.joint : []).slice(0, 6).map(Number),
+      }))
     const reply = await this.http.send({
       method: 'post',
       url: '/settings/function/customPose',
       portName: this.ip,
-      params: postures,
+      params: payload,
       timeout: 10000,
     })
     if (!reply.status) {
+      // 保留原始 errormessage，便于上层识别 Unsupported method 并回退
       throw new Error(`Set customPose failed: ${reply.message}`)
     }
   }
@@ -798,10 +925,11 @@ export class MG6Driver extends DeviceDriver {
   }
 
   // ─── Dobot+ 插件系统 ──────────────────────────
+  // 管理接口在 22001；插件业务 API 在 getPorts 分配的动态端口（如 22100）
 
   async listDobotPlus(): Promise<string[]> {
     try {
-      const reply = await this.http.send({
+      const reply = await this.httpPlus.send({
         method: 'get',
         url: '/dobotPlus/list',
         portName: this.ip,
@@ -815,7 +943,7 @@ export class MG6Driver extends DeviceDriver {
   }
 
   async installDobotPlus(name: string): Promise<void> {
-    const reply = await this.http.send({
+    const reply = await this.httpPlus.send({
       method: 'post',
       url: '/dobotPlus/install',
       portName: this.ip,
@@ -826,7 +954,7 @@ export class MG6Driver extends DeviceDriver {
   }
 
   async uninstallDobotPlus(name: string): Promise<void> {
-    const reply = await this.http.send({
+    const reply = await this.httpPlus.send({
       method: 'post',
       url: '/dobotPlus/uninstall',
       portName: this.ip,
@@ -834,16 +962,107 @@ export class MG6Driver extends DeviceDriver {
       timeout: 30000,
     })
     if (!reply.status) throw new Error(`DobotPlus uninstall failed: ${reply.message}`)
+    this.pluginPortCache.delete(name)
   }
 
   async getDobotPlusPorts(): Promise<Record<string, unknown>> {
-    const reply = await this.http.send({
+    const reply = await this.httpPlus.send({
       method: 'get',
       url: '/dobotPlus/getPorts',
       portName: this.ip,
       timeout: 5000,
     })
-    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+    if (reply.status && reply.data && typeof reply.data === 'object') {
+      const ports = reply.data as Record<string, unknown>
+      for (const [name, port] of Object.entries(ports)) {
+        const n = Number(port)
+        if (Number.isFinite(n) && n > 0) this.pluginPortCache.set(name, n)
+      }
+      return ports
+    }
+    return {}
+  }
+
+  private async resolvePluginPort(pluginName: string): Promise<number> {
+    const cached = this.pluginPortCache.get(pluginName)
+    if (cached) return cached
+    const ports = await this.getDobotPlusPorts()
+    const raw = ports[pluginName]
+    const port = Number(raw)
+    if (!Number.isFinite(port) || port <= 0) {
+      throw new Error(`插件 "${pluginName}" 未分配端口（可能未安装或未启动）`)
+    }
+    this.pluginPortCache.set(pluginName, port)
+    return port
+  }
+
+  /**
+   * 调用插件 HTTP API。
+   * 官方路径：POST http://{ip}:{pluginPort}/dobotPlus/{pluginName}/{fn}
+   * body 为 JSON 数组（Lua 变参）
+   */
+  async callDobotPlus(pluginName: string, fn: string, data: unknown = []): Promise<unknown> {
+    const port = await this.resolvePluginPort(pluginName)
+    const transport = new HttpTransport(this.ip, port)
+    const payload = Array.isArray(data) ? data : (data === undefined || data === null ? [] : [data])
+    const reply = await transport.send({
+      method: 'post',
+      url: `/dobotPlus/${pluginName}/${fn}`,
+      portName: this.ip,
+      params: payload,
+      timeout: 10000,
+    })
+    if (!reply.status) {
+      throw new Error(`Dobot+ ${pluginName}/${fn} failed: ${reply.message}`)
+    }
+    return reply.data
+  }
+
+  /** 解析已安装列表中的 DobotES01 完整包名 */
+  private async findDobotES01Plugin(): Promise<string | null> {
+    const list = await this.listDobotPlus()
+    const hit = list.find(n => /^DobotES01/i.test(n))
+    return hit ?? null
+  }
+
+  /**
+   * DobotES01 吸盘控制
+   * - grip: ToolDO(1,1) 吸取
+   * - release: ToolDO(1,0) 释放
+   * - clearAlarm: ToolDO(2) 脉冲清错
+   * - status: 从 exchange endDI 推断 0=吸附 1=释放 2=异常/未知
+   */
+  async controlDobotES01(action: 'grip' | 'release' | 'clearAlarm' | 'status'): Promise<unknown> {
+    if (action === 'status') {
+      // daemon 通过 MQTT 推送；这里用末端 DI 做即时状态
+      // ToolDI1=1 → 吸附(0), ToolDI1=0 → 释放(1), ToolDI2=1 → 异常(2)
+      const endDI = this.state.io?.endInput
+      const di1 = Array.isArray(endDI) ? Number(endDI[0]?.value ?? 0) : 0
+      const di2 = Array.isArray(endDI) ? Number(endDI[1]?.value ?? 0) : 0
+      // raw exchange 可能有更直接的 endDI 数组
+      const rawEndDI = (this.rawExchange as { endDI?: number[] }).endDI
+      const t1 = Array.isArray(rawEndDI) ? Number(rawEndDI[0] ?? di1) : di1
+      const t2 = Array.isArray(rawEndDI) ? Number(rawEndDI[1] ?? di2) : di2
+      let status = 1
+      if (t2 === 1) status = 2
+      else if (t1 === 1) status = 0
+      else status = 1
+      return { status, toolDI1: t1, toolDI2: t2 }
+    }
+
+    const plugin = await this.findDobotES01Plugin()
+    if (!plugin) {
+      throw new Error('未安装 DobotES01 吸盘插件')
+    }
+
+    if (action === 'grip') {
+      return this.callDobotPlus(plugin, 'DeControl', [1])
+    }
+    if (action === 'release') {
+      return this.callDobotPlus(plugin, 'DeControl', [0])
+    }
+    // clearAlarm
+    return this.callDobotPlus(plugin, 'ClearESAlarm', [])
   }
 
   // ─── 通讯设置 ──────────────────────────────────

@@ -295,8 +295,17 @@ export async function setTeachInch(id: string, distance: number): Promise<ApiRes
   return request('POST', `/api/devices/${id}/teachInch`, { distance })
 }
 
+export async function setJogCoordinate(id: string, mode: 'joint' | 'cartesian' | 'tool'): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/jogCoordinate`, { mode })
+}
+
 export async function jogDevice(id: string, axis: string, direction: string, mode?: string): Promise<ApiResponse<null>> {
   return request('POST', `/api/devices/${id}/jog`, { axis, direction, mode })
+}
+
+/** 仅停止点动（panel/jog 全 false），比 stop 更轻 */
+export async function stopJogDevice(id: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/jog/stop`)
 }
 
 export async function stopDevice(id: string): Promise<ApiResponse<null>> {
@@ -325,11 +334,21 @@ export async function moveJointsCommand(id: string, joints: number[], value: boo
   return request('POST', `/api/devices/${id}/moveJointsCommand`, { joints, value })
 }
 
-export async function moveDevice(id: string, params: { x: number; y: number; z: number; r?: number; mode?: string; user?: number; tool?: number }): Promise<ApiResponse<null>> {
+export async function moveDevice(id: string, params: {
+  x: number; y: number; z: number
+  r?: number; rx?: number; ry?: number; rz?: number
+  mode?: string; user?: number; tool?: number
+  jointNear?: number[]
+}): Promise<ApiResponse<null>> {
   return request('POST', `/api/devices/${id}/move`, params)
 }
 
-export async function moveCartesian(id: string, params: { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number; user?: number; tool?: number }): Promise<ApiResponse<Record<string, unknown>>> {
+export async function moveCartesian(id: string, params: {
+  x: number; y: number; z: number
+  rx?: number; ry?: number; rz?: number
+  user?: number; tool?: number
+  jointNear?: number[]
+}): Promise<ApiResponse<Record<string, unknown>>> {
   return request('POST', `/api/devices/${id}/moveCartesian`, params)
 }
 
@@ -485,9 +504,23 @@ export async function setLoadConfig(id: string, config: LoadParams[]): Promise<A
 
 // ─── Custom Postures ──────────────────────────
 
+export type CustomPostureType = 'joint' | 'cartesian'
+
+export interface CustomPosturePose {
+  x: number
+  y: number
+  z: number
+  rx: number
+  ry: number
+  rz: number
+}
+
 export interface CustomPostureItem {
   name: string
+  /** joint（默认）| cartesian */
+  type?: CustomPostureType
   joint: number[]
+  pose?: CustomPosturePose
 }
 
 export async function getCustomPostures(id: string): Promise<ApiResponse<CustomPostureItem[]>> {
@@ -667,6 +700,34 @@ export async function manageDobotPlus(id: string, name: string, action: 'install
 
 export async function getDobotPlusPorts(id: string): Promise<ApiResponse<Record<string, unknown>>> {
   return request('GET', `/api/devices/${id}/dobotPlus/ports`)
+}
+
+export async function callDobotPlus(
+  id: string,
+  plugin: string,
+  fn: string,
+  data?: unknown,
+): Promise<ApiResponse<unknown>> {
+  return request('POST', `/api/devices/${id}/dobotPlus/call`, { plugin, fn, data })
+}
+
+export type DobotES01Action = 'grip' | 'release' | 'clearAlarm' | 'status'
+
+export interface DobotES01Status {
+  status: number // 0=吸附 1=释放 2=异常
+  toolDI1?: number
+  toolDI2?: number
+}
+
+export async function controlDobotES01(
+  id: string,
+  action: DobotES01Action,
+): Promise<ApiResponse<unknown>> {
+  return request('POST', `/api/devices/${id}/dobotPlus/es01`, { action })
+}
+
+export async function getDobotES01Status(id: string): Promise<ApiResponse<DobotES01Status>> {
+  return request('GET', `/api/devices/${id}/dobotPlus/es01/status`)
 }
 
 // ─── CR TCP Dashboard (29999/30004) ────────────

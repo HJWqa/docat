@@ -51,7 +51,7 @@
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1"/><line x1="5" y1="9" x2="10" y2="9" stroke="currentColor" stroke-width="1"/><line x1="5" y1="12" x2="8" y2="12" stroke="currentColor" stroke-width="1"/></svg>
           日志{{ deviceLogs.length > 0 ? ` (${deviceLogs.length})` : '' }}
         </button>
-        <button :class="['btn btn-sm', showSettings ? 'btn-primary' : 'btn-secondary']" @click="showSettings = !showSettings" :disabled="!isConnected" title="设备设置">
+        <button :class="['btn btn-sm', showSettings ? 'btn-primary' : 'btn-secondary']" @click="toggleSettings" :disabled="!isConnected" title="设备设置">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           设置
         </button>
@@ -207,11 +207,24 @@
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isOnlineMode }]" @click="setDeviceMode('online')" :disabled="isAutoMode || modeSwitching">ONLINE</button>
             </div>
+            <!-- Coordinate space: Joint / Cartesian -->
+            <div class="jog-mode-selector">
+              <button
+                :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate === 'joint' }]"
+                :disabled="!isConnected || jogCoordSwitching"
+                @click="changeJogCoordinate('joint')"
+              >关节</button>
+              <button
+                :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate !== 'joint' }]"
+                :disabled="!isConnected || jogCoordSwitching"
+                @click="changeJogCoordinate('cartesian')"
+              >笛卡尔</button>
+            </div>
             <!-- Amplitude limit -->
             <div class="amp-limit">
               <span class="amp-limit-label">最大增量</span>
               <input v-model.number="ampLimit" type="number" min="1" max="500" step="1" class="amp-input" />
-              <span class="amp-limit-unit">{{ jogAxis.startsWith('j') || jogAxis === 'r' ? '°' : 'mm' }}</span>
+              <span class="amp-limit-unit">{{ jogAxisUnit }}</span>
             </div>
             <div class="jog-mode-selector">
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">连续</button>
@@ -220,7 +233,7 @@
             <div v-if="jogMode === 'step'" class="inch-setting">
               <span class="amp-limit-label">步长</span>
               <input v-model.number="jogInch" type="number" min="0.01" step="0.01" class="amp-input" @change="applyTeachInch" />
-              <span class="amp-limit-unit">°</span>
+              <span class="amp-limit-unit">{{ jogCoordinate === 'joint' ? '°' : 'mm/°' }}</span>
               <button v-for="value in inchPresets" :key="value" :class="['inch-preset', { 'inch-preset--active': jogInch === value }]" @click="setTeachInchPreset(value)">
                 {{ value }}
               </button>
@@ -230,22 +243,28 @@
 
         <div class="jog-body">
           <div class="jog-grid">
-            <div v-for="axis in ['j1','j2','j3','j4','j5','j6']" :key="axis" class="jog-axis-col">
-              <span class="jog-axis-name">{{ axis.toUpperCase() }}</span>
+            <div v-for="axis in activeJogAxes" :key="axis" class="jog-axis-col">
+              <span class="jog-axis-name">{{ formatJogAxisName(axis) }}</span>
               <button class="jog-btn" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '+' }"
                 :disabled="!isConnected"
-                @mousedown.prevent="jogAxis = axis; startJog('+')" @mouseup="stopJog" @mouseleave="stopJog"
-                @touchstart.prevent="jogAxis = axis; startJog('+')" @touchend="stopJog">
+                @mousedown.prevent="beginAxisJog(axis, '+')" @mouseup="stopJog" @mouseleave="stopJog"
+                @touchstart.prevent="beginAxisJog(axis, '+')" @touchend="stopJog">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
-              <span class="jog-axis-val">{{ getJoint(Number(axis.slice(1))) }}°</span>
+              <span class="jog-axis-val">{{ formatJogAxisValue(axis) }}</span>
               <button class="jog-btn jog-btn--down" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '-' }"
                 :disabled="!isConnected"
-                @mousedown.prevent="jogAxis = axis; startJog('-')" @mouseup="stopJog" @mouseleave="stopJog"
-                @touchstart.prevent="jogAxis = axis; startJog('-')" @touchend="stopJog">
+                @mousedown.prevent="beginAxisJog(axis, '-')" @mouseup="stopJog" @mouseleave="stopJog"
+                @touchstart.prevent="beginAxisJog(axis, '-')" @touchend="stopJog">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 19l-6-6M12 19l6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
+          </div>
+          <div class="jog-shortcut-hints">
+            <span v-for="hint in activeShortcutHints" :key="hint.label" class="jog-shortcut-hint">
+              <b>{{ hint.label }}</b>
+              <kbd>{{ hint.pos }}</kbd>/<kbd>{{ hint.neg }}</kbd>
+            </span>
           </div>
         </div>
       </div>
@@ -253,15 +272,25 @@
       <!-- Move To Position (joint + pose) -->
       <div class="card move-panel">
         <div class="move-panel-header">
-          <span class="hud-label" style="margin-bottom:0">移动至关节</span>
+          <span class="hud-label" style="margin-bottom:0">移动 / 预设</span>
           <div class="move-panel-actions">
             <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentJoints" title="读取当前关节值">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1010.9-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               读取
             </button>
-            <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="姿态名称"
+            <div class="jog-mode-selector" title="保存预设类型">
+              <button
+                :class="['jog-mode-btn', { 'jog-mode-btn--active': newPostureType === 'joint' }]"
+                @click="newPostureType = 'joint'"
+              >关节</button>
+              <button
+                :class="['jog-mode-btn', { 'jog-mode-btn--active': newPostureType === 'cartesian' }]"
+                @click="newPostureType = 'cartesian'"
+              >笛卡尔</button>
+            </div>
+            <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="预设名称"
               @keyup.enter="saveCurrentAsPosture" style="width:100px" />
-            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture">💾 保存</button>
+            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture" :title="newPostureType === 'cartesian' ? '保存当前笛卡尔位姿' : '保存当前关节角'">💾 保存</button>
           </div>
         </div>
         <div class="move-grid">
@@ -306,11 +335,12 @@
 
           <!-- Quick bar: first 7 postures (3 system + up to 4 custom) -->
           <div class="quick-posture-bar">
-            <button v-for="(p, i) in allPostures.slice(0, 7)" :key="p._key"
-              :class="['btn-quick-posture', { 'btn-quick-posture--sys': p.system }]"
+            <button v-for="p in allPostures.slice(0, 7)" :key="p._key"
+              :class="['btn-quick-posture', { 'btn-quick-posture--sys': p.system, 'btn-quick-posture--cart': p.type === 'cartesian' }]"
               @click="fillPosture(p)"
-              :title="`J[${p.joint.map(v => v.toFixed(1)).join(', ')}]`">
+              :title="formatPostureDetail(p)">
               <span class="qpi">{{ p.name }}</span>
+              <span v-if="p.type === 'cartesian'" class="qpi-tag">XYZ</span>
             </button>
           </div>
 
@@ -321,6 +351,7 @@
                 class="preset-item"
                 :class="{
                   'preset-item--system': p.system,
+                  'preset-item--cartesian': p.type === 'cartesian',
                   'preset-item--dragging': dragPostureIdx === idx,
                   'preset-item--dragover': dragPostureOver === idx && dragPostureIdx !== idx,
                 }"
@@ -339,9 +370,13 @@
                       @click.stop @blur="confirmRenamePosture(p)" ref="renamePostureInputRef" />
                   </template>
                   <template v-else>
-                    <span class="preset-item-name">{{ p.name }}</span>
+                    <span class="preset-item-name">
+                      {{ p.name }}
+                      <span v-if="p.type === 'cartesian'" class="preset-type-badge">笛卡尔</span>
+                      <span v-else-if="!p.system" class="preset-type-badge preset-type-badge--joint">关节</span>
+                    </span>
                   </template>
-                  <span class="preset-item-joints">{{ p.joint.map(v => v.toFixed(1)).join(', ') }}°</span>
+                  <span class="preset-item-joints">{{ formatPostureSummary(p) }}</span>
                 </div>
                 <div class="preset-item-actions">
                   <span v-if="p.system" class="preset-item-badge">系统</span>
@@ -376,14 +411,28 @@
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop">⏹ 停止</button>
       <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
-      <button :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="showTrajectory = !showTrajectory" :disabled="!isConnected">
+      <button :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="toggleTrajectory" :disabled="!isConnected">
         📍 轨迹
       </button>
+      <!-- DobotES01 吸盘快捷控制 -->
+      <template v-if="hasDobotES01">
+        <span class="action-sep" />
+        <div class="es01-control" :class="{ 'es01-control--busy': es01Busy }">
+          <span class="es01-label">吸盘</span>
+          <span :class="['es01-status', `es01-status--${es01StatusKey}`]">{{ es01StatusText }}</span>
+          <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')">吸取</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')">释放</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')" title="清错">清错</button>
+        </div>
+      </template>
     </div>
 
     <!-- Trajectory Panel -->
+    <Transition name="fade">
+      <div v-if="showTrajectory" class="side-panel-overlay" @click="showTrajectory = false" />
+    </Transition>
     <Transition name="logs-slide">
-      <div v-if="showTrajectory" class="log-panel card">
+      <div v-if="showTrajectory" class="log-panel card" @click.stop>
         <div class="log-panel-header">
           <div class="log-panel-title">
             <span class="hud-label" style="margin-bottom:0">📍 轨迹录制 (控制器存储)</span>
@@ -432,8 +481,11 @@
     </Transition>
 
     <!-- Device Log Panel -->
+    <Transition name="fade">
+      <div v-if="showLogs" class="side-panel-overlay" @click="showLogs = false" />
+    </Transition>
     <Transition name="logs-slide">
-      <div v-if="showLogs" class="log-panel card">
+      <div v-if="showLogs" class="log-panel card" @click.stop>
         <div class="log-panel-header">
           <div class="log-panel-title">
             <span class="hud-label" style="margin-bottom:0">📋 设备日志</span>
@@ -501,31 +553,37 @@
       </div>
     </Transition>
 
-    <!-- Settings Modal -->
+    <!-- Settings Side Panel -->
     <Transition name="fade">
-      <div v-if="showSettings" class="modal-overlay" @click.self="showSettings = false">
-        <div class="modal settings-modal card">
-          <div class="modal-header">
-            <h3>⚙ 设备设置</h3>
-            <button class="modal-close" @click="showSettings = false">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
+      <div v-if="showSettings" class="side-panel-overlay" @click="showSettings = false" />
+    </Transition>
+    <Transition name="logs-slide">
+      <div v-if="showSettings" class="settings-panel card" @click.stop>
+        <div class="log-panel-header">
+          <div class="log-panel-title">
+            <span class="hud-label" style="margin-bottom:0">⚙ 设备设置</span>
+          </div>
+          <div class="log-panel-actions">
+            <button class="btn btn-secondary btn-sm" @click="showSettings = false">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
             </button>
           </div>
-          <div class="settings-layout">
-            <!-- Sidebar -->
-            <nav class="settings-sidebar">
-              <button
-                v-for="tab in settingsTabs"
-                :key="tab.key"
-                :class="['settings-nav-item', { 'settings-nav-item--active': settingsTab === tab.key }]"
-                @click="settingsTab = tab.key"
-              >
-                <span class="settings-nav-icon">{{ tab.icon }}</span>
-                <span class="settings-nav-label">{{ tab.label }}</span>
-              </button>
-            </nav>
-            <!-- Content -->
-            <div class="settings-content">
+        </div>
+        <div class="settings-layout">
+          <!-- Sidebar tabs -->
+          <nav class="settings-sidebar">
+            <button
+              v-for="tab in settingsTabs"
+              :key="tab.key"
+              :class="['settings-nav-item', { 'settings-nav-item--active': settingsTab === tab.key }]"
+              @click="settingsTab = tab.key"
+            >
+              <span class="settings-nav-icon">{{ tab.icon }}</span>
+              <span class="settings-nav-label">{{ tab.label }}</span>
+            </button>
+          </nav>
+          <!-- Content -->
+          <div class="settings-content">
 
               <!-- Load Parameters -->
               <div v-if="settingsTab === 'load'">
@@ -787,30 +845,59 @@
               <div v-else-if="settingsTab === 'postures'">
                 <div class="settings-section">
                   <div class="settings-section-header">
-                    <h4>自定义姿态（控制器）</h4>
-                    <div style="display:flex;gap:6px">
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent" :disabled="!isConnected">📋 读取当前</button>
-                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture">+ 添加</button>
+                    <h4>自定义预设</h4>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected">📋 当前关节</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected">📋 当前笛卡尔</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('joint')">+ 关节</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('cartesian')">+ 笛卡尔</button>
                     </div>
                   </div>
-                  <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">控制器上暂无保存的姿态</div>
+                  <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">暂无自定义预设</div>
                   <table v-if="customPostures.length > 0" class="load-config-table">
-                    <thead><tr><th style="width:40px">#</th><th>J1</th><th>J2</th><th>J3</th><th>J4</th><th>J5</th><th>J6</th><th style="width:120px">操作</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th style="width:40px">#</th>
+                        <th style="width:70px">类型</th>
+                        <th>名称</th>
+                        <th>数值</th>
+                        <th style="width:120px">操作</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       <tr v-for="(p, i) in customPostures" :key="i" :class="{ 'row--editing': editingPostureIdx === i }">
                         <template v-if="editingPostureIdx === i">
-                          <td class="preset-name">{{ i }}</td>
-                          <td v-for="j in 6" :key="j"><input v-model.number="editPostureForm.joint[j-1]" type="number" class="input-xs" style="width:60px" step="0.1" /></td>
+                          <td class="preset-name">{{ i + 1 }}</td>
+                          <td>
+                            <select v-model="editPostureForm.type" class="input-xs" style="width:72px">
+                              <option value="joint">关节</option>
+                              <option value="cartesian">笛卡尔</option>
+                            </select>
+                          </td>
+                          <td><input v-model.trim="editPostureForm.name" class="input-xs" style="width:80px" /></td>
+                          <td>
+                            <div v-if="editPostureForm.type === 'cartesian'" style="display:flex;gap:3px;flex-wrap:wrap">
+                              <input v-for="axis in (['x','y','z','rx','ry','rz'] as const)" :key="axis"
+                                v-model.number="editPostureForm.pose![axis]" type="number" class="input-xs"
+                                style="width:58px" step="0.1" :title="axis.toUpperCase()" :placeholder="axis.toUpperCase()" />
+                            </div>
+                            <div v-else style="display:flex;gap:3px;flex-wrap:wrap">
+                              <input v-for="j in 6" :key="j" v-model.number="editPostureForm.joint[j-1]"
+                                type="number" class="input-xs" style="width:58px" step="0.1" :placeholder="`J${j}`" />
+                            </div>
+                          </td>
                           <td class="table-actions">
                             <button class="btn btn-primary btn-xs" @click="saveEditPosture(i)">✓</button>
                             <button class="btn btn-secondary btn-xs" @click="editingPostureIdx = null">✕</button>
                           </td>
                         </template>
                         <template v-else>
-                          <td class="preset-name">{{ i }}</td>
-                          <td v-for="v in p.joint" :key="v">{{ Number(v).toFixed(1) }}</td>
+                          <td class="preset-name">{{ i + 1 }}</td>
+                          <td>{{ (p.type === 'cartesian') ? '笛卡尔' : '关节' }}</td>
+                          <td class="preset-name">{{ p.name }}</td>
+                          <td style="font-size:0.66rem">{{ formatPostureSummary(p) }}</td>
                           <td class="table-actions">
-                            <button class="btn btn-secondary btn-xs" @click="fillPosture(p)">前往</button>
+                            <button class="btn btn-secondary btn-xs" @click="fillPosture(p)">填充</button>
                             <button class="btn btn-secondary btn-xs" @click="startEditPosture(i)" :disabled="moving">✎</button>
                             <button class="btn btn-secondary btn-xs" @click="deletePosture(i)" :disabled="moving">✕</button>
                           </td>
@@ -886,6 +973,22 @@
 
               <!-- Dobot+ -->
               <div v-else-if="settingsTab === 'dobotplus'">
+                <!-- ES01 吸盘 -->
+                <div v-if="hasDobotES01" class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>DobotES01 吸盘</h4>
+                    <span :class="['es01-status', `es01-status--${es01StatusKey}`]">{{ es01StatusText }}</span>
+                  </div>
+                  <div class="es01-settings-actions">
+                    <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')">吸取</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')">释放</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')">清错</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="refreshES01Status">刷新状态</button>
+                  </div>
+                  <div class="text-muted" style="margin-top:8px;font-size:0.68rem">
+                    通过 ToolDO(1) 控制吸/放，ToolDO(2) 脉冲清错；状态来自 ToolDI。
+                  </div>
+                </div>
                 <div class="settings-section">
                   <div class="settings-section-header">
                     <h4>已安装插件</h4>
@@ -929,7 +1032,6 @@
                   />
                 </div>
               </div>
-            </div>
           </div>
         </div>
       </div>
@@ -1033,6 +1135,34 @@ function normalizeWarningItem(raw: number | Partial<AlarmItem> & { id: number })
   return normalizeAlarmItem(raw, 'Warning')
 }
 
+/**
+ * 兼容多种 alarm 载荷：
+ * - AlarmInfo[]（driver 解析后）
+ * - number[][]（控制器原始 alarms）
+ * - number[] / 对象数组
+ */
+function coerceAlarmList(raw: unknown): Array<Partial<AlarmItem> & { id: number }> {
+  if (!raw) return []
+  if (!Array.isArray(raw)) return []
+
+  // number[][] — 控制器原始格式
+  if (raw.length > 0 && Array.isArray(raw[0])) {
+    const codes = (raw as unknown[][]).flat()
+      .filter((c): c is number => typeof c === 'number' && c !== 0)
+    return codes.map(id => ({ id }))
+  }
+
+  return (raw as unknown[])
+    .map((item): (Partial<AlarmItem> & { id: number }) | null => {
+      if (typeof item === 'number' && item !== 0) return { id: item }
+      if (item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'number') {
+        return item as Partial<AlarmItem> & { id: number }
+      }
+      return null
+    })
+    .filter((item): item is Partial<AlarmItem> & { id: number } => item !== null)
+}
+
 function mergeAlarmDetails(next: AlarmItem[], existing: AlarmItem[]): AlarmItem[] {
   return next.map(item => {
     const previous = existing.find(e => e.id === item.id)
@@ -1049,6 +1179,30 @@ function mergeAlarmDetails(next: AlarmItem[], existing: AlarmItem[]): AlarmItem[
   })
 }
 
+function toAlarmItemFromApi(entry: api.DeviceAlarm, fallbackPrefix: string): AlarmItem {
+  return {
+    id: entry.id,
+    level: entry.level ?? '',
+    message: entry.description || `${fallbackPrefix} ${entry.id}`,
+    solution: entry.solution || '',
+    date: entry.date || '',
+    time: entry.time || '',
+    timestamp: Date.now(),
+  }
+}
+
+/** 将 exchange 中的轻量列表立即同步到主界面，详情异步补全 */
+function applyRealtimeAlarms(rawList: unknown) {
+  const next = coerceAlarmList(rawList).map(a => normalizeAlarmItem(a, 'Alarm'))
+  currentAlarms.value = mergeAlarmDetails(next, currentAlarms.value)
+}
+
+function applyRealtimeWarnings(rawList: unknown) {
+  const list = Array.isArray(rawList) ? rawList : []
+  const next = list.map(w => normalizeWarningItem(w as number | Partial<AlarmItem> & { id: number }))
+  currentWarnings.value = mergeAlarmDetails(next, currentWarnings.value)
+}
+
 // ─── Device Log / Alarm Descriptions ─────────────
 
 interface DeviceLogEntry {
@@ -1063,6 +1217,9 @@ interface DeviceLogEntry {
 const deviceLogs = ref<DeviceLogEntry[]>([])
 const showLogs = ref(false)
 const showSettings = ref(false)
+let alarmDetailSeq = 0
+let warningDetailSeq = 0
+let deviceLogSeq = 0
 const showDobotPlusBar = ref(false)
 const settingsTab = ref('system')
 const settingsTabs = [
@@ -1201,11 +1358,50 @@ function todayDateString(): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function closeTopOverlay() {
+  if (showSettings.value) {
+    showSettings.value = false
+    return true
+  }
+  if (showLogs.value) {
+    showLogs.value = false
+    return true
+  }
+  if (showTrajectory.value) {
+    showTrajectory.value = false
+    return true
+  }
+  if (showDobotPlusBar.value) {
+    showDobotPlusBar.value = false
+    return true
+  }
+  return false
+}
+
+function closeSiblingSidePanels(except: 'logs' | 'trajectory' | 'settings') {
+  if (except !== 'logs' && showLogs.value) showLogs.value = false
+  if (except !== 'trajectory' && showTrajectory.value) showTrajectory.value = false
+  if (except !== 'settings' && showSettings.value) showSettings.value = false
+}
+
 function toggleLogs() {
   showLogs.value = !showLogs.value
   if (!showLogs.value) return
-  if (logPanelTab.value === 'alarms' && deviceLogs.value.length === 0) fetchDeviceLogs()
+  closeSiblingSidePanels('logs')
+  if (logPanelTab.value === 'alarms') fetchDeviceLogs()
   if (logPanelTab.value === 'history' && historyLogEntries.value.length === 0) fetchControlLogs()
+}
+
+function toggleTrajectory() {
+  showTrajectory.value = !showTrajectory.value
+  if (!showTrajectory.value) return
+  closeSiblingSidePanels('trajectory')
+}
+
+function toggleSettings() {
+  showSettings.value = !showSettings.value
+  if (!showSettings.value) return
+  closeSiblingSidePanels('settings')
 }
 
 function switchLogTab(tab: 'alarms' | 'history') {
@@ -1222,51 +1418,121 @@ function refreshVisibleLogs() {
   }
 }
 
+/** 主动拉告警详情（对齐官方 isAlarmUpdate → getAlarms） */
+async function fetchAlarmDetails() {
+  if (!isConnected.value || isMock) return
+  const seq = ++alarmDetailSeq
+  try {
+    const res = await api.getDeviceAlarms(deviceId)
+    if (seq !== alarmDetailSeq) return
+    if (res.success && res.data) {
+      const next = res.data.map(a => toAlarmItemFromApi(a, 'Alarm'))
+      // 即使为空也覆盖：告警清除后主界面必须同步消失
+      currentAlarms.value = next
+      rebuildDeviceLogsFromPanels()
+    }
+  } catch { /* ignore */ }
+}
+
+/** 主动拉警告详情（对齐官方 isWarningUpdate → getWarnings） */
+async function fetchWarningDetails() {
+  if (!isConnected.value || isMock) return
+  const seq = ++warningDetailSeq
+  try {
+    const res = await api.getDeviceWarnings(deviceId)
+    if (seq !== warningDetailSeq) return
+    if (res.success && res.data) {
+      const next = res.data.map(w => toAlarmItemFromApi(w, 'Warning'))
+      // 即使为空也覆盖：警告消除后主界面必须同步消失
+      currentWarnings.value = next
+      rebuildDeviceLogsFromPanels()
+    }
+  } catch { /* ignore */ }
+}
+
+/** 用主界面当前告警/警告重建日志面板告警 tab，避免“日志有、主界面无” */
+function rebuildDeviceLogsFromPanels() {
+  const entries: DeviceLogEntry[] = [
+    ...currentAlarms.value.map(a => ({
+      id: a.id,
+      type: 'alarm',
+      level: a.level,
+      description: a.message,
+      solution: a.solution,
+      date: a.date,
+      time: a.time,
+    })),
+    ...currentWarnings.value.map(w => ({
+      id: w.id,
+      type: 'warning',
+      level: w.level,
+      description: w.message,
+      solution: w.solution,
+      date: w.date,
+      time: w.time,
+    })),
+  ]
+  entries.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+  // 仅在完整 fetch 未进行时，用面板数据兜底同步日志列表
+  if (!loadingLogs.value) {
+    deviceLogs.value = entries
+  }
+}
+
 async function fetchDeviceLogs() {
   if (!isConnected.value) return
+  const seq = ++deviceLogSeq
   loadingLogs.value = true
   try {
     const [alarmRes, warnRes] = await Promise.all([
       api.getDeviceAlarms(deviceId),
       api.getDeviceWarnings(deviceId),
     ])
+    if (seq !== deviceLogSeq) return
+
     const entries: DeviceLogEntry[] = []
+    let nextAlarms: AlarmItem[] | null = null
+    let nextWarnings: AlarmItem[] | null = null
+
     if (alarmRes.success && alarmRes.data) {
-      for (const a of alarmRes.data) entries.push({ id: a.id, type: 'alarm', level: a.level ?? '', description: a.description, solution: a.solution || '', date: a.date, time: a.time })
+      nextAlarms = alarmRes.data.map(a => toAlarmItemFromApi(a, 'Alarm'))
+      for (const a of alarmRes.data) {
+        entries.push({
+          id: a.id,
+          type: 'alarm',
+          level: a.level ?? '',
+          description: a.description,
+          solution: a.solution || '',
+          date: a.date,
+          time: a.time,
+        })
+      }
     }
     if (warnRes.success && warnRes.data) {
-      for (const w of warnRes.data) entries.push({ id: w.id, type: 'warning', level: w.level ?? '', description: w.description, solution: w.solution || '', date: w.date, time: w.time })
+      nextWarnings = warnRes.data.map(w => toAlarmItemFromApi(w, 'Warning'))
+      for (const w of warnRes.data) {
+        entries.push({
+          id: w.id,
+          type: 'warning',
+          level: w.level ?? '',
+          description: w.description,
+          solution: w.solution || '',
+          date: w.date,
+          time: w.time,
+        })
+      }
     }
+
     entries.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
     deviceLogs.value = entries
 
-    // Also update alarm panel descriptions
-    const alarmDescs = entries.filter(e => e.type === 'alarm')
-    if (alarmDescs.length > 0) {
-      currentAlarms.value = alarmDescs.map(a => ({
-        id: a.id,
-        level: a.level,
-        message: a.description || `Alarm ${a.id}`,
-        solution: a.solution,
-        date: a.date,
-        time: a.time,
-        timestamp: Date.now(),
-      }))
-    }
-    const warningDescs = entries.filter(e => e.type === 'warning')
-    if (warningDescs.length > 0) {
-      currentWarnings.value = warningDescs.map(w => ({
-        id: w.id,
-        level: w.level,
-        message: w.description || `Warning ${w.id}`,
-        solution: w.solution,
-        date: w.date,
-        time: w.time,
-        timestamp: Date.now(),
-      }))
-    }
+    // 始终用完整详情覆盖主界面，包括空列表（清除后同步）
+    if (nextAlarms) currentAlarms.value = nextAlarms
+    if (nextWarnings) currentWarnings.value = nextWarnings
   } catch { /* ignore */ }
-  finally { loadingLogs.value = false }
+  finally {
+    if (seq === deviceLogSeq) loadingLogs.value = false
+  }
 }
 
 async function fetchControlLogs() {
@@ -1313,14 +1579,6 @@ function historyLogIcon(level: string): string {
   return 'ℹ'
 }
 
-// Auto-fetch device logs when alarms change
-watch(currentAlarms, (newVal, oldVal) => {
-  const newIds = newVal.map(a => a.id)
-  const oldIds = (oldVal || []).map(a => a.id)
-  if (newVal.length > 0 && newIds.some(id => !oldIds.includes(id))) {
-    fetchDeviceLogs()
-  }
-})
 watch(state, () => sync3DPose(), { deep: true })
 watch(robotModelType, () => {
   sync3DModelType()
@@ -1338,6 +1596,12 @@ let speedDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 // ─── Jog State ───────────────────────────────────
 
+type JogCoordinateMode = 'joint' | 'cartesian' | 'tool'
+const JOINT_AXES = ['j1', 'j2', 'j3', 'j4', 'j5', 'j6'] as const
+const CARTESIAN_AXES = ['x', 'y', 'z', 'rx', 'ry', 'rz'] as const
+
+const jogCoordinate = ref<JogCoordinateMode>('joint')
+const jogCoordSwitching = ref(false)
 const jogAxis = ref('j1')
 const jogDir = ref('+')
 const jogMode = ref<'continuous' | 'step'>('continuous')
@@ -1351,12 +1615,73 @@ const ampTravel = ref(0)
 const ampLimit = ref(50)  // mm or °
 const appliedJogMode = ref<'jog' | 'step' | null>(null)
 const appliedTeachInch = ref<number | null>(null)
+const appliedJogCoordinate = ref<JogCoordinateMode | null>(null)
 const moveTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 let moveTargetJoints: number[] | null = null
+/** 点动代数：松手/换轴时递增，丢弃过期的 in-flight jog 请求结果 */
+let jogGeneration = 0
+/** 串行化 jog/stop 请求，避免 stop 被更晚到达的 jog 覆盖 */
+let jogCmdChain: Promise<void> = Promise.resolve()
+const JOG_REPEAT_MS = 80
+
+const activeJogAxes = computed(() =>
+  jogCoordinate.value === 'joint' ? [...JOINT_AXES] : [...CARTESIAN_AXES]
+)
+
+const jogAxisUnit = computed(() => {
+  if (jogAxis.value.startsWith('j') || jogAxis.value.startsWith('r')) return '°'
+  return 'mm'
+})
+
+function formatJogAxisName(axis: string): string {
+  return axis.toUpperCase()
+}
+
+function formatJogAxisValue(axis: string): string {
+  if (axis.startsWith('j')) {
+    return `${getJoint(Number(axis.slice(1)))}°`
+  }
+  const unit = axis.startsWith('r') ? '°' : 'mm'
+  return `${getPoseVal(axis)}${unit}`
+}
+
+function beginAxisJog(axis: string, dir: string) {
+  jogAxis.value = axis
+  startJog(dir)
+}
 
 // ─── Keyboard Shortcuts ──────────────────────────
 
-const keyMap: Record<string, { axis: string; dir: string }> = {
+/** 规范化按键 id（方向键 / Space / Shift 等） */
+function normalizeJogKey(e: KeyboardEvent): string {
+  const k = e.key
+  if (k === ';' ) return 'semicolon'
+  if (k === ' ' || k === 'Spacebar' || e.code === 'Space') return 'space'
+  if (k === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') return 'shift'
+  if (k.startsWith('Arrow')) return k.toLowerCase() // arrowup/down/left/right
+  return k.toLowerCase()
+}
+
+/**
+ * 飞行键：WASD + Shift/Space + 方向键 → 笛卡尔 X/Y/Z
+ * W=Y+  A=X-  S=Y-  D=X+  Shift=Z-  Space=Z+
+ * ↑=Y+  ↓=Y-  ←=X-  →=X+
+ * 任意坐标系模式下都优先走这组键，并自动切到笛卡尔。
+ */
+const flightKeyMap: Record<string, { axis: string; dir: string }> = {
+  w: { axis: 'y', dir: '+' },
+  a: { axis: 'x', dir: '-' },
+  s: { axis: 'y', dir: '-' },
+  d: { axis: 'x', dir: '+' },
+  shift: { axis: 'z', dir: '-' },
+  space: { axis: 'z', dir: '+' },
+  arrowup: { axis: 'y', dir: '+' },
+  arrowdown: { axis: 'y', dir: '-' },
+  arrowleft: { axis: 'x', dir: '-' },
+  arrowright: { axis: 'x', dir: '+' },
+}
+
+const jointKeyMap: Record<string, { axis: string; dir: string }> = {
   y: { axis: 'j1', dir: '+' }, h: { axis: 'j1', dir: '-' },
   u: { axis: 'j2', dir: '+' }, j: { axis: 'j2', dir: '-' },
   i: { axis: 'j3', dir: '+' }, k: { axis: 'j3', dir: '-' },
@@ -1365,29 +1690,72 @@ const keyMap: Record<string, { axis: string; dir: string }> = {
   '[': { axis: 'j6', dir: '+' }, "'": { axis: 'j6', dir: '-' },
 }
 
-const shortcutHints = [
+const cartesianKeyMap: Record<string, { axis: string; dir: string }> = {
+  // 保留原 YUHJ… 映射；飞行键由 flightKeyMap 优先处理
+  y: { axis: 'x', dir: '+' }, h: { axis: 'x', dir: '-' },
+  u: { axis: 'y', dir: '+' }, j: { axis: 'y', dir: '-' },
+  i: { axis: 'z', dir: '+' }, k: { axis: 'z', dir: '-' },
+  o: { axis: 'rx', dir: '+' }, l: { axis: 'rx', dir: '-' },
+  p: { axis: 'ry', dir: '+' }, semicolon: { axis: 'ry', dir: '-' },
+  '[': { axis: 'rz', dir: '+' }, "'": { axis: 'rz', dir: '-' },
+}
+
+const jointShortcutHints = [
   { label: 'J1', pos: 'Y', neg: 'H' },
   { label: 'J2', pos: 'U', neg: 'J' },
   { label: 'J3', pos: 'I', neg: 'K' },
   { label: 'J4', pos: 'O', neg: 'L' },
   { label: 'J5', pos: 'P', neg: ';' },
-  { label: 'J6', pos: '[', neg: ']' },
+  { label: 'J6', pos: '[', neg: "'" },
 ]
+
+const cartesianShortcutHints = [
+  { label: 'X', pos: 'D / →', neg: 'A / ←' },
+  { label: 'Y', pos: 'W / ↑', neg: 'S / ↓' },
+  { label: 'Z', pos: 'Space', neg: 'Shift' },
+  { label: 'RX', pos: 'O', neg: 'L' },
+  { label: 'RY', pos: 'P', neg: ';' },
+  { label: 'RZ', pos: '[', neg: "'" },
+]
+
+/** 关节模式下也提示飞行键（XYZ） */
+const jointWithFlightHints = [
+  { label: 'X', pos: 'D / →', neg: 'A / ←' },
+  { label: 'Y', pos: 'W / ↑', neg: 'S / ↓' },
+  { label: 'Z', pos: 'Space', neg: 'Shift' },
+  ...jointShortcutHints,
+]
+
+const activeKeyMap = computed(() =>
+  jogCoordinate.value === 'joint' ? jointKeyMap : cartesianKeyMap
+)
+const activeShortcutHints = computed(() =>
+  jogCoordinate.value === 'joint' ? jointWithFlightHints : cartesianShortcutHints
+)
 
 const keysDown = new Set<string>()
 
+function isJogHotkey(key: string): boolean {
+  return Boolean(flightKeyMap[key] || jointKeyMap[key] || cartesianKeyMap[key])
+}
+
 function onKeyDown(e: KeyboardEvent) {
-  // Esc 关闭设置弹窗
-  if (e.key === 'Escape' && showSettings.value) {
-    showSettings.value = false
-    return
+  // Esc 关闭顶层面板（设置 > 日志 > 轨迹 > Dobot+）
+  if (e.key === 'Escape') {
+    if (closeTopOverlay()) {
+      e.preventDefault()
+      return
+    }
   }
   // 跳过输入框/编辑器，避免打字触发 jog
   const target = e.target as HTMLElement
   const tag = target.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.closest('.monaco-editor')) return
-  const key = e.key === ';' ? 'semicolon' : e.key.toLowerCase()
-  const mapped = keyMap[key]
+
+  const key = normalizeJogKey(e)
+  // 飞行键优先（笛卡尔 X/Y/Z），任意模式下可用
+  const flight = flightKeyMap[key]
+  const mapped = flight || activeKeyMap.value[key]
   if (!mapped) return
   if (keysDown.has(key)) return  // already held
   e.preventDefault()
@@ -1395,6 +1763,15 @@ function onKeyDown(e: KeyboardEvent) {
   // 如果已经在 jog（可能是其他轴），先停
   if (jogActive.value) stopJog()
   jogAxis.value = mapped.axis
+
+  // 飞行键强制笛卡尔坐标系；后台切换，不阻塞首包点动
+  if (flight && jogCoordinate.value === 'joint') {
+    jogCoordinate.value = 'cartesian'
+    jogAxis.value = mapped.axis
+    appliedJogCoordinate.value = null
+    void applyJogCoordinate('cartesian')
+  }
+
   startJog(mapped.dir)
 }
 
@@ -1407,8 +1784,8 @@ function onPageClick(e: MouseEvent) {
 }
 
 function onKeyUp(e: KeyboardEvent) {
-  const key = e.key === ';' ? 'semicolon' : e.key.toLowerCase()
-  if (!keyMap[key]) return // 不是 jog 键，忽略
+  const key = normalizeJogKey(e)
+  if (!isJogHotkey(key)) return
   e.preventDefault()
   // 清理：滑键时旧键可能残留，松手时全部清空
   keysDown.clear()
@@ -1453,9 +1830,22 @@ async function moveToPose() {
   }
   poseMoving.value = true
   try {
-    const res = await api.moveDevice(deviceId, { x: pt.x, y: pt.y, z: pt.z, r: pt.rx, mode: 'movJ' })
+    // 使用完整 6DOF 笛卡尔 MovL（旧 moveDevice 曾把 x/y/z/rx 误当关节角导致“关节限位”）
+    const joints = state.value.joints as Record<string, number> | undefined
+    const jointNear = joints
+      ? [1, 2, 3, 4, 5, 6].map(j => Number(joints['j' + j] ?? 0))
+      : undefined
+    const res = await api.moveCartesian(deviceId, {
+      x: pt.x, y: pt.y, z: pt.z,
+      rx: pt.rx, ry: pt.ry, rz: pt.rz,
+      jointNear,
+    })
     if (res.success) {
-      toastRef.value?.success('已到达指定位姿')
+      if ((res.data as Record<string, unknown> | undefined)?.isAlarms) {
+        toastRef.value?.error('因告警停止运动')
+      } else {
+        toastRef.value?.success('已到达指定位姿')
+      }
     } else {
       toastRef.value?.error(`移动失败: ${res.error?.message}`)
     }
@@ -1466,10 +1856,25 @@ async function moveToPose() {
   }
 }
 
+/** 姿态角规范化：把 ±180 等价角显示为更接近 0 的一侧，避免 -180/180 跳动 */
+function normalizeEulerDeg(v: number): number {
+  let a = v
+  // 归一到 (-180, 180]
+  a = ((a + 180) % 360 + 360) % 360 - 180
+  if (a === -180) a = 180
+  return a
+}
+
 function getPoseVal(axis: string): string {
   const pose = state.value.pose as Record<string, number> | undefined
-  const val = pose?.[axis]
-  return val != null ? val.toFixed(2) : '--.--'
+  let val = pose?.[axis]
+  // r 兼容旧字段
+  if (val == null && axis === 'rx') val = pose?.r
+  if (val == null) return '--.--'
+  if (axis === 'rx' || axis === 'ry' || axis === 'rz' || axis === 'r') {
+    return normalizeEulerDeg(val).toFixed(2)
+  }
+  return val.toFixed(2)
 }
 function getJoint(n: number): string {
   const joints = state.value.joints as Record<string, number> | undefined
@@ -1489,7 +1894,9 @@ function getAxisValue(): number {
     return joints?.[jogAxis.value] ?? 0
   }
   const pose = state.value.pose as Record<string, number> | undefined
-  return pose?.[jogAxis.value] ?? 0
+  // r 兼容旧别名，映射到 rx
+  const key = jogAxis.value === 'r' ? 'rx' : jogAxis.value
+  return pose?.[key] ?? 0
 }
 
 // ─── Load / Connect ──────────────────────────────
@@ -1519,16 +1926,17 @@ async function load() {
       const status = s.data.status as Record<string, unknown> | undefined
       enabled.value = status?.mode === 'auto'
       deviceStore.setEnabled(deviceId, enabled.value)
-      // Parse alarm info
-      currentAlarms.value = ((statusData.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
-        .map(a => normalizeAlarmItem(a, 'Alarm'))
-      currentWarnings.value = ((statusData.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
-        .map(w => normalizeWarningItem(w))
+      // Parse alarm info（先用 exchange 轻量数据立刻上屏，再拉完整详情）
+      applyRealtimeAlarms(statusData.alarms)
+      applyRealtimeWarnings(statusData.warningList)
       isCollision.value = (statusData.isCollision as boolean) || false
       protectiveStop.value = (statusData.protectiveStop as boolean) || false
       emergencyStop.value = (statusData.emergencyStop as boolean) || false
-      // Fetch device alarm descriptions on load
-      if (currentAlarms.value.length > 0) fetchDeviceLogs()
+      if (statusData.coordinate !== undefined) {
+        syncJogCoordinateFromController(statusData.coordinate)
+      }
+      // 始终拉一次完整告警/警告详情，避免“日志有、主界面无”
+      fetchDeviceLogs()
     }
   } catch { /* ignore */ }
   loadPostures()
@@ -1548,6 +1956,8 @@ async function doConnect() {
     if (res.success) {
       deviceStore.setConnected(deviceId, true)
       toastRef.value?.success('设备已连接 — 请上电后使能')
+      // 预热点动坐标系/模式，减少首按延迟
+      ensureJogReadyBackground()
     } else {
       const msg = res.error?.message ?? ''
       const code = res.error?.code
@@ -1741,6 +2151,8 @@ async function doClearAlarm() {
     const res = await api.clearAlarm(deviceId)
     if (res.success) {
       currentAlarms.value = []
+      // 清除后立即刷新完整列表，同步主界面与日志面板
+      fetchDeviceLogs()
       toastRef.value?.success('告警已清除')
     } else {
       toastRef.value?.error(`清除告警失败：${res.error?.message}`)
@@ -1799,6 +2211,77 @@ async function changeJogMode(mode: 'continuous' | 'step') {
   } else {
     await applyTeachInch()
   }
+  // 模式就绪后预热，保证下次按键无额外等待
+  ensureJogReadyBackground()
+}
+
+/** 切换关节 / 笛卡尔点动坐标系（对应控制器 /interface/coordinate） */
+async function changeJogCoordinate(mode: JogCoordinateMode) {
+  if (jogCoordinate.value === mode || jogCoordSwitching.value) return
+  if (jogActive.value) stopJog()
+
+  const prev = jogCoordinate.value
+  jogCoordinate.value = mode
+  // 切换坐标系时重置当前轴与幅度起点，避免跨空间误用
+  jogAxis.value = mode === 'joint' ? 'j1' : 'x'
+  appliedJogCoordinate.value = null
+
+  if (!isConnected.value || isMock) {
+    appliedJogCoordinate.value = mode
+    return
+  }
+
+  jogCoordSwitching.value = true
+  try {
+    const ok = await applyJogCoordinate(mode)
+    if (!ok) {
+      jogCoordinate.value = prev
+      jogAxis.value = prev === 'joint' ? 'j1' : 'x'
+    } else {
+      // 预热点动模式，减少下次按键等待
+      ensureJogReadyBackground()
+    }
+  } finally {
+    jogCoordSwitching.value = false
+  }
+}
+
+async function applyJogCoordinate(mode: JogCoordinateMode = jogCoordinate.value): Promise<boolean> {
+  if (isMock) {
+    appliedJogCoordinate.value = mode
+    return true
+  }
+  if (appliedJogCoordinate.value === mode) return true
+  const res = await api.setJogCoordinate(deviceId, mode)
+  if (res.success) {
+    appliedJogCoordinate.value = mode
+    return true
+  }
+  toastRef.value?.error(`切换坐标系失败：${res.error?.message}`)
+  return false
+}
+
+/** 从控制器状态同步当前坐标系（0=joint, 非0=cartesian） */
+function syncJogCoordinateFromController(raw: unknown) {
+  if (jogActive.value || jogCoordSwitching.value) return
+  let next: JogCoordinateMode | null = null
+  if (typeof raw === 'number') {
+    next = raw === 0 ? 'joint' : 'cartesian'
+  } else if (typeof raw === 'string') {
+    const s = raw.toLowerCase()
+    if (s === 'joint') next = 'joint'
+    else if (s === 'cartesian' || s === 'tool') next = s
+  }
+  if (!next) return
+  if (jogCoordinate.value !== next) {
+    jogCoordinate.value = next
+  }
+  // 无论是否刚切换，都保证当前轴属于当前坐标系
+  const axes = next === 'joint' ? JOINT_AXES : CARTESIAN_AXES
+  if (!(axes as readonly string[]).includes(jogAxis.value)) {
+    jogAxis.value = next === 'joint' ? 'j1' : 'x'
+  }
+  appliedJogCoordinate.value = next
 }
 
 async function applyJogMode(): Promise<boolean> {
@@ -1844,6 +2327,23 @@ async function setTeachInchPreset(value: number) {
   await applyTeachInch()
 }
 
+/**
+ * 后台预热：坐标系 / 连续点动模式
+ * 不阻塞按键；首次按键若未就绪会 fire-and-forget 触发一次。
+ */
+function ensureJogReadyBackground() {
+  if (!isConnected.value || isMock) return
+  if (appliedJogCoordinate.value !== jogCoordinate.value) {
+    void applyJogCoordinate()
+  }
+  if (jogMode.value === 'continuous' && appliedJogMode.value !== 'jog') {
+    void applyJogMode()
+  }
+  if (jogMode.value === 'step') {
+    void applyTeachInch()
+  }
+}
+
 async function startJog(dir: string) {
   if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
   if (!checkEnabled()) return
@@ -1851,6 +2351,7 @@ async function startJog(dir: string) {
   // 先停掉旧的 jog（防止重复启动）
   if (jogActive.value) stopJog()
 
+  const gen = ++jogGeneration
   jogDir.value = dir
   jogActive.value = true
 
@@ -1861,64 +2362,65 @@ async function startJog(dir: string) {
   }
   ampTravel.value = 0
 
-  if (jogMode.value === 'continuous') {
-    if (!await applyJogMode()) {
-      jogActive.value = false
-      return
-    }
-    // await 期间用户可能已松手
-    if (!jogActive.value) return
-  } else {
-    if (!await applyTeachInch()) {
-      jogActive.value = false
-      return
-    }
-    if (!jogActive.value) return
-  }
+  // 即走：先发点动，坐标系/模式在后台预热（避免按键被 await 拖住）
+  ensureJogReadyBackground()
+  sendJogCmd(dir, gen)
 
-  sendJogCmd(dir)
+  // 轻点松手：若在首包发出前就 stop，gen 会变化，后续包自动丢弃
+  if (!jogActive.value || gen !== jogGeneration) return
 
   if (jogMode.value === 'step') {
-    // OpenDobot46 does not send a stop command for inch jog.
+    // 步进：不发 stop，短时间后结束本地状态
     stepTimer.value = setTimeout(() => {
-      jogActive.value = false
-    }, 150)
+      if (gen === jogGeneration) jogActive.value = false
+    }, 120)
   } else {
-    // Continuous: repeated jog commands every 150ms
+    // 连续：更高频续发，提升跟手性
     jogInterval.value = setInterval(() => {
-      // 每次发送前检查是否仍活跃（stopJog 可能已清掉标志）
-      if (!jogActive.value) {
+      if (!jogActive.value || gen !== jogGeneration) {
         if (jogInterval.value) { clearInterval(jogInterval.value); jogInterval.value = null }
         return
       }
-      sendJogCmd(dir)
+      sendJogCmd(dir, gen)
       checkAmplitude()
-    }, 150)
+    }, JOG_REPEAT_MS)
   }
 }
 
-function sendJogCmd(dir: string) {
+function enqueueJogCmd(task: () => Promise<void>) {
+  jogCmdChain = jogCmdChain.then(task, task)
+  return jogCmdChain
+}
+
+function sendJogCmd(dir: string, gen: number = jogGeneration) {
   if (isMock) {
     // Mock: 本地模拟关节值变化
     const axis = jogAxis.value
-    const delta = dir === '+' ? 1.5 : -1.5
+    const delta = dir === '+' ? 0.4 : -0.4
     if (axis.startsWith('j')) {
       const joints = state.value.joints as Record<string, number>
       const prev = joints[axis] ?? 0
       joints[axis] = prev + delta
-      console.log(`[Mock Jog] ${axis} ${dir}: ${prev} → ${joints[axis]}`)
       state.value = { ...state.value, joints: { ...joints }, timestamp: Date.now() }
     } else {
       const pose = state.value.pose as Record<string, number>
       const prev = pose[axis] ?? 0
       pose[axis] = prev + delta
-      console.log(`[Mock Jog] ${axis} ${dir}: ${prev} → ${pose[axis]}`)
       state.value = { ...state.value, pose: { ...pose }, timestamp: Date.now() }
     }
     return
   }
-  api.jogDevice(deviceId, jogAxis.value, dir, jogMode.value).catch(err => {
-    console.error('[Jog] send failed:', err)
+
+  const axis = jogAxis.value
+  const mode = jogMode.value
+  void enqueueJogCmd(async () => {
+    // 过期代数：用户已松手/换轴，不再下发 jog（避免盖住 stop）
+    if (gen !== jogGeneration || !jogActive.value) return
+    try {
+      await api.jogDevice(deviceId, axis, dir, mode)
+    } catch (err) {
+      console.error('[Jog] send failed:', err)
+    }
   })
 }
 
@@ -1926,9 +2428,11 @@ function stopJog() {
   if (stepTimer.value) { clearTimeout(stepTimer.value); stepTimer.value = null }
   if (jogInterval.value) { clearInterval(jogInterval.value); jogInterval.value = null }
   const wasActive = jogActive.value
+  // 立刻作废所有 in-flight jog，并标为非活跃
+  jogGeneration++
   jogActive.value = false
   ampTravel.value = 0
-  // 发送停止指令（仅 continuous 模式且之前在活跃状态）
+  // 连续模式：立刻发 stopJog（轻量清按钮），保证即停
   if (wasActive && jogMode.value === 'continuous') {
     sendJogStop()
   }
@@ -1936,8 +2440,17 @@ function stopJog() {
 
 function sendJogStop() {
   if (isMock) return
-  api.stopDevice(deviceId).catch(err => {
-    console.error('[Jog] stop failed:', err)
+  // 串到同一队列末尾，确保排在尚未发出的 jog 之后，且不会被其覆盖
+  void enqueueJogCmd(async () => {
+    try {
+      // 连发两次：第一枪尽快停，第二枪兜底（网络乱序/控制器偶发丢包）
+      await api.stopJogDevice(deviceId)
+      await api.stopJogDevice(deviceId)
+    } catch (err) {
+      console.error('[Jog] stop failed:', err)
+      // 兜底走通用 stop
+      await api.stopDevice(deviceId).catch(() => {})
+    }
   })
 }
 
@@ -2355,28 +2868,106 @@ async function saveCoords(type: string) {
 
 // ─── Custom Postures ────────────────────────────
 
+const EMPTY_POSE: api.CustomPosturePose = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 }
+
+function emptyPose(): api.CustomPosturePose {
+  return { ...EMPTY_POSE }
+}
+
+function normalizePostureItem(p: api.CustomPostureItem, index = 0): api.CustomPostureItem {
+  const type: api.CustomPostureType = p.type === 'cartesian' ? 'cartesian' : 'joint'
+  const joint = (p.joint || []).slice(0, 6).map(j => Number(j) || 0)
+  while (joint.length < 6) joint.push(0)
+  const item: api.CustomPostureItem = {
+    name: String(p.name || '').trim() || `P${index + 1}`,
+    type,
+    joint,
+  }
+  if (type === 'cartesian') {
+    const src = p.pose || EMPTY_POSE
+    item.pose = {
+      x: Number(src.x) || 0,
+      y: Number(src.y) || 0,
+      z: Number(src.z) || 0,
+      rx: Number(src.rx) || 0,
+      ry: Number(src.ry) || 0,
+      rz: Number(src.rz) || 0,
+    }
+  }
+  return item
+}
+
 const customPostures = ref<api.CustomPostureItem[]>([])
 
 // System postures (always present, not stored on controller)
-const systemPostures: Array<{ name: string; joint: number[]; system: true }> = [
-  { name: '零点', joint: [0, 0, 0, 0, 0, 0], system: true },
-  { name: '打包', joint: [-90, 0, -140, -40, 0, 0], system: true },
-  { name: '研究', joint: [-90, 0, -90, 0, 90, 0], system: true },
+const systemPostures: Array<{ name: string; type: 'joint'; joint: number[]; system: true }> = [
+  { name: '零点', type: 'joint', joint: [0, 0, 0, 0, 0, 0], system: true },
+  { name: '打包', type: 'joint', joint: [-90, 0, -140, -40, 0, 0], system: true },
+  { name: '研究', type: 'joint', joint: [-90, 0, -90, 0, 90, 0], system: true },
 ]
 
-interface PostureItem { _key: string; name: string; joint: number[]; system: boolean; _controllerIdx?: number }
+interface PostureItem {
+  _key: string
+  name: string
+  type: api.CustomPostureType
+  joint: number[]
+  pose?: api.CustomPosturePose
+  system: boolean
+  _controllerIdx?: number
+}
+
 const allPostures = computed<PostureItem[]>(() => [
-  ...systemPostures.map((s, i) => ({ ...s, _key: `sys-${i}`, joint: [...s.joint] })),
-  ...customPostures.value.map((p, i) => ({ _key: `ctrl-${i}`, name: p.name, joint: [...p.joint], system: false, _controllerIdx: i })),
+  ...systemPostures.map((s, i) => ({
+    ...s,
+    _key: `sys-${i}`,
+    joint: [...s.joint],
+    type: 'joint' as const,
+  })),
+  ...customPostures.value.map((p, i) => {
+    const n = normalizePostureItem(p, i)
+    return {
+      _key: `ctrl-${i}`,
+      name: n.name,
+      type: n.type ?? 'joint',
+      joint: [...(n.joint || [])],
+      pose: n.pose ? { ...n.pose } : undefined,
+      system: false,
+      _controllerIdx: i,
+    }
+  }),
 ])
 
 const postureListExpanded = ref(false)
 const editingPostureIdx = ref<number | null>(null)
-const editPostureForm = reactive<api.CustomPostureItem>({ name: '', joint: [0,0,0,0,0,0] })
+const editPostureForm = reactive<api.CustomPostureItem>({
+  name: '',
+  type: 'joint',
+  joint: [0, 0, 0, 0, 0, 0],
+  pose: emptyPose(),
+})
+
+function formatPostureSummary(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose }): string {
+  if (p.type === 'cartesian' && p.pose) {
+    const { x, y, z, rx, ry, rz } = p.pose
+    return `X${x.toFixed(1)} Y${y.toFixed(1)} Z${z.toFixed(1)}  RX${rx.toFixed(1)} RY${ry.toFixed(1)} RZ${rz.toFixed(1)}`
+  }
+  const j = p.joint || []
+  return j.map(v => `${Number(v).toFixed(1)}°`).join(', ')
+}
+
+function formatPostureDetail(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose; name?: string }): string {
+  if (p.type === 'cartesian' && p.pose) {
+    const { x, y, z, rx, ry, rz } = p.pose
+    return `${p.name || ''}  XYZ[${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}] RXYZ[${rx.toFixed(1)}, ${ry.toFixed(1)}, ${rz.toFixed(1)}]`
+  }
+  return `${p.name || ''}  J[${(p.joint || []).map(v => Number(v).toFixed(1)).join(', ')}]`
+}
 
 async function loadPostures() {
   const res = await api.getCustomPostures(deviceId)
-  if (res.success && res.data) customPostures.value = res.data
+  if (res.success && res.data) {
+    customPostures.value = res.data.map((p, i) => normalizePostureItem(p, i))
+  }
 }
 function nextAutoName(): string {
   const maxN = customPostures.value.reduce((m, p) => {
@@ -2385,13 +2976,17 @@ function nextAutoName(): string {
   }, 0)
   return `P${maxN + 1}`
 }
-function addEmptyPosture() {
-  customPostures.value.push({ name: nextAutoName(), joint: [0,0,0,0,0,0] })
+function addEmptyPosture(type: api.CustomPostureType = 'joint') {
+  customPostures.value.push(normalizePostureItem({
+    name: nextAutoName(),
+    type,
+    joint: [0, 0, 0, 0, 0, 0],
+    pose: emptyPose(),
+  }))
   const idx = customPostures.value.length - 1
-  editingPostureIdx.value = idx
-  Object.assign(editPostureForm, customPostures.value[idx])
+  startEditPosture(idx)
   postureListExpanded.value = true
-  savePostures()
+  void savePostures()
 }
 // ─── Posture Drag Reorder ─────────────────────────
 
@@ -2425,49 +3020,118 @@ async function onPostureDrop(targetIdx: number) {
   const newIdx = tgtCtrl > srcCtrl ? tgtCtrl - 1 : tgtCtrl
   customPostures.value.splice(newIdx, 0, moved)
   await savePostures()
-  toastRef.value?.success('姿态已重新排序')
+  toastRef.value?.success('预设已重新排序')
 }
 function onPostureDragEnd() { dragPostureIdx.value = -1; dragPostureOver.value = -1 }
 
-function addPostureFromCurrent() {
+async function addPostureFromCurrent(type: api.CustomPostureType = 'joint') {
+  const name = nextAutoName()
+  if (type === 'cartesian') {
+    const pt = getCurrentCartesian()
+    if (!pt) {
+      toastRef.value?.error('无法读取当前笛卡尔位姿')
+      return
+    }
+    customPostures.value.push(normalizePostureItem({
+      name,
+      type: 'cartesian',
+      joint: getMoveTargetJoints(),
+      pose: { x: pt.x, y: pt.y, z: pt.z, rx: pt.rx, ry: pt.ry, rz: pt.rz },
+    }))
+    postureListExpanded.value = true
+    await savePostures(`笛卡尔预设 "${name}" 已保存`)
+    return
+  }
+
   const joints = state.value.joints as Record<string, number> | undefined
   if (!joints) return
-  const name = nextAutoName()
-  customPostures.value.push({ name, joint: [1,2,3,4,5,6].map(j => Math.round((joints['j'+j] ?? 0) * 10) / 10) })
+  customPostures.value.push(normalizePostureItem({
+    name,
+    type: 'joint',
+    joint: [1, 2, 3, 4, 5, 6].map(j => Math.round((joints['j' + j] ?? 0) * 10) / 10),
+  }))
   postureListExpanded.value = true
-  savePostures()
-  toastRef.value?.info(`姿态 "${name}" 已从当前关节保存`)
+  await savePostures(`关节预设 "${name}" 已保存`)
 }
-function startEditPosture(i: number) { editingPostureIdx.value = i; Object.assign(editPostureForm, customPostures.value[i]) }
+function startEditPosture(i: number) {
+  editingPostureIdx.value = i
+  const cur = normalizePostureItem(customPostures.value[i], i)
+  editPostureForm.name = cur.name
+  editPostureForm.type = cur.type ?? 'joint'
+  editPostureForm.joint = [...(cur.joint || [0, 0, 0, 0, 0, 0])]
+  editPostureForm.pose = cur.pose ? { ...cur.pose } : emptyPose()
+}
 async function saveEditPosture(i: number) {
-  customPostures.value[i] = { ...editPostureForm, name: String(i) }
+  customPostures.value[i] = normalizePostureItem({
+    name: String(editPostureForm.name || '').trim() || nextAutoName(),
+    type: editPostureForm.type === 'cartesian' ? 'cartesian' : 'joint',
+    joint: (editPostureForm.joint || []).map(Number),
+    pose: editPostureForm.pose ? { ...editPostureForm.pose } : emptyPose(),
+  }, i)
   editingPostureIdx.value = null
   await savePostures()
 }
 async function deletePosture(i: number) { customPostures.value.splice(i, 1); await savePostures() }
 function deletePostureItem(ctrlIdx: number) { deletePosture(ctrlIdx) }
-async function savePostures() {
-  const res = await api.setCustomPostures(deviceId, customPostures.value)
-  if (res.success) toastRef.value?.success('姿态已保存')
-  else toastRef.value?.error(`保存姿态失败：${res.error?.message}`)
+async function savePostures(successMessage?: string): Promise<boolean> {
+  // 规范化后再提交，避免脏数据
+  const payload = customPostures.value.map((p, i) => normalizePostureItem(p, i))
+  customPostures.value = payload
+  const res = await api.setCustomPostures(deviceId, payload)
+  if (res.success) {
+    toastRef.value?.success(successMessage || '预设已保存')
+    return true
+  }
+  toastRef.value?.error(`保存预设失败：${res.error?.message}`)
+  return false
 }
 const newPostureName = ref('')
-function saveCurrentAsPosture() {
+const newPostureType = ref<api.CustomPostureType>('joint')
+
+async function saveCurrentAsPosture() {
   if (!newPostureName.value.trim()) return
-  const joints = getMoveTargetJoints()
   const name = newPostureName.value.trim()
-  if (customPostures.value.some(p => p.name === name)) {
-    // Overwrite existing
-    const idx = customPostures.value.findIndex(p => p.name === name)
-    customPostures.value[idx] = { name, joint: [...joints] }
-    toastRef.value?.success(`姿态 "${name}" 已更新`)
+  const type = newPostureType.value
+  let item: api.CustomPostureItem
+
+  if (type === 'cartesian') {
+    // 优先用位姿编辑框；若全为 0 则回退到当前实时位姿
+    const fromForm = {
+      x: Number(targetPose.x || 0),
+      y: Number(targetPose.y || 0),
+      z: Number(targetPose.z || 0),
+      rx: Number(targetPose.rx || 0),
+      ry: Number(targetPose.ry || 0),
+      rz: Number(targetPose.rz || 0),
+    }
+    const formIsZero = Object.values(fromForm).every(v => v === 0)
+    const live = getCurrentCartesian()
+    const pt = formIsZero && live ? live : fromForm
+    item = normalizePostureItem({
+      name,
+      type: 'cartesian',
+      joint: getMoveTargetJoints(),
+      pose: { x: pt.x, y: pt.y, z: pt.z, rx: pt.rx, ry: pt.ry, rz: pt.rz },
+    })
   } else {
-    customPostures.value.push({ name, joint: [...joints] })
-    toastRef.value?.success(`姿态 "${name}" 已保存`)
+    item = normalizePostureItem({
+      name,
+      type: 'joint',
+      joint: getMoveTargetJoints(),
+    })
+  }
+
+  const exists = customPostures.value.some(p => p.name === name)
+  if (exists) {
+    const idx = customPostures.value.findIndex(p => p.name === name)
+    customPostures.value[idx] = item
+  } else {
+    customPostures.value.push(item)
   }
   newPostureName.value = ''
   postureListExpanded.value = true
-  savePostures()
+  const kind = type === 'cartesian' ? '笛卡尔' : '关节'
+  await savePostures(exists ? `${kind}预设 "${name}" 已更新` : `${kind}预设 "${name}" 已保存`)
 }
 
 // ─── Posture Rename ─────────────────────────────
@@ -2486,15 +3150,31 @@ function confirmRenamePosture(p: PostureItem) {
     return
   }
   if (p._controllerIdx !== undefined) {
-    customPostures.value[p._controllerIdx] = { ...customPostures.value[p._controllerIdx], name: renamePostureValue.value.trim() }
+    customPostures.value[p._controllerIdx] = {
+      ...normalizePostureItem(customPostures.value[p._controllerIdx], p._controllerIdx),
+      name: renamePostureValue.value.trim(),
+    }
     savePostures()
   }
   renamingPostureKey.value = ''
   toastRef.value?.success(`已重命名为 "${renamePostureValue.value.trim()}"`)
 }
 
-function fillPosture(p: { joint: number[] }) {
-  for (let j = 1; j <= 6; j++) moveTarget['j'+j] = p.joint[j-1] ?? 0
+/** 点击预设：关节填充 moveTarget；笛卡尔填充 targetPose */
+function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose; name?: string }) {
+  if (p.type === 'cartesian' && p.pose) {
+    targetPose.x = p.pose.x
+    targetPose.y = p.pose.y
+    targetPose.z = p.pose.z
+    targetPose.rx = p.pose.rx
+    targetPose.ry = p.pose.ry
+    targetPose.rz = p.pose.rz
+    toastRef.value?.info(`已填充笛卡尔预设${p.name ? ` "${p.name}"` : ''}`)
+    return
+  }
+  const joint = p.joint || []
+  for (let j = 1; j <= 6; j++) moveTarget['j' + j] = joint[j - 1] ?? 0
+  toastRef.value?.info(`已填充关节预设${p.name ? ` "${p.name}"` : ''}`)
 }
 
 // ─── Motion Parameters ─────────────────────────
@@ -2580,6 +3260,24 @@ const loadingDobotPlus = ref(false)
 const installingDobotPlus = ref(false)
 const dobotPlusIframeName = ref('')
 
+// DobotES01 吸盘
+const hasDobotES01 = computed(() => dobotPlusList.value.some(n => /^DobotES01/i.test(n)))
+const es01Busy = ref(false)
+const es01StatusCode = ref<number | null>(null) // 0=吸附 1=释放 2=异常
+const es01StatusKey = computed(() => {
+  if (es01StatusCode.value === 0) return 'grip'
+  if (es01StatusCode.value === 2) return 'alarm'
+  if (es01StatusCode.value === 1) return 'release'
+  return 'unknown'
+})
+const es01StatusText = computed(() => {
+  if (es01StatusCode.value === 0) return '吸附中'
+  if (es01StatusCode.value === 1) return '已释放'
+  if (es01StatusCode.value === 2) return '异常'
+  return '—'
+})
+let es01StatusTimer: ReturnType<typeof setInterval> | null = null
+
 async function loadDobotPlusList() {
   loadingDobotPlus.value = true
   try {
@@ -2593,8 +3291,60 @@ async function loadDobotPlusList() {
       for (const [k, v] of Object.entries(portsRes.data)) p[k] = String(v)
       dobotPlusPorts.value = p
     }
+    // 有 ES01 时启动状态轮询
+    if (hasDobotES01.value) {
+      void refreshES01Status()
+      startES01StatusPoll()
+    } else {
+      stopES01StatusPoll()
+    }
   } catch (err) { console.warn('[DobotPlus] load failed:', err) }
   finally { loadingDobotPlus.value = false }
+}
+
+async function refreshES01Status() {
+  if (!isConnected.value || !hasDobotES01.value) return
+  try {
+    const res = await api.getDobotES01Status(deviceId)
+    if (res.success && res.data && typeof (res.data as api.DobotES01Status).status === 'number') {
+      es01StatusCode.value = (res.data as api.DobotES01Status).status
+    }
+  } catch { /* ignore */ }
+}
+
+function startES01StatusPoll() {
+  if (es01StatusTimer) return
+  es01StatusTimer = setInterval(() => { void refreshES01Status() }, 1500)
+}
+
+function stopES01StatusPoll() {
+  if (es01StatusTimer) {
+    clearInterval(es01StatusTimer)
+    es01StatusTimer = null
+  }
+}
+
+async function doES01(action: 'grip' | 'release' | 'clearAlarm') {
+  if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
+  if (es01Busy.value) return
+  es01Busy.value = true
+  try {
+    const res = await api.controlDobotES01(deviceId, action)
+    if (res.success) {
+      const labels = { grip: '吸取', release: '释放', clearAlarm: '清错' } as const
+      toastRef.value?.success(`吸盘${labels[action]}成功`)
+      // 立即刷新状态
+      if (action === 'grip') es01StatusCode.value = 0
+      else if (action === 'release') es01StatusCode.value = 1
+      setTimeout(() => { void refreshES01Status() }, 300)
+    } else {
+      toastRef.value?.error(`吸盘操作失败：${res.error?.message}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`吸盘操作出错：${(err as Error).message}`)
+  } finally {
+    es01Busy.value = false
+  }
 }
 async function installDobotPlusPlugin() {
   if (!dobotPlusInstallName.value.trim()) return
@@ -2657,10 +3407,13 @@ function getCurrentCartesian() {
   const pose = s?.pose as Record<string, number> | undefined
   if (!pose) return null
   return {
-    x: pose.x ?? 0, y: pose.y ?? 0, z: pose.z ?? 0,
-    rx: (pose as Record<string, number>).rx ?? (pose as Record<string, number>).r ?? 0,
-    ry: (pose as Record<string, number>).ry ?? 0,
-    rz: (pose as Record<string, number>).rz ?? 0,
+    x: pose.x ?? 0,
+    y: pose.y ?? 0,
+    z: pose.z ?? 0,
+    // 控制器 exchange 常给 +180，UI 读取时规范化，避免 -180/180 看起来“错位”
+    rx: normalizeEulerDeg(pose.rx ?? pose.r ?? 0),
+    ry: normalizeEulerDeg(pose.ry ?? 0),
+    rz: normalizeEulerDeg(pose.rz ?? 0),
   }
 }
 
@@ -2736,7 +3489,15 @@ async function goToTrajPoint(i: number) {
   if (!check.legal) { toastRef.value?.error(`安全校验失败: ${check.reason}`); return }
   trajMovingIdx.value = i
   try {
-    const res = await api.moveDevice(deviceId, { x: pt.x, y: pt.y, z: pt.z, r: pt.rx, mode: 'movJ' })
+    const joints = state.value.joints as Record<string, number> | undefined
+    const jointNear = joints
+      ? [1, 2, 3, 4, 5, 6].map(j => Number(joints['j' + j] ?? 0))
+      : undefined
+    const res = await api.moveCartesian(deviceId, {
+      x: pt.x, y: pt.y, z: pt.z,
+      rx: pt.rx, ry: pt.ry, rz: pt.rz,
+      jointNear,
+    })
     if (res.success) toastRef.value?.success(`已到达轨迹点 #${i + 1}`)
     else toastRef.value?.error(`移动失败: ${res.error?.message}`)
   } catch (err) { toastRef.value?.error(`移动错误: ${(err as Error).message}`) }
@@ -2765,7 +3526,10 @@ onMounted(async () => {
   window.addEventListener('blur', onWindowBlur)
   await load()
   if (!isMock && !isConnected.value) await doConnect()
-  if (!isMock && isConnected.value) loadSpeed()
+  if (!isMock && isConnected.value) {
+    loadSpeed()
+    ensureJogReadyBackground()
+  }
   api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
   api.getRemoteControl(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = r.data.mode === 'online' })
 
@@ -2801,25 +3565,23 @@ onMounted(async () => {
     // Parse alarm info from WS ext payload
     if (ext) {
       isAutoMode.value = (ext.autoManual as number) === 1
-      // 只在控制器标记更新时才刷新 alarms/warnings
-      // 控制器的 raw.alarms 仅在 isAlarmUpdate=true 时包含有效数据
+      // 对齐官方：isAlarmUpdate / isWarningUpdate 时立刻上屏轻量数据，并主动拉完整详情
+      // exchange 的 alarms/warningList 仅在 update 标志为 true 时可靠
       const isAlarmUpdate = (ext.isAlarmUpdate as boolean) || false
       const isWarningUpdate = (ext.isWarningUpdate as boolean) || false
       if (isAlarmUpdate) {
-        const newAlarms = ((raw.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
-          .map(a => normalizeAlarmItem(a, 'Alarm'))
-        const prevIds = currentAlarms.value.map(a => a.id)
-        const hasNew = newAlarms.some(a => !prevIds.includes(a.id))
-        currentAlarms.value = mergeAlarmDetails(newAlarms, currentAlarms.value)
-        if (hasNew) fetchDeviceLogs()
+        // WS 推送的是 DeviceState.alarm；REST status 则是 alarms 字段
+        applyRealtimeAlarms(raw.alarms ?? raw.alarm)
+        // 不依赖“是否有新 ID”——清除/等级变化/同 ID 更新都要拉详情
+        void fetchAlarmDetails()
       }
       if (isWarningUpdate) {
-        const newWarnings = ((ext.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
-          .map(w => normalizeWarningItem(w))
-        const prevWarningIds = currentWarnings.value.map(w => w.id)
-        const hasNewWarning = newWarnings.some(w => !prevWarningIds.includes(w.id))
-        currentWarnings.value = mergeAlarmDetails(newWarnings, currentWarnings.value)
-        if (hasNewWarning) fetchDeviceLogs()
+        applyRealtimeWarnings(ext.warningList)
+        void fetchWarningDetails()
+      }
+      // 同步点动坐标系（控制器 coordinate: 0=joint, 非0=cartesian）
+      if (ext.coordinate !== undefined) {
+        syncJogCoordinateFromController(ext.coordinate)
       }
       isCollision.value = (ext.isCollision as boolean) || false
       protectiveStop.value = (ext.protectiveStop as boolean) || false
@@ -2872,14 +3634,16 @@ onMounted(async () => {
         const isAlarmUpd = (fb.isAlarmUpdate as boolean) || false
         const isWarningUpd = (fb.isWarningUpdate as boolean) || false
         if (isAlarmUpd) {
-          const newAlarms = ((fb.alarms as Array<Partial<AlarmItem> & { id: number }>) || [])
-            .map(a => normalizeAlarmItem(a, 'Alarm'))
-          currentAlarms.value = mergeAlarmDetails(newAlarms, currentAlarms.value)
+          const stateObj = fb.state as Record<string, unknown> | undefined
+          applyRealtimeAlarms(fb.alarms ?? stateObj?.alarm)
+          void fetchAlarmDetails()
         }
         if (isWarningUpd) {
-          const newWarnings = ((fb.warningList as Array<number | Partial<AlarmItem> & { id: number }>) || [])
-            .map(w => normalizeWarningItem(w))
-          currentWarnings.value = mergeAlarmDetails(newWarnings, currentWarnings.value)
+          applyRealtimeWarnings(fb.warningList)
+          void fetchWarningDetails()
+        }
+        if (fb.coordinate !== undefined) {
+          syncJogCoordinateFromController(fb.coordinate)
         }
         isCollision.value = (fb.isCollision as boolean) || false
         protectiveStop.value = (fb.protectiveStop as boolean) || false
@@ -2899,6 +3663,7 @@ onUnmounted(() => {
   window.removeEventListener('message', handle3DModelMessage)
   window.removeEventListener('blur', onWindowBlur)
   if (fallbackTimer) clearInterval(fallbackTimer)
+  stopES01StatusPoll()
   stopJog()
   keysDown.clear()
   wsClient.unsubscribe(deviceId)
@@ -3044,6 +3809,20 @@ onUnmounted(() => {
 .jog-axis-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 56px; }
 .jog-axis-name { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
 .jog-axis-val { font-family: var(--font-mono); font-size: 0.74rem; color: var(--cyan-300); }
+.jog-shortcut-hints {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px;
+  padding: 4px 0 2px; border-top: 1px solid var(--border); margin-top: 6px;
+}
+.jog-shortcut-hint {
+  font-family: var(--font-body); font-size: 0.62rem; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.jog-shortcut-hint b { color: var(--text-secondary); font-weight: 600; min-width: 18px; }
+.jog-shortcut-hint kbd {
+  font-family: var(--font-mono); font-size: 0.58rem; padding: 1px 5px;
+  border: 1px solid var(--border); border-radius: 3px; background: var(--void-deep);
+  color: var(--text-secondary);
+}
 /* 模拟键盘键位错位：↓ 按钮整排右移 */
 .jog-btn--down { transform: translateX(16px); }
 .jog-btn { width: 48px; height: 40px; display: flex; align-items: center; justify-content: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; color: var(--text-secondary); transition: all 80ms var(--ease-out); user-select: none; touch-action: none; }
@@ -3169,21 +3948,28 @@ onUnmounted(() => {
 .modal-actions { display: flex; gap: 12px; }
 .modal-actions .btn { flex: 1; }
 
-/* Settings Modal */
-.settings-modal { max-width: 900px; width: 90vw; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }
+/* Settings Side Panel */
+.settings-panel {
+  position: fixed; top: 0; right: 0; width: min(720px, 92vw); height: 100vh;
+  z-index: 100; overflow: hidden; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border); background: var(--surface-0);
+  box-shadow: -8px 0 32px rgba(0,0,0,0.5);
+  border-radius: 0;
+}
 .settings-layout { display: flex; flex: 1; min-height: 0; }
 .settings-sidebar {
-  width: 155px; flex-shrink: 0; padding: 12px 0;
+  width: 132px; flex-shrink: 0; padding: 10px 0;
   border-right: 1px solid var(--border-subtle);
   display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
 }
 
 .settings-alias-input { padding: 5px 8px; font-family: var(--font-mono); font-size: 0.74rem; background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; flex: 1; }
 .settings-alias-input:focus { border-color: var(--accent); }
 .settings-nav-item {
-  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px;
   background: transparent; border: none; cursor: pointer;
-  font-family: var(--font-body); font-size: 0.78rem; font-weight: 500;
+  font-family: var(--font-body); font-size: 0.74rem; font-weight: 500;
   color: var(--text-muted);
   transition: all 0.15s ease; text-align: left; width: 100%;
   border-left: 2px solid transparent;
@@ -3193,9 +3979,9 @@ onUnmounted(() => {
   color: var(--cyan-300); background: var(--cyan-900);
   border-left-color: var(--cyan-500);
 }
-.settings-nav-icon { font-size: 0.95rem; flex-shrink: 0; }
+.settings-nav-icon { font-size: 0.9rem; flex-shrink: 0; }
 .settings-nav-label { white-space: nowrap; }
-.settings-content { flex: 1; overflow-y: auto; padding: 12px 24px 24px; min-height: 0; }
+.settings-content { flex: 1; overflow-y: auto; padding: 12px 16px 20px; min-height: 0; }
 .settings-placeholder { display: flex; align-items: center; justify-content: center; height: 200px; }
 
 .settings-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
@@ -3263,6 +4049,28 @@ onUnmounted(() => {
 .estop-btn { padding: 12px 28px; font-size: 13px; background: var(--status-danger); border-color: transparent; color: #fff; box-shadow: var(--shadow-md); }
 .estop-btn:hover:not(:disabled) { background: #dc2626; border-color: transparent; box-shadow: var(--shadow-lg); }
 
+/* DobotES01 sucker control */
+.es01-control {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-0);
+}
+.es01-control--busy { opacity: 0.7; }
+.es01-label {
+  font-family: var(--font-body); font-size: 0.72rem; font-weight: 600;
+  color: var(--text-muted); white-space: nowrap;
+}
+.es01-status {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600;
+  padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  color: var(--text-muted); min-width: 52px; text-align: center;
+}
+.es01-status--grip { color: var(--cyan-300); border-color: var(--cyan-500); background: var(--cyan-900); }
+.es01-status--release { color: var(--text-secondary); }
+.es01-status--alarm { color: var(--status-danger); border-color: var(--status-danger); background: var(--status-danger-dim); }
+.es01-status--unknown { color: var(--text-muted); }
+.es01-settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* Quick Posture Buttons */
 .quick-posture-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
 .btn-quick-posture {
@@ -3271,10 +4079,27 @@ onUnmounted(() => {
   background: var(--void-deep); color: var(--text-muted);
   cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; font-weight: 600;
   transition: all 0.15s ease;
+  display: inline-flex; align-items: center; gap: 4px;
 }
 .btn-quick-posture:hover:not(:disabled) { border-color: var(--cyan-500); color: var(--cyan-300); background: var(--cyan-900); }
 .btn-quick-posture--moving { border-color: var(--status-danger); color: var(--status-danger); background: var(--status-danger-dim); }
+.btn-quick-posture--cart { border-color: var(--cyan-700); color: var(--cyan-300); }
 .btn-quick-posture .qpi { font-size: 0.78rem; }
+.btn-quick-posture .qpi-tag {
+  font-family: var(--font-mono); font-size: 0.55rem; font-weight: 700;
+  padding: 0 4px; border-radius: 3px;
+  background: var(--cyan-900); color: var(--cyan-300); border: 1px solid var(--cyan-700);
+}
+.preset-type-badge {
+  display: inline-block; margin-left: 6px;
+  font-family: var(--font-mono); font-size: 0.55rem; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px; vertical-align: middle;
+  background: var(--cyan-900); color: var(--cyan-300); border: 1px solid var(--cyan-700);
+}
+.preset-type-badge--joint {
+  background: var(--surface-2); color: var(--text-muted); border-color: var(--border);
+}
+.preset-item--cartesian .preset-item-name { color: var(--cyan-300); }
 
 .preset-rename-input {
   padding: 1px 4px; font-family: var(--font-mono); font-size: 0.7rem;
@@ -3302,6 +4127,13 @@ onUnmounted(() => {
 /* Warning button variant */
 .btn-warning { background: var(--surface-1); border-color: var(--status-warning); color: var(--status-warning); }
 .btn-warning:hover:not(:disabled) { background: var(--status-warning-dim); }
+
+/* Side panel backdrop — click outside to close */
+.side-panel-overlay {
+  position: fixed; inset: 0; z-index: 99;
+  background: rgba(8, 9, 10, 0.45);
+  backdrop-filter: blur(2px);
+}
 
 /* Device Log Panel */
 .log-panel {

@@ -43,6 +43,7 @@ export class StubDriver extends DeviceDriver {
   }
 
   private http: HttpTransport
+  private httpPlus: HttpTransport
 
   constructor(id: string, ip: string, deviceTypeName: string) {
     super()
@@ -50,6 +51,7 @@ export class StubDriver extends DeviceDriver {
     this.ip = ip
     this.deviceTypeName = deviceTypeName
     this.http = new HttpTransport(ip, 22000)
+    this.httpPlus = new HttpTransport(ip, 22001)
   }
 
   async connect(): Promise<void> {
@@ -252,7 +254,14 @@ export class StubDriver extends DeviceDriver {
   }
 
   async setCustomPostures(postures: CustomPosture[]): Promise<void> {
-    const reply = await this.http.send({ method: 'post', url: '/settings/function/customPose', portName: this.ip, params: postures, timeout: 10000 })
+    // 控制器仅接受关节预设
+    const payload = postures
+      .filter(p => (p.type ?? 'joint') === 'joint')
+      .map((p, i) => ({
+        name: String(p.name ?? '').trim() || `P${i + 1}`,
+        joint: (Array.isArray(p.joint) ? p.joint : []).slice(0, 6).map(Number),
+      }))
+    const reply = await this.http.send({ method: 'post', url: '/settings/function/customPose', portName: this.ip, params: payload, timeout: 10000 })
     if (!reply.status) throw new Error(`Set customPose failed: ${reply.message}`)
   }
 
@@ -388,27 +397,56 @@ export class StubDriver extends DeviceDriver {
 
   async listDobotPlus(): Promise<string[]> {
     try {
-      const reply = await this.http.send({ method: 'get', url: '/dobotPlus/list', portName: this.ip, timeout: 5000 })
+      const reply = await this.httpPlus.send({ method: 'get', url: '/dobotPlus/list', portName: this.ip, timeout: 5000 })
       if (reply.status && Array.isArray(reply.data)) return reply.data.map(String)
     } catch { /* ignore */ }
     return []
   }
 
   async installDobotPlus(name: string): Promise<void> {
-    const reply = await this.http.send({ method: 'post', url: '/dobotPlus/install', portName: this.ip, params: { name }, timeout: 60000 })
+    const reply = await this.httpPlus.send({ method: 'post', url: '/dobotPlus/install', portName: this.ip, params: { name }, timeout: 60000 })
     if (!reply.status) throw new Error(`DobotPlus install failed: ${reply.message}`)
   }
 
   async uninstallDobotPlus(name: string): Promise<void> {
-    const reply = await this.http.send({ method: 'post', url: '/dobotPlus/uninstall', portName: this.ip, params: { name }, timeout: 30000 })
+    const reply = await this.httpPlus.send({ method: 'post', url: '/dobotPlus/uninstall', portName: this.ip, params: { name }, timeout: 30000 })
     if (!reply.status) throw new Error(`DobotPlus uninstall failed: ${reply.message}`)
   }
 
   async getDobotPlusPorts(): Promise<Record<string, unknown>> {
     try {
-      const reply = await this.http.send({ method: 'get', url: '/dobotPlus/getPorts', portName: this.ip, timeout: 5000 })
+      const reply = await this.httpPlus.send({ method: 'get', url: '/dobotPlus/getPorts', portName: this.ip, timeout: 5000 })
       return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
     } catch { return {} }
+  }
+
+  async callDobotPlus(pluginName: string, fn: string, data: unknown = []): Promise<unknown> {
+    const ports = await this.getDobotPlusPorts()
+    const port = Number(ports[pluginName])
+    if (!Number.isFinite(port) || port <= 0) throw new Error(`插件 "${pluginName}" 未分配端口`)
+    const transport = new HttpTransport(this.ip, port)
+    const payload = Array.isArray(data) ? data : (data == null ? [] : [data])
+    const reply = await transport.send({
+      method: 'post',
+      url: `/dobotPlus/${pluginName}/${fn}`,
+      portName: this.ip,
+      params: payload,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Dobot+ ${pluginName}/${fn} failed: ${reply.message}`)
+    return reply.data
+  }
+
+  async controlDobotES01(action: 'grip' | 'release' | 'clearAlarm' | 'status'): Promise<unknown> {
+    if (action === 'status') {
+      return { status: 1, toolDI1: 0, toolDI2: 0 }
+    }
+    const list = await this.listDobotPlus()
+    const plugin = list.find(n => /^DobotES01/i.test(n))
+    if (!plugin) throw new Error('未安装 DobotES01 吸盘插件')
+    if (action === 'grip') return this.callDobotPlus(plugin, 'DeControl', [1])
+    if (action === 'release') return this.callDobotPlus(plugin, 'DeControl', [0])
+    return this.callDobotPlus(plugin, 'ClearESAlarm', [])
   }
 
   // ─── 通讯设置 ──────────────────────────────────
@@ -495,8 +533,25 @@ export class StubDriver extends DeviceDriver {
     // TODO: POST + GET /settings/teach/inch
   }
 
+  async setJogCoordinate(_mode: 'joint' | 'cartesian' | 'tool'): Promise<void> {
+    // TODO: POST /interface/coordinate
+  }
+
   async jog(_params: JogParams): Promise<void> {
-    // TODO: POST /motion/jog
+    // TODO: POST /panel/jog
+  }
+
+  async stopJog(): Promise<void> {
+    await this.http.send({
+      method: 'post',
+      url: '/panel/jog',
+      portName: this.ip,
+      params: {
+        posBtns: [false, false, false, false, false, false],
+        negBtns: [false, false, false, false, false, false],
+      },
+      timeout: 500,
+    }).catch(() => {})
   }
 
   async moveTo(_pose: MoveParams): Promise<void> {
@@ -511,12 +566,31 @@ export class StubDriver extends DeviceDriver {
     return { status: true }
   }
 
-  async moveCartesian(params: { x: number; y: number; z: number; rx: number; ry: number; rz: number; user?: number; tool?: number }): Promise<Record<string, unknown>> {
+  async moveCartesian(params: {
+    x: number; y: number; z: number
+    rx: number; ry: number; rz: number
+    user?: number; tool?: number
+    jointNear?: number[]
+  }): Promise<Record<string, unknown>> {
+    const joint = params.jointNear ?? [0, 0, 0, 0, 0, 0]
+    const pose = [params.x, params.y, params.z, params.rx, params.ry, params.rz]
     const reply = await this.http.send({
       method: 'post', url: '/interface/movL', portName: this.ip,
-      params: { x: params.x, y: params.y, z: params.z, rx: params.rx, ry: params.ry, rz: params.rz, user: params.user ?? -1, tool: params.tool ?? -1 },
+      params: {
+        value: true,
+        joint,
+        pose,
+        user: params.user ?? 0,
+        tool: params.tool ?? 0,
+      },
       timeout: 30000,
     })
+    // best-effort stop
+    await this.http.send({
+      method: 'post', url: '/interface/movL', portName: this.ip,
+      params: { value: false, joint, pose, user: params.user ?? 0, tool: params.tool ?? 0 },
+      timeout: 3000,
+    }).catch(() => {})
     return { status: reply.status, message: reply.message, data: reply.data }
   }
 

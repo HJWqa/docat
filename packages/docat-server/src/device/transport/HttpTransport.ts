@@ -51,12 +51,16 @@ export class HttpTransport {
     const { method, url, host, port, timeout } = params
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeout)
+    const upperMethod = method.toUpperCase()
+    // GET/HEAD 不应带 body（部分控制器会因此返回异常）
+    const canHaveBody = upperMethod !== 'GET' && upperMethod !== 'HEAD'
+    const hasBody = canHaveBody && params.params !== undefined && params.params !== null
 
     try {
       const response = await fetch(`http://${host}:${port}${url}`, {
-        method: method.toUpperCase(),
-        headers: { 'Content-Type': 'application/json' },
-        body: params.params ? JSON.stringify(params.params) : undefined,
+        method: upperMethod,
+        headers: hasBody ? { 'Content-Type': 'application/json' } : undefined,
+        body: hasBody ? JSON.stringify(params.params) : undefined,
         signal: controller.signal,
       })
 
@@ -70,7 +74,14 @@ export class HttpTransport {
         throw err
       }
 
-      return response.json()
+      // 部分接口可能返回空 body
+      const text = await response.text()
+      if (!text) return null
+      try {
+        return JSON.parse(text)
+      } catch {
+        return text
+      }
     } finally {
       clearTimeout(timer)
     }
@@ -84,7 +95,8 @@ export class HttpTransport {
       return { status: false, code: 4001, message: '请求超时' }
     }
 
-    if (err.status === 501) {
+    // 501 Not Implemented / 405 Method Not Allowed（如 E6 不支持 customPose）
+    if (err.status === 501 || err.status === 405) {
       return { status: false, code: 4002, message: err.message }
     }
 

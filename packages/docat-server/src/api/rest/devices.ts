@@ -307,7 +307,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: true, data: { connected: false, status: null, state: null, alarms: null } }
         }
 
-        // 从 driver 获取扩展告警信息
+        // 从 driver 获取扩展告警信息（与 WS device:state 的 _ext 对齐）
         const extInfo: Record<string, unknown> = {}
         const rawExchange = (entry.driver as unknown as Record<string, unknown>).rawExchange as Record<string, unknown> | undefined
         if (rawExchange) {
@@ -316,6 +316,10 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           extInfo.skinCollison = rawExchange.skinCollison
           extInfo.emergencyStop = rawExchange.emergencyStop
           extInfo.protectiveStop = rawExchange.protectiveStop
+          extInfo.isAlarmUpdate = rawExchange.isAlarmUpdate
+          extInfo.isWarningUpdate = rawExchange.isWarningUpdate
+          extInfo.autoManual = rawExchange.autoManual
+          extInfo.coordinate = rawExchange.coordinate
         }
 
         return {
@@ -782,7 +786,85 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
-  // ─── 自定义姿态（控制器端）────────────────────
+  // ─── 自定义姿态 ────────────────────────────────
+  // Magician E6 等机型控制器不支持 /settings/function/customPose（405 Unsupported method）。
+  // 官方软件遇到该情况会隐藏姿态 UI；这里改为：
+  // 1) 始终持久化到 docat 本地 device_joint_presets
+  // 2) 若设备已连接且控制器支持，再 best-effort 同步到控制器
+
+  function normalizeJointArray(raw: unknown): number[] {
+    const joint = (Array.isArray(raw) ? raw : [])
+      .slice(0, 6)
+      .map(j => Number(Number(j).toFixed(6)))
+    while (joint.length < 6) joint.push(0)
+    return joint
+  }
+
+  function normalizePose(raw: unknown): CustomPosture['pose'] | undefined {
+    if (!raw || typeof raw !== 'object') return undefined
+    const p = raw as Record<string, unknown>
+    return {
+      x: Number(p.x ?? 0),
+      y: Number(p.y ?? 0),
+      z: Number(p.z ?? 0),
+      rx: Number(p.rx ?? p.r ?? 0),
+      ry: Number(p.ry ?? 0),
+      rz: Number(p.rz ?? 0),
+    }
+  }
+
+  function loadCustomPosturesFromDb(deviceId: string): CustomPosture[] {
+    const db = getDb()
+    const rows = db.prepare(
+      'SELECT name, joints, type, pose FROM device_joint_presets WHERE deviceId = ? ORDER BY sortOrder ASC, name ASC'
+    ).all(deviceId) as Array<{ name: string; joints: string; type?: string; pose?: string | null }>
+    return rows.map(row => {
+      const type = row.type === 'cartesian' ? 'cartesian' as const : 'joint' as const
+      let pose: CustomPosture['pose'] | undefined
+      if (row.pose) {
+        try { pose = normalizePose(JSON.parse(row.pose)) } catch { /* ignore */ }
+      }
+      return {
+        name: row.name,
+        type,
+        joint: normalizeJointArray(JSON.parse(row.joints)),
+        ...(type === 'cartesian' && pose ? { pose } : {}),
+      }
+    })
+  }
+
+  function saveCustomPosturesToDb(deviceId: string, postures: CustomPosture[]): void {
+    const db = getDb()
+    const del = db.prepare('DELETE FROM device_joint_presets WHERE deviceId = ?')
+    const ins = db.prepare(
+      'INSERT INTO device_joint_presets (id, deviceId, name, joints, sortOrder, type, pose) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+    db.transaction(() => {
+      del.run(deviceId)
+      postures.forEach((p, i) => {
+        const name = String(p.name ?? '').trim() || `P${i + 1}`
+        const type = p.type === 'cartesian' ? 'cartesian' : 'joint'
+        const joint = normalizeJointArray(p.joint)
+        const pose = type === 'cartesian' ? (normalizePose(p.pose) ?? {
+          x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0,
+        }) : null
+        ins.run(
+          uuidv4(),
+          deviceId,
+          name,
+          JSON.stringify(joint),
+          i + 1,
+          type,
+          pose ? JSON.stringify(pose) : null,
+        )
+      })
+    })()
+  }
+
+  function isControllerCustomPoseUnsupported(err: unknown): boolean {
+    const msg = err instanceof Error ? err.message : String(err ?? '')
+    return /Unsupported method|405|4002/i.test(msg)
+  }
 
   app.get<{ Params: { id: string } }>(
     '/api/devices/:id/customPostures',
@@ -790,26 +872,91 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
-        const entry = pool.getDevice(request.params.id)
-        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
-        const data = await entry.driver.getCustomPostures()
-        return { success: true, data }
+
+        const deviceId = request.params.id
+        const db = getDb()
+        const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId)
+        if (!device) {
+          return { success: false, error: { code: 40401, message: '设备不存在' } }
+        }
+
+        // 优先读本地库（E6 可靠）；若本地为空且控制器有数据，则导入一次
+        const local = loadCustomPosturesFromDb(deviceId)
+        if (local.length > 0) {
+          return { success: true, data: local }
+        }
+
+        const entry = pool.getDevice(deviceId)
+        if (entry) {
+          try {
+            const remote = await entry.driver.getCustomPostures()
+            if (Array.isArray(remote) && remote.length > 0) {
+              saveCustomPosturesToDb(deviceId, remote)
+              return { success: true, data: remote }
+            }
+          } catch {
+            // 控制器不支持或离线：返回本地空列表
+          }
+        }
+
+        return { success: true, data: local }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
     }
   )
 
-  app.post<{ Params: { id: string }; Body: Array<{ name: string; joint: number[] }> }>(
+  app.post<{ Params: { id: string }; Body: CustomPosture[] }>(
     '/api/devices/:id/customPostures',
     async (request, reply): Promise<ApiResponse<null>> => {
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
         requireOperator(request, reply)
-        const entry = pool.getDevice(request.params.id)
-        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
-        await entry.driver.setCustomPostures(request.body)
+
+        const deviceId = request.params.id
+        const db = getDb()
+        const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId)
+        if (!device) {
+          return { success: false, error: { code: 40401, message: '设备不存在' } }
+        }
+
+        const body = Array.isArray(request.body) ? request.body : []
+        const postures: CustomPosture[] = body.map((p, i) => {
+          const type = p?.type === 'cartesian' ? 'cartesian' as const : 'joint' as const
+          const name = String(p?.name ?? '').trim() || `P${i + 1}`
+          const joint = normalizeJointArray(p?.joint)
+          const pose = type === 'cartesian' ? normalizePose(p?.pose) : undefined
+          return {
+            name,
+            type,
+            joint,
+            ...(type === 'cartesian' ? {
+              pose: pose ?? { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 },
+            } : {}),
+          }
+        })
+
+        // 1) 始终写入本地库（含 cartesian）
+        saveCustomPosturesToDb(deviceId, postures)
+
+        // 2) 控制器 customPose 仅支持关节；只同步 joint 类型
+        const entry = pool.getDevice(deviceId)
+        if (entry) {
+          const jointOnly = postures
+            .filter(p => (p.type ?? 'joint') === 'joint')
+            .map(p => ({ name: p.name, joint: p.joint }))
+          try {
+            // 即使只有笛卡尔预设，也推一次（空/仅 joint）以尽量保持控制器一致
+            await entry.driver.setCustomPostures(jointOnly)
+          } catch (err) {
+            if (!isControllerCustomPoseUnsupported(err)) {
+              // 本地已保存成功；控制器同步失败仅记日志，不阻断用户
+              console.warn(`[customPostures] controller sync failed for ${deviceId}:`, (err as Error).message)
+            }
+          }
+        }
+
         return { success: true, data: null }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
@@ -1223,6 +1370,66 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         const data = await entry.driver.getDobotPlusPorts()
         return { success: true, data }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 通用 Dobot+ 插件函数调用 */
+  app.post<{ Params: { id: string }; Body: { plugin: string; fn: string; data?: unknown } }>(
+    '/api/devices/:id/dobotPlus/call',
+    async (request, reply): Promise<ApiResponse<unknown>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const { plugin, fn, data } = request.body ?? {}
+        if (!plugin || !fn) {
+          return { success: false, error: { code: 40001, message: 'plugin 与 fn 必填' } }
+        }
+        const result = await entry.driver.callDobotPlus(String(plugin), String(fn), data)
+        return { success: true, data: result }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** DobotES01 吸盘控制：grip / release / clearAlarm / status */
+  app.post<{ Params: { id: string }; Body: { action: 'grip' | 'release' | 'clearAlarm' | 'status' } }>(
+    '/api/devices/:id/dobotPlus/es01',
+    async (request, reply): Promise<ApiResponse<unknown>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const action = request.body?.action
+        if (action !== 'grip' && action !== 'release' && action !== 'clearAlarm' && action !== 'status') {
+          return { success: false, error: { code: 40001, message: 'action 必须是 grip/release/clearAlarm/status' } }
+        }
+        const data = await entry.driver.controlDobotES01(action)
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/dobotPlus/es01/status',
+    async (request, reply): Promise<ApiResponse<unknown>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.controlDobotES01('status')
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
     }
   )
 
@@ -1844,6 +2051,33 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  /** 切换点动坐标系 joint / cartesian / tool */
+  app.post<{ Params: { id: string }; Body: { mode: 'joint' | 'cartesian' | 'tool' } }>(
+    '/api/devices/:id/jogCoordinate',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        const mode = request.body.mode
+        if (mode !== 'joint' && mode !== 'cartesian' && mode !== 'tool') {
+          return { success: false, error: { code: 40001, message: 'mode 必须是 joint / cartesian / tool' } }
+        }
+
+        await entry.driver.setJogCoordinate(mode)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   /** 设置寸动距离 */
   app.post<{ Params: { id: string }; Body: { distance: number } }>(
     '/api/devices/:id/teachInch',
@@ -1885,12 +2119,38 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         }
 
         const { axis, direction, mode } = request.body
+        const validAxes = new Set(['x', 'y', 'z', 'rx', 'ry', 'rz', 'r', 'j1', 'j2', 'j3', 'j4', 'j5', 'j6'])
+        if (!validAxes.has(axis)) {
+          return { success: false, error: { code: 40001, message: `无效轴: ${axis}` } }
+        }
         await entry.driver.jog({
-          axis: axis as 'x' | 'y' | 'z' | 'r' | 'j1' | 'j2' | 'j3' | 'j4' | 'j5' | 'j6',
+          axis: axis as 'x' | 'y' | 'z' | 'rx' | 'ry' | 'rz' | 'r' | 'j1' | 'j2' | 'j3' | 'j4' | 'j5' | 'j6',
           direction: direction as '+' | '-',
           mode: (mode as 'continuous' | 'step') || 'continuous',
           stepValue: request.body.stepValue,
         })
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 停止点动（仅清 panel/jog 按钮，低延迟） */
+  app.post<{ Params: { id: string } }>(
+    '/api/devices/:id/jog/stop',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) {
+          return { success: false, error: { code: 40401, message: '设备未连接' } }
+        }
+
+        await entry.driver.stopJog()
         return { success: true, data: null }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
@@ -2022,7 +2282,12 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
   )
 
   /** 笛卡尔直线移动 (MovL, 控制器内部 IK) */
-  app.post<{ Params: { id: string }; Body: { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number; user?: number; tool?: number } }>(
+  app.post<{ Params: { id: string }; Body: {
+    x: number; y: number; z: number
+    rx?: number; ry?: number; rz?: number
+    user?: number; tool?: number
+    jointNear?: number[]
+  } }>(
     '/api/devices/:id/moveCartesian',
     async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
       try {
@@ -2034,9 +2299,10 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
         const b = request.body
         const data = await entry.driver.moveCartesian({
-          x: b.x, y: b.y, z: b.z,
-          rx: b.rx ?? 0, ry: b.ry ?? 0, rz: b.rz ?? 0,
+          x: Number(b.x), y: Number(b.y), z: Number(b.z),
+          rx: Number(b.rx ?? 0), ry: Number(b.ry ?? 0), rz: Number(b.rz ?? 0),
           user: b.user, tool: b.tool,
+          jointNear: b.jointNear,
         })
         return { success: true, data }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
@@ -2076,8 +2342,13 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
-  /** 笛卡尔移动 */
-  app.post<{ Params: { id: string }; Body: { x: number; y: number; z: number; r?: number; mode?: string; user?: number; tool?: number } }>(
+  /** 笛卡尔移动（兼容旧 API，内部走 MovL） */
+  app.post<{ Params: { id: string }; Body: {
+    x: number; y: number; z: number
+    r?: number; rx?: number; ry?: number; rz?: number
+    mode?: string; user?: number; tool?: number
+    jointNear?: number[]
+  } }>(
     '/api/devices/:id/move',
     async (request, reply): Promise<ApiResponse<null>> => {
       try {
@@ -2090,11 +2361,18 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: false, error: { code: 40401, message: '设备未连接' } }
         }
 
-        const { x, y, z, r, mode, user, tool } = request.body
-        await entry.driver.moveTo({
-          x, y, z, r,
-          mode: (mode as 'go' | 'move' | 'jump') || 'move',
-          user, tool,
+        const b = request.body
+        // 兼容旧字段 r（曾只传 RX），以及完整 rx/ry/rz
+        await entry.driver.moveCartesian({
+          x: Number(b.x),
+          y: Number(b.y),
+          z: Number(b.z),
+          rx: Number(b.rx ?? b.r ?? 0),
+          ry: Number(b.ry ?? 0),
+          rz: Number(b.rz ?? 0),
+          user: b.user,
+          tool: b.tool,
+          jointNear: b.jointNear,
         })
         return { success: true, data: null }
       } catch (err) {

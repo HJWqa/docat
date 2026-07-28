@@ -80,8 +80,13 @@ export interface JointPose {
 
 // ─── 运动参数 ────────────────────────────────
 
+export type JogAxis = 'x' | 'y' | 'z' | 'rx' | 'ry' | 'rz' | 'r' | 'j1' | 'j2' | 'j3' | 'j4' | 'j5' | 'j6'
+
+/** 点动坐标系类型（对齐控制器 /interface/coordinate） */
+export type JogCoordinate = 'joint' | 'cartesian' | 'tool'
+
 export interface JogParams {
-  axis: 'x' | 'y' | 'z' | 'r' | 'j1' | 'j2' | 'j3' | 'j4' | 'j5' | 'j6'
+  axis: JogAxis
   direction: '+' | '-'
   mode: 'continuous' | 'step'
   stepValue?: number

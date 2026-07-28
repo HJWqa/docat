@@ -290,6 +290,8 @@ export class DevicePool {
               extInfo.dragMode = rawExchange.dragMode
               extInfo.prjState = rawExchange.prjState
               extInfo.isMotion = rawExchange.isMotion
+              // 0=joint, 1=cartesian/tool（控制器 coordinate 字段）
+              extInfo.coordinate = rawExchange.coordinate
               extInfo.mode = mode
             }
             extInfo.mode = mode // 告诉前端当前连接模式
