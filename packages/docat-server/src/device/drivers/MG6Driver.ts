@@ -118,6 +118,12 @@ export class MG6Driver extends DeviceDriver {
   private isPoweringOn = false
   /** 插件名 → 动态 HTTP 端口缓存 */
   private pluginPortCache = new Map<string, number>()
+  /**
+   * 点动命令串行队列：避免 WS 并发 fire-and-forget 把设备 HTTP 打成排队卡顿。
+   * 官方 IntervalWorker 虽不 await，但间隔 200ms；我们经 server 更需要串行。
+   */
+  private jogQueue: Promise<void> = Promise.resolve()
+  private jogSeq = 0
 
   constructor(id: string, ip: string, modelName: string = 'MG6') {
     super()
@@ -201,40 +207,59 @@ export class MG6Driver extends DeviceDriver {
       negBtns[idx] = true
     }
 
-    // 点动要低延迟：超时不宜过长
-    const reply = await this.http.send({
-      method: 'post',
-      url: '/panel/jog',
-      portName: this.ip,
-      params: { posBtns, negBtns },
-      timeout: 800,
+    const seq = ++this.jogSeq
+    // 串行化：后到的 jog 等前一个完成；若中途 stopJog 抬高了 seq，则丢弃过期 jog
+    // 错误吞掉，避免一次失败永久卡死队列
+    const run = this.jogQueue.then(async () => {
+      if (seq !== this.jogSeq) return
+      const reply = await this.http.send({
+        method: 'post',
+        url: '/panel/jog',
+        portName: this.ip,
+        params: { posBtns, negBtns },
+        timeout: 800,
+      })
+      if (!reply.status && seq === this.jogSeq) {
+        throw new Error(`Jog failed: ${reply.message}`)
+      }
+    }).catch((err) => {
+      if (seq === this.jogSeq) console.warn('[MG6Driver] jog error:', (err as Error).message)
     })
-    if (!reply.status) throw new Error(`Jog failed: ${reply.message}`)
+    this.jogQueue = run.then(() => undefined, () => undefined)
+    await run
   }
 
   async stopJog(): Promise<void> {
-    // 官方 stopJog：清空全部 pos/neg 按钮，立即停止点动
-    await this.http.send({
-      method: 'post',
-      url: '/panel/jog',
-      portName: this.ip,
-      params: {
-        posBtns: [false, false, false, false, false, false],
-        negBtns: [false, false, false, false, false, false],
-      },
-      timeout: 500,
+    // 抬高 seq，使队列中尚未发出的 jog 全部作废
+    this.jogSeq++
+    const seq = this.jogSeq
+    const run = this.jogQueue.then(async () => {
+      if (seq !== this.jogSeq) return
+      await this.http.send({
+        method: 'post',
+        url: '/panel/jog',
+        portName: this.ip,
+        params: {
+          posBtns: [false, false, false, false, false, false],
+          negBtns: [false, false, false, false, false, false],
+        },
+        timeout: 500,
+      })
+    }).catch((err) => {
+      console.warn('[MG6Driver] stopJog error:', (err as Error).message)
     })
+    this.jogQueue = run.then(() => undefined, () => undefined)
+    await run
   }
 
   async moveTo(pose: MoveParams): Promise<void> {
-    // 兼容旧接口：若显式给 joints 则关节运动，否则按笛卡尔 movL
+    // 兼容旧接口：joints 优先，否则按 pose 走 MovL
     const extra = pose as unknown as Record<string, unknown>
     const joints = extra.joints as number[] | undefined
     if (Array.isArray(joints) && joints.length >= 6) {
       await this.moveJoints(joints)
       return
     }
-    // 旧调用曾把 x/y/z/r 误当关节角，这里改为笛卡尔
     await this.moveCartesian({
       x: pose.x,
       y: pose.y,
@@ -244,49 +269,85 @@ export class MG6Driver extends DeviceDriver {
       rz: Number(extra.rz ?? 0),
       user: pose.user,
       tool: pose.tool,
+      path: 'MovL',
     })
   }
 
   /**
-   * 笛卡尔直线运动（MovL）
-   * 官方协议：{ value, joint, pose:[x,y,z,rx,ry,rz], user, tool }
-   * - joint: 近邻关节（用于选解），不是目标
-   * - pose: 目标笛卡尔位姿
-   * - 需轮询 value=true 直到到达，最后 value=false 结束
+   * 统一点到点（官方 /interface/movJ | /interface/movL）
+   *
+   * 文档（dobot-docs Motion.md）明确：
+   * - MovJ / MovL 描述的是**路径类型**（关节插补 vs 直线）
+   * - 目标点既可以是 {joint=...} 也可以是 {pose=...}
+   * 因此 path 与目标表示正交，不能把 “笛卡尔目标” 绑死成 MovL。
+   *
+   * HTTP 侧官方 runto 载荷：
+   *   { value, joint, pose?, user, tool }
+   * 持续 value=true 直到到位，最后 value=false。
    */
-  async moveCartesian(params: {
-    x: number; y: number; z: number
-    rx: number; ry: number; rz: number
-    user?: number; tool?: number
-    jointNear?: number[]
+  async movePoint(params: {
+    path?: 'MovJ' | 'MovL'
+    joint?: number[]
+    pose?: number[]
+    user?: number
+    tool?: number
   }): Promise<Record<string, unknown>> {
+    const path = params.path === 'MovJ' ? 'MovJ' : 'MovL'
+    const url = path === 'MovJ' ? '/interface/movJ' : '/interface/movL'
     const user = params.user ?? 0
     const tool = params.tool ?? 0
-    const pose = [
-      Number(params.x), Number(params.y), Number(params.z),
-      Number(params.rx), Number(params.ry), Number(params.rz),
-    ]
-    const jointNear = (params.jointNear && params.jointNear.length >= 6)
-      ? params.jointNear.map(j => Number(j))
-      : [
-          this.state.joints.j1 ?? 0,
-          this.state.joints.j2 ?? 0,
-          this.state.joints.j3 ?? 0,
-          this.state.joints.j4 ?? 0,
-          this.state.joints.j5 ?? 0,
-          this.state.joints.j6 ?? 0,
-        ]
 
-    // 先做 IK 可达性检查，给出明确错误而不是关节限位误报
-    const ik = await this.inverseKinematics({
-      coordinate: pose,
-      jointNear,
+    const currentJoint = [
+      this.state.joints.j1 ?? 0,
+      this.state.joints.j2 ?? 0,
+      this.state.joints.j3 ?? 0,
+      this.state.joints.j4 ?? 0,
+      this.state.joints.j5 ?? 0,
+      this.state.joints.j6 ?? 0,
+    ]
+
+    let joint = (params.joint && params.joint.length >= 6)
+      ? params.joint.slice(0, 6).map(j => Number(j))
+      : [...currentJoint]
+
+    let pose = (params.pose && params.pose.length >= 6)
+      ? params.pose.slice(0, 6).map(n => Number(n))
+      : undefined
+
+    // 仅给了 pose：IK 求 joint（就近选解），与官方同时带 joint+pose 的 runto 对齐
+    if (pose && !(params.joint && params.joint.length >= 6)) {
+      const ik = await this.inverseKinematics({
+        coordinate: pose,
+        jointNear: currentJoint,
+        user,
+        tool,
+      })
+      if (ik.errID !== 0) {
+        throw new Error(ik.errMsg || `目标不可达 (errID=${ik.errID})`)
+      }
+      if (ik.joint.length >= 6) joint = ik.joint.slice(0, 6).map(Number)
+    }
+
+    // 仅给了 joint：补一份 pose（可选，movJ/movL 都接受）
+    if (!pose && params.joint && params.joint.length >= 6) {
+      try {
+        const fk = await this.forwardKinematics({ joint, user, tool })
+        if (fk.errID === 0 && fk.coordinate.length >= 6) {
+          pose = fk.coordinate.slice(0, 6).map(Number)
+        }
+      } catch { /* FK 失败不阻断，仅 joint 也能跑 */ }
+    }
+
+    if (!params.joint && !params.pose) {
+      throw new Error('movePoint 需要 joint 或 pose')
+    }
+
+    const bodyBase: Record<string, unknown> = {
+      joint,
       user,
       tool,
-    })
-    if (ik.errID !== 0) {
-      throw new Error(ik.errMsg || `笛卡尔目标不可达 (errID=${ik.errID})`)
     }
+    if (pose) bodyBase.pose = pose
 
     const start = Date.now()
     let last: Record<string, unknown> = {}
@@ -294,48 +355,54 @@ export class MG6Driver extends DeviceDriver {
       while (Date.now() - start < 30000) {
         const reply = await this.http.send({
           method: 'post',
-          url: '/interface/movL',
+          url,
           portName: this.ip,
-          params: {
-            value: true,
-            joint: jointNear,
-            pose,
-            user,
-            tool,
-          },
+          params: { ...bodyBase, value: true },
           timeout: 3000,
         })
         if (!reply.status) {
-          throw new Error(`MovL failed: ${reply.message}`)
+          throw new Error(`${path} failed: ${reply.message}`)
         }
         last = (reply.data as Record<string, unknown> | undefined) || {}
         if (last.status === false) {
-          throw new Error(String(last.message || last.errormessage || 'MovL rejected by controller'))
+          throw new Error(String(last.message || last.errormessage || `${path} rejected by controller`))
         }
-        // value=true 表示已到达；isAlarms 表示告警中止
         if (last.value === true || last.isAlarms === true) break
         await new Promise(resolve => setTimeout(resolve, 200))
       }
       if (Date.now() - start >= 30000 && last.value !== true) {
-        throw new Error('MovL timed out')
+        throw new Error(`${path} timed out`)
       }
       return last
     } finally {
-      // 结束运动指令
       await this.http.send({
         method: 'post',
-        url: '/interface/movL',
+        url,
         portName: this.ip,
-        params: {
-          value: false,
-          joint: jointNear,
-          pose,
-          user,
-          tool,
-        },
+        params: { ...bodyBase, value: false },
         timeout: 3000,
       }).catch(() => {})
     }
+  }
+
+  /**
+   * 兼容旧 API：按笛卡尔坐标运动。
+   * 默认 MovL（直线）；可传 path:'MovJ' 做“到笛卡尔目标的关节插补”。
+   */
+  async moveCartesian(params: {
+    x: number; y: number; z: number
+    rx: number; ry: number; rz: number
+    user?: number; tool?: number
+    jointNear?: number[]
+    path?: 'MovJ' | 'MovL'
+  }): Promise<Record<string, unknown>> {
+    return this.movePoint({
+      path: params.path ?? 'MovL',
+      pose: [params.x, params.y, params.z, params.rx, params.ry, params.rz],
+      joint: params.jointNear,
+      user: params.user,
+      tool: params.tool,
+    })
   }
 
   async forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }> {
@@ -376,18 +443,24 @@ export class MG6Driver extends DeviceDriver {
     return { joint: [], errID: -1, errMsg: reply.message || 'IK request failed' }
   }
 
-  /** 关节空间移动 */
+  /**
+   * 关节空间移动 — 服务端一次完成
+   * 官方 jointMovJ / runto：持续 POST value=true（~200ms），直到 value=true（到位）。
+   * value=false 只用于结束，不能用来轮询，否则会立刻停住。
+   */
   async moveJoints(joints: number[]): Promise<void> {
+    const targetJoints = joints.map(j => Number(Number(j).toFixed(6)))
     const start = Date.now()
     try {
       while (Date.now() - start < 30000) {
-        const result = await this.moveJointsCommand(joints, true)
-        if (result.value === true || result.isAlarms === true) return
+        const result = await this.moveJointsCommand(targetJoints, true)
+        if (result.isAlarms === true) throw new Error('因告警停止运动')
+        if (result.value === true) return
         await new Promise(resolve => setTimeout(resolve, 200))
       }
       throw new Error('Move joints timed out')
     } finally {
-      await this.moveJointsCommand(joints, false).catch(() => {})
+      await this.moveJointsCommand(targetJoints, false).catch(() => {})
     }
   }
 

@@ -122,6 +122,55 @@ export function websocketRoutes(
             break
           }
 
+          /**
+           * 实时点动 — 不走 REST，直接 driver.jog
+           * 官方也是客户端高频发 panel/jog；经 WS 可去掉一轮 HTTP 往返
+           */
+          case 'jog': {
+            if (client.role === 'viewer') {
+              ws.send(JSON.stringify({ type: 'error', data: { message: '只读用户无法点动' } }))
+              break
+            }
+            const deviceId = msg.deviceId
+            const data = (msg.data ?? msg.params ?? {}) as Record<string, unknown>
+            if (!deviceId) break
+            const entry = pool.getDevice(deviceId)
+            if (!entry) {
+              ws.send(JSON.stringify({ type: 'error', data: { message: '设备未连接', deviceId } }))
+              break
+            }
+            const axis = String(data.axis ?? '')
+            const direction = data.direction === '-' ? '-' : '+'
+            const validAxes = new Set(['x', 'y', 'z', 'rx', 'ry', 'rz', 'r', 'j1', 'j2', 'j3', 'j4', 'j5', 'j6'])
+            if (!validAxes.has(axis)) break
+            // fire-and-forget：不等待完成再回包，降低按键延迟
+            void entry.driver.jog({
+              axis: axis as 'x' | 'y' | 'z' | 'rx' | 'ry' | 'rz' | 'r' | 'j1' | 'j2' | 'j3' | 'j4' | 'j5' | 'j6',
+              direction,
+              mode: (data.mode as 'continuous' | 'step') || 'continuous',
+            }).catch((err) => {
+              try {
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  deviceId,
+                  data: { message: `点动失败: ${(err as Error).message}` },
+                }))
+              } catch { /* ignore */ }
+            })
+            break
+          }
+
+          case 'jog-stop': {
+            if (client.role === 'viewer') break
+            const deviceId = msg.deviceId
+            if (!deviceId) break
+            const entry = pool.getDevice(deviceId)
+            if (!entry) break
+            // 连发两次 stop 由客户端控制；这里单次尽快清空按钮
+            void entry.driver.stopJog().catch(() => {})
+            break
+          }
+
           default:
             // 其他消息类型由具体业务处理
             break

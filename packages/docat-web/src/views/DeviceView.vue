@@ -207,18 +207,18 @@
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isOnlineMode }]" @click="setDeviceMode('online')" :disabled="isAutoMode || modeSwitching">ONLINE</button>
             </div>
-            <!-- Coordinate space: Joint / Cartesian -->
-            <div class="jog-mode-selector">
+            <!-- 点动坐标系（按键/按钮动哪一套轴），与 MovJ/MovL 路径类型无关 -->
+            <div class="jog-mode-selector" title="点动时操作的坐标系：关节角 J1–J6，或笛卡尔 X/Y/Z/RX/RY/RZ">
               <button
                 :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate === 'joint' }]"
                 :disabled="!isConnected || jogCoordSwitching"
                 @click="changeJogCoordinate('joint')"
-              >关节</button>
+              >点动·关节</button>
               <button
                 :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate !== 'joint' }]"
                 :disabled="!isConnected || jogCoordSwitching"
                 @click="changeJogCoordinate('cartesian')"
-              >笛卡尔</button>
+              >点动·笛卡尔</button>
             </div>
             <!-- Amplitude limit -->
             <div class="amp-limit">
@@ -278,19 +278,35 @@
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1010.9-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               读取
             </button>
-            <div class="jog-mode-selector" title="保存预设类型">
+            <div class="jog-mode-selector" title="预设存什么：关节角 joint[]，或笛卡尔位姿 pose[]（与 MovJ/MovL 路径无关）">
               <button
                 :class="['jog-mode-btn', { 'jog-mode-btn--active': newPostureType === 'joint' }]"
                 @click="newPostureType = 'joint'"
-              >关节</button>
+              >存·关节角</button>
               <button
                 :class="['jog-mode-btn', { 'jog-mode-btn--active': newPostureType === 'cartesian' }]"
                 @click="newPostureType = 'cartesian'"
-              >笛卡尔</button>
+              >存·位姿</button>
             </div>
             <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="预设名称"
               @keyup.enter="saveCurrentAsPosture" style="width:100px" />
-            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture" :title="newPostureType === 'cartesian' ? '保存当前笛卡尔位姿' : '保存当前关节角'">💾 保存</button>
+            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture" :title="newPostureType === 'cartesian' ? '保存当前位姿 pose' : '保存当前关节角 joint'">💾 保存</button>
+          </div>
+        </div>
+        <!-- 路径类型：与目标 joint/pose 正交（见 dobot-docs Motion.md） -->
+        <div class="move-path-row">
+          <span class="amp-limit-label">路径</span>
+          <div class="jog-mode-selector">
+            <button
+              :class="['jog-mode-btn', { 'jog-mode-btn--active': movePath === 'MovJ' }]"
+              @click="movePath = 'MovJ'"
+              title="关节插补路径（MovJ），目标可以是关节角或笛卡尔位姿"
+            >MovJ 关节路径</button>
+            <button
+              :class="['jog-mode-btn', { 'jog-mode-btn--active': movePath === 'MovL' }]"
+              @click="movePath = 'MovL'"
+              title="直线路径（MovL），目标可以是关节角或笛卡尔位姿"
+            >MovL 直线路径</button>
           </div>
         </div>
         <div class="move-grid">
@@ -299,8 +315,8 @@
             <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input" />
             <span class="move-unit">°</span>
           </div>
-          <button class="btn btn-primary move-btn" :disabled="!isConnected || moving" @click="doMove">
-            {{ moving ? '移动中...' : '移动' }}
+          <button class="btn btn-primary move-btn" :disabled="!isConnected || moving || poseMoving" @click="doMove">
+            {{ moving ? '移动中...' : (movePath + ' 关节目标') }}
           </button>
           <button v-if="moving" class="btn btn-danger move-stop-btn" @click="() => stopMoveJoints()">
             停止
@@ -314,8 +330,8 @@
             <span class="move-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
           </div>
           <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentPoseToTarget">读取当前位姿</button>
-          <button class="btn btn-primary move-btn" :disabled="!isConnected || poseMoving" @click="moveToPose">
-            {{ poseMoving ? '移动中...' : '移动' }}
+          <button class="btn btn-primary move-btn" :disabled="!isConnected || poseMoving || moving" @click="moveToPose">
+            {{ poseMoving ? '移动中...' : (movePath + ' 位姿目标') }}
           </button>
           <button v-if="poseMoving" class="btn btn-danger move-stop-btn" @click="doStop">停止</button>
         </div>
@@ -372,8 +388,8 @@
                   <template v-else>
                     <span class="preset-item-name">
                       {{ p.name }}
-                      <span v-if="p.type === 'cartesian'" class="preset-type-badge">笛卡尔</span>
-                      <span v-else-if="!p.system" class="preset-type-badge preset-type-badge--joint">关节</span>
+                      <span v-if="p.type === 'cartesian'" class="preset-type-badge">位姿</span>
+                      <span v-else-if="!p.system" class="preset-type-badge preset-type-badge--joint">关节角</span>
                     </span>
                   </template>
                   <span class="preset-item-joints">{{ formatPostureSummary(p) }}</span>
@@ -730,7 +746,7 @@
                           </td>
                         </template>
                         <template v-else>
-                          <td class="preset-name">{{ isFixedLevel(u.level) ? levelName(u.level) : (u.name || `等级${u.level}`) }}</td>
+                          <td class="preset-name">{{ isFixedLevel(u.level) ? levelName(u.level) : (u.name || ('等级' + u.level)) }}</td>
                           <td>{{ u.enablePassword ? '●●●●' : '(无)' }}</td>
                           <td>{{ u.enablePassword ? '✓' : '—' }}</td>
                           <td class="table-actions">
@@ -847,10 +863,10 @@
                   <div class="settings-section-header">
                     <h4>自定义预设</h4>
                     <div style="display:flex;gap:6px;flex-wrap:wrap">
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected">📋 当前关节</button>
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected">📋 当前笛卡尔</button>
-                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('joint')">+ 关节</button>
-                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('cartesian')">+ 笛卡尔</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected">📋 当前关节角</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected">📋 当前位姿</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('joint')">+ 关节角</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('cartesian')">+ 位姿</button>
                     </div>
                   </div>
                   <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">暂无自定义预设</div>
@@ -870,8 +886,8 @@
                           <td class="preset-name">{{ i + 1 }}</td>
                           <td>
                             <select v-model="editPostureForm.type" class="input-xs" style="width:72px">
-                              <option value="joint">关节</option>
-                              <option value="cartesian">笛卡尔</option>
+                              <option value="joint">关节角</option>
+                              <option value="cartesian">位姿</option>
                             </select>
                           </td>
                           <td><input v-model.trim="editPostureForm.name" class="input-xs" style="width:80px" /></td>
@@ -883,7 +899,7 @@
                             </div>
                             <div v-else style="display:flex;gap:3px;flex-wrap:wrap">
                               <input v-for="j in 6" :key="j" v-model.number="editPostureForm.joint[j-1]"
-                                type="number" class="input-xs" style="width:58px" step="0.1" :placeholder="`J${j}`" />
+                                type="number" class="input-xs" style="width:58px" step="0.1" :placeholder="'J' + j" />
                             </div>
                           </td>
                           <td class="table-actions">
@@ -893,7 +909,7 @@
                         </template>
                         <template v-else>
                           <td class="preset-name">{{ i + 1 }}</td>
-                          <td>{{ (p.type === 'cartesian') ? '笛卡尔' : '关节' }}</td>
+                          <td>{{ (p.type === 'cartesian') ? '位姿' : '关节角' }}</td>
                           <td class="preset-name">{{ p.name }}</td>
                           <td style="font-size:0.66rem">{{ formatPostureSummary(p) }}</td>
                           <td class="table-actions">
@@ -1620,9 +1636,16 @@ const moveTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 let moveTargetJoints: number[] | null = null
 /** 点动代数：松手/换轴时递增，丢弃过期的 in-flight jog 请求结果 */
 let jogGeneration = 0
-/** 串行化 jog/stop 请求，避免 stop 被更晚到达的 jog 覆盖 */
+/** 串行化 REST 降级路径的 jog/stop（WS 路径不需要串行） */
 let jogCmdChain: Promise<void> = Promise.resolve()
-const JOG_REPEAT_MS = 80
+/**
+ * 续发间隔。
+ * 官方默认 200ms 偏稳；有服务端串行队列后可用 ~100ms 更跟手。
+ * 再低（如 50ms）容易在 RTT 高时堆积，反而一卡一卡。
+ */
+const JOG_REPEAT_MS = 100
+/** 上一次续发是否仍在途（仅用于跳过堆积，不阻塞首包） */
+let jogTickInFlight = false
 
 const activeJogAxes = computed(() =>
   jogCoordinate.value === 'joint' ? [...JOINT_AXES] : [...CARTESIAN_AXES]
@@ -1804,6 +1827,13 @@ function onWindowBlur() {
 
 const targetPose = reactive<Record<string, number>>({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
 const poseMoving = ref(false)
+/**
+ * 路径类型（与目标 joint/pose 正交）
+ * - MovJ：关节空间插补（路径可弯曲）
+ * - MovL：笛卡尔直线
+ * 文档：两者都可接受 joint 或 pose 目标。
+ */
+const movePath = ref<'MovJ' | 'MovL'>('MovJ')
 
 function readCurrentPoseToTarget() {
   const pt = getCurrentCartesian()
@@ -1830,21 +1860,18 @@ async function moveToPose() {
   }
   poseMoving.value = true
   try {
-    // 使用完整 6DOF 笛卡尔 MovL（旧 moveDevice 曾把 x/y/z/rx 误当关节角导致“关节限位”）
-    const joints = state.value.joints as Record<string, number> | undefined
-    const jointNear = joints
-      ? [1, 2, 3, 4, 5, 6].map(j => Number(joints['j' + j] ?? 0))
-      : undefined
-    const res = await api.moveCartesian(deviceId, {
-      x: pt.x, y: pt.y, z: pt.z,
-      rx: pt.rx, ry: pt.ry, rz: pt.rz,
-      jointNear,
+    // 当前关节作就近选解；同时带 pose 目标
+    const joints = getMoveTargetJoints()
+    const res = await api.movePoint(deviceId, {
+      path: movePath.value,
+      pose: [pt.x, pt.y, pt.z, pt.rx, pt.ry, pt.rz],
+      joint: joints,
     })
     if (res.success) {
       if ((res.data as Record<string, unknown> | undefined)?.isAlarms) {
         toastRef.value?.error('因告警停止运动')
       } else {
-        toastRef.value?.success('已到达指定位姿')
+        toastRef.value?.success(`已到达位姿目标（${movePath.value}）`)
       }
     } else {
       toastRef.value?.error(`移动失败: ${res.error?.message}`)
@@ -2362,8 +2389,9 @@ async function startJog(dir: string) {
   }
   ampTravel.value = 0
 
-  // 即走：先发点动，坐标系/模式在后台预热（避免按键被 await 拖住）
+  // 即走：首包立刻发（不排队），坐标系/模式后台预热
   ensureJogReadyBackground()
+  jogTickInFlight = false
   sendJogCmd(dir, gen)
 
   // 轻点松手：若在首包发出前就 stop，gen 会变化，后续包自动丢弃
@@ -2375,13 +2403,21 @@ async function startJog(dir: string) {
       if (gen === jogGeneration) jogActive.value = false
     }, 120)
   } else {
-    // 连续：更高频续发，提升跟手性
+    // 连续续发：固定节拍，但若上一拍还在飞就跳过，避免堆积卡顿
     jogInterval.value = setInterval(() => {
       if (!jogActive.value || gen !== jogGeneration) {
         if (jogInterval.value) { clearInterval(jogInterval.value); jogInterval.value = null }
         return
       }
+      if (jogTickInFlight) {
+        // 上一拍未完成：只检查幅度，不叠包
+        checkAmplitude()
+        return
+      }
+      jogTickInFlight = true
       sendJogCmd(dir, gen)
+      // release in-flight on next tick to avoid request pile-up
+      setTimeout(() => { jogTickInFlight = false }, 0)
       checkAmplitude()
     }, JOG_REPEAT_MS)
   }
@@ -2392,9 +2428,14 @@ function enqueueJogCmd(task: () => Promise<void>) {
   return jogCmdChain
 }
 
+/**
+ * 下发点动：优先 WebSocket（少一跳 HTTP），失败再 REST 降级。
+ * WS 路径 fire-and-forget，不排队等待，真正做到“按即发”。
+ */
 function sendJogCmd(dir: string, gen: number = jogGeneration) {
+  if (gen !== jogGeneration || !jogActive.value) return
+
   if (isMock) {
-    // Mock: 本地模拟关节值变化
     const axis = jogAxis.value
     const delta = dir === '+' ? 0.4 : -0.4
     if (axis.startsWith('j')) {
@@ -2413,8 +2454,12 @@ function sendJogCmd(dir: string, gen: number = jogGeneration) {
 
   const axis = jogAxis.value
   const mode = jogMode.value
+
+  // ① 优先 WS 实时通道
+  if (wsClient.sendJog(deviceId, axis, dir, mode)) return
+
+  // ② 降级 REST（串行，避免 stop 被盖）
   void enqueueJogCmd(async () => {
-    // 过期代数：用户已松手/换轴，不再下发 jog（避免盖住 stop）
     if (gen !== jogGeneration || !jogActive.value) return
     try {
       await api.jogDevice(deviceId, axis, dir, mode)
@@ -2431,8 +2476,9 @@ function stopJog() {
   // 立刻作废所有 in-flight jog，并标为非活跃
   jogGeneration++
   jogActive.value = false
+  jogTickInFlight = false
   ampTravel.value = 0
-  // 连续模式：立刻发 stopJog（轻量清按钮），保证即停
+  // 连续模式：立刻发 stopJog，保证即停
   if (wasActive && jogMode.value === 'continuous') {
     sendJogStop()
   }
@@ -2440,15 +2486,16 @@ function stopJog() {
 
 function sendJogStop() {
   if (isMock) return
-  // 串到同一队列末尾，确保排在尚未发出的 jog 之后，且不会被其覆盖
+
+  // ① 优先 WS 单次 stop（server 端会作废未发出的 jog 再清按钮）
+  if (wsClient.sendJogStop(deviceId)) return
+
+  // ② REST 降级
   void enqueueJogCmd(async () => {
     try {
-      // 连发两次：第一枪尽快停，第二枪兜底（网络乱序/控制器偶发丢包）
-      await api.stopJogDevice(deviceId)
       await api.stopJogDevice(deviceId)
     } catch (err) {
       console.error('[Jog] stop failed:', err)
-      // 兜底走通用 stop
       await api.stopDevice(deviceId).catch(() => {})
     }
   })
@@ -2489,39 +2536,41 @@ function readCurrentJoints() {
   toastRef.value?.info('当前关节值已读取')
 }
 
+/**
+ * 关节目标移动：用当前路径类型（MovJ/MovL）+ joint 目标。
+ * 文档允许 MovL({joint=...})，即直线路径到关节角对应位姿。
+ */
 async function doMove() {
   if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
   if (!checkEnabled()) return
-  if (moving.value) return
-  moving.value = true
-  moveTargetJoints = getMoveTargetJoints()
-  runMoveJointsTick()
-}
+  if (moving.value || poseMoving.value) return
 
-async function runMoveJointsTick() {
-  if (!moving.value || !moveTargetJoints) return
+  const joints = getMoveTargetJoints()
+  moving.value = true
+  moveTargetJoints = joints
   try {
-    const joints = moveTargetJoints
-    const res = await api.moveJointsCommand(deviceId, joints, true)
+    const res = await api.movePoint(deviceId, {
+      path: movePath.value,
+      joint: joints,
+    })
     if (res.success) {
-      if (res.data?.isAlarms) {
+      if ((res.data as Record<string, unknown> | undefined)?.isAlarms) {
         toastRef.value?.error('因告警停止运动')
-        await stopMoveJoints()
-        return
+      } else {
+        toastRef.value?.success(`已到达 J[${joints.map(v => v.toFixed(1)).join(', ')}]（${movePath.value}）`)
       }
-      if (res.data?.value) {
-        await stopMoveJoints(false)
-        toastRef.value?.success(`已到达 J[${joints.map(v => v.toFixed(1)).join(', ')}]`)
-        return
-      }
-      moveTimer.value = setTimeout(runMoveJointsTick, 200)
     } else {
       toastRef.value?.error(`移动失败：${res.error?.message}`)
-      await stopMoveJoints(false)
     }
   } catch (err) {
     toastRef.value?.error(`移动出错：${(err as Error).message}`)
-    await stopMoveJoints(false)
+  } finally {
+    moveTargetJoints = null
+    moving.value = false
+    if (moveTimer.value) {
+      clearTimeout(moveTimer.value)
+      moveTimer.value = null
+    }
   }
 }
 
@@ -2534,11 +2583,11 @@ async function stopMoveJoints(showToast = true) {
   moveTargetJoints = null
   const wasMoving = moving.value
   moving.value = false
+  // 打断进行中的服务端 moveJoints：发 value:false + 通用 stop
   if (joints) {
-    await api.moveJointsCommand(deviceId, joints, false).catch(err => {
-      console.error('[Move] stop failed:', err)
-    })
+    await api.moveJointsCommand(deviceId, joints, false).catch(() => {})
   }
+  await api.stopDevice(deviceId).catch(() => {})
   if (showToast && wasMoving) {
     toastRef.value?.info('运动已停止')
   }
@@ -3039,7 +3088,7 @@ async function addPostureFromCurrent(type: api.CustomPostureType = 'joint') {
       pose: { x: pt.x, y: pt.y, z: pt.z, rx: pt.rx, ry: pt.ry, rz: pt.rz },
     }))
     postureListExpanded.value = true
-    await savePostures(`笛卡尔预设 "${name}" 已保存`)
+    await savePostures(`位姿预设 "${name}" 已保存`)
     return
   }
 
@@ -3051,7 +3100,7 @@ async function addPostureFromCurrent(type: api.CustomPostureType = 'joint') {
     joint: [1, 2, 3, 4, 5, 6].map(j => Math.round((joints['j' + j] ?? 0) * 10) / 10),
   }))
   postureListExpanded.value = true
-  await savePostures(`关节预设 "${name}" 已保存`)
+  await savePostures(`关节角预设 "${name}" 已保存`)
 }
 function startEditPosture(i: number) {
   editingPostureIdx.value = i
@@ -3130,7 +3179,7 @@ async function saveCurrentAsPosture() {
   }
   newPostureName.value = ''
   postureListExpanded.value = true
-  const kind = type === 'cartesian' ? '笛卡尔' : '关节'
+  const kind = type === 'cartesian' ? '位姿' : '关节角'
   await savePostures(exists ? `${kind}预设 "${name}" 已更新` : `${kind}预设 "${name}" 已保存`)
 }
 
@@ -3169,12 +3218,12 @@ function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?:
     targetPose.rx = p.pose.rx
     targetPose.ry = p.pose.ry
     targetPose.rz = p.pose.rz
-    toastRef.value?.info(`已填充笛卡尔预设${p.name ? ` "${p.name}"` : ''}`)
+    toastRef.value?.info(`已填充位姿预设${p.name ? ` "${p.name}"` : ''}`)
     return
   }
   const joint = p.joint || []
   for (let j = 1; j <= 6; j++) moveTarget['j' + j] = joint[j - 1] ?? 0
-  toastRef.value?.info(`已填充关节预设${p.name ? ` "${p.name}"` : ''}`)
+  toastRef.value?.info(`已填充关节角预设${p.name ? ` "${p.name}"` : ''}`)
 }
 
 // ─── Motion Parameters ─────────────────────────
@@ -3834,6 +3883,10 @@ onUnmounted(() => {
 .jog-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .action-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.move-path-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
 
 /* Speed Slider */
 .speed-control {

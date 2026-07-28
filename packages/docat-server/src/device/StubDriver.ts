@@ -566,32 +566,47 @@ export class StubDriver extends DeviceDriver {
     return { status: true }
   }
 
+  async movePoint(params: {
+    path?: 'MovJ' | 'MovL'
+    joint?: number[]
+    pose?: number[]
+    user?: number
+    tool?: number
+  }): Promise<Record<string, unknown>> {
+    const path = params.path === 'MovJ' ? 'MovJ' : 'MovL'
+    const url = path === 'MovJ' ? '/interface/movJ' : '/interface/movL'
+    const joint = params.joint ?? [0, 0, 0, 0, 0, 0]
+    const body: Record<string, unknown> = {
+      value: true,
+      joint,
+      user: params.user ?? 0,
+      tool: params.tool ?? 0,
+    }
+    if (params.pose) body.pose = params.pose
+    const reply = await this.http.send({
+      method: 'post', url, portName: this.ip, params: body, timeout: 30000,
+    })
+    await this.http.send({
+      method: 'post', url, portName: this.ip,
+      params: { ...body, value: false }, timeout: 3000,
+    }).catch(() => {})
+    return { status: reply.status, message: reply.message, data: reply.data }
+  }
+
   async moveCartesian(params: {
     x: number; y: number; z: number
     rx: number; ry: number; rz: number
     user?: number; tool?: number
     jointNear?: number[]
+    path?: 'MovJ' | 'MovL'
   }): Promise<Record<string, unknown>> {
-    const joint = params.jointNear ?? [0, 0, 0, 0, 0, 0]
-    const pose = [params.x, params.y, params.z, params.rx, params.ry, params.rz]
-    const reply = await this.http.send({
-      method: 'post', url: '/interface/movL', portName: this.ip,
-      params: {
-        value: true,
-        joint,
-        pose,
-        user: params.user ?? 0,
-        tool: params.tool ?? 0,
-      },
-      timeout: 30000,
+    return this.movePoint({
+      path: params.path ?? 'MovL',
+      pose: [params.x, params.y, params.z, params.rx, params.ry, params.rz],
+      joint: params.jointNear,
+      user: params.user,
+      tool: params.tool,
     })
-    // best-effort stop
-    await this.http.send({
-      method: 'post', url: '/interface/movL', portName: this.ip,
-      params: { value: false, joint, pose, user: params.user ?? 0, tool: params.tool ?? 0 },
-      timeout: 3000,
-    }).catch(() => {})
-    return { status: reply.status, message: reply.message, data: reply.data }
   }
 
   async forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }> {

@@ -2281,12 +2281,67 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
-  /** 笛卡尔直线移动 (MovL, 控制器内部 IK) */
+  /**
+   * 统一点到点运动
+   * body: { path?: 'MovJ'|'MovL', joint?: number[6], pose?: number[6]|{x,y,z,rx,ry,rz}, user?, tool? }
+   * 对齐文档：MovJ/MovL 均可接受 joint 或 pose 目标。
+   */
+  app.post<{ Params: { id: string }; Body: {
+    path?: 'MovJ' | 'MovL'
+    joint?: number[]
+    pose?: number[] | { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number; r?: number }
+    user?: number
+    tool?: number
+  } }>(
+    '/api/devices/:id/movePoint',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const b = request.body ?? {}
+        const path = b.path === 'MovJ' ? 'MovJ' : 'MovL'
+
+        let poseArr: number[] | undefined
+        if (Array.isArray(b.pose) && b.pose.length >= 6) {
+          poseArr = b.pose.slice(0, 6).map(Number)
+        } else if (b.pose && typeof b.pose === 'object') {
+          const p = b.pose as Record<string, number>
+          poseArr = [Number(p.x ?? 0), Number(p.y ?? 0), Number(p.z ?? 0), Number(p.rx ?? p.r ?? 0), Number(p.ry ?? 0), Number(p.rz ?? 0)]
+        }
+
+        const joint = Array.isArray(b.joint) && b.joint.length >= 6
+          ? b.joint.slice(0, 6).map(Number)
+          : undefined
+
+        if (!poseArr && !joint) {
+          return { success: false, error: { code: 40001, message: '需要 joint 或 pose' } }
+        }
+
+        const data = await entry.driver.movePoint({
+          path,
+          joint,
+          pose: poseArr,
+          user: b.user,
+          tool: b.tool,
+        })
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 笛卡尔目标运动（兼容旧 API；默认 MovL，可传 path=MovJ） */
   app.post<{ Params: { id: string }; Body: {
     x: number; y: number; z: number
     rx?: number; ry?: number; rz?: number
     user?: number; tool?: number
     jointNear?: number[]
+    path?: 'MovJ' | 'MovL'
   } }>(
     '/api/devices/:id/moveCartesian',
     async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
@@ -2303,6 +2358,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           rx: Number(b.rx ?? 0), ry: Number(b.ry ?? 0), rz: Number(b.rz ?? 0),
           user: b.user, tool: b.tool,
           jointNear: b.jointNear,
+          path: b.path === 'MovJ' ? 'MovJ' : 'MovL',
         })
         return { success: true, data }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }

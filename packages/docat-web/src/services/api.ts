@@ -16,18 +16,39 @@ import { getApiBaseUrl } from './runtime'
 
 const BASE = getApiBaseUrl()
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<ApiResponse<T>> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: { timeoutMs?: number },
+): Promise<ApiResponse<T>> {
   const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  return res.json()
+  const timeoutMs = opts?.timeoutMs
+  const controller = timeoutMs ? new AbortController() : null
+  const timer = timeoutMs
+    ? setTimeout(() => controller!.abort(), timeoutMs)
+    : null
+
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller?.signal,
+    })
+    return res.json()
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      return { success: false, error: { code: 40800, message: '请求超时' } }
+    }
+    throw err
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 // ─── Auth ────────────────────────────────────────
@@ -321,7 +342,8 @@ export async function estopDevice(id: string): Promise<ApiResponse<null>> {
 }
 
 export async function moveJoints(id: string, joints: number[]): Promise<ApiResponse<null>> {
-  return request('POST', `/api/devices/${id}/moveJoints`, { joints })
+  // 服务端会阻塞到到位（最长 ~30s），前端超时放宽
+  return request('POST', `/api/devices/${id}/moveJoints`, { joints }, { timeoutMs: 60000 })
 }
 
 export interface MoveJointsCommandState {
@@ -343,13 +365,28 @@ export async function moveDevice(id: string, params: {
   return request('POST', `/api/devices/${id}/move`, params)
 }
 
+/**
+ * 统一点到点。path=MovJ|MovL 是路径类型；joint/pose 是目标表示，二者正交。
+ * @see dobot-docs Motion.md
+ */
+export async function movePoint(id: string, params: {
+  path?: 'MovJ' | 'MovL'
+  joint?: number[]
+  pose?: number[] | { x: number; y: number; z: number; rx?: number; ry?: number; rz?: number }
+  user?: number
+  tool?: number
+}): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('POST', `/api/devices/${id}/movePoint`, params, { timeoutMs: 60000 })
+}
+
 export async function moveCartesian(id: string, params: {
   x: number; y: number; z: number
   rx?: number; ry?: number; rz?: number
   user?: number; tool?: number
   jointNear?: number[]
+  path?: 'MovJ' | 'MovL'
 }): Promise<ApiResponse<Record<string, unknown>>> {
-  return request('POST', `/api/devices/${id}/moveCartesian`, params)
+  return request('POST', `/api/devices/${id}/moveCartesian`, params, { timeoutMs: 60000 })
 }
 
 export interface IKResult { joint: number[]; errID: number; errMsg?: string }

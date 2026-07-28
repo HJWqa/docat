@@ -140,6 +140,39 @@ class WsClient {
     }
   }
 
+  /** 底层发送；未连接返回 false，由调用方决定是否降级 REST */
+  private rawSend(msg: Record<string, unknown>): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
+    try {
+      this.ws.send(JSON.stringify(msg))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 实时点动（低延迟路径）
+   * 成功经 WS 发出返回 true；否则 false（调用方应降级 REST）
+   */
+  sendJog(deviceId: string, axis: string, direction: string, mode?: string): boolean {
+    return this.rawSend({
+      type: 'jog',
+      deviceId,
+      data: { axis, direction, mode: mode || 'continuous' },
+      timestamp: Date.now(),
+    })
+  }
+
+  /** 实时停止点动 */
+  sendJogStop(deviceId: string): boolean {
+    return this.rawSend({
+      type: 'jog-stop',
+      deviceId,
+      timestamp: Date.now(),
+    })
+  }
+
   // ─── 多监听器注册，返回 unsubscribe ────────────
 
   onState(h: StateHandler): Unsubscribe {

@@ -59,11 +59,26 @@ export abstract class DeviceDriver {
   abstract moveTo(pose: MoveParams): Promise<void>
   abstract moveJoints(joints: number[]): Promise<void>
   abstract moveJointsCommand(joints: number[], value: boolean): Promise<Record<string, unknown>>
+  /**
+   * 统一点到点运动（对齐官方 /interface/movJ | movL）
+   * - path: MovJ=关节插补路径，MovL=直线路径（与目标用 joint 还是 pose 无关）
+   * - 目标可用 joint 和/或 pose；两者都给时与官方 runto 一致
+   * @see dobot-docs Motion.md: MovJ/MovL 均可接受 {joint=...} 或 {pose=...}
+   */
+  abstract movePoint(params: {
+    path?: 'MovJ' | 'MovL'
+    joint?: number[]
+    pose?: number[] // [x,y,z,rx,ry,rz]
+    user?: number
+    tool?: number
+  }): Promise<Record<string, unknown>>
+  /** @deprecated 请用 movePoint({ path:'MovL', pose })；保留兼容 */
   abstract moveCartesian(params: {
     x: number; y: number; z: number
     rx: number; ry: number; rz: number
     user?: number; tool?: number
     jointNear?: number[]
+    path?: 'MovJ' | 'MovL'
   }): Promise<Record<string, unknown>>
   abstract inverseKinematics(params: { coordinate: number[]; jointNear: number[]; user?: number; tool?: number }): Promise<{ joint: number[]; errID: number; errMsg?: string }>
   abstract forwardKinematics(params: { joint: number[]; user?: number; tool?: number }): Promise<{ coordinate: number[]; errID: number; errMsg?: string }>

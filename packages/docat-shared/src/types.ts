@@ -256,6 +256,11 @@ export type WSEventType =
   | 'alarm'
   | 'runtime-log'
   | 'runtime-cursor'
+  /** 实时点动（低延迟）：浏览器 → server → 设备，不经 REST */
+  | 'jog'
+  | 'jog-stop'
+  | 'jog-ack'
+  | 'error'
 
 export interface WSMessage {
   type: WSEventType
@@ -265,6 +270,13 @@ export interface WSMessage {
   action?: string
   params?: unknown
   timestamp?: number
+}
+
+/** WS 点动指令载荷 */
+export interface WSJogCommand {
+  axis: string
+  direction: '+' | '-'
+  mode?: 'continuous' | 'step'
 }
 
 // ─── API 通用响应格式 ─────────────────────────
