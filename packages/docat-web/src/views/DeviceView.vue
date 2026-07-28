@@ -230,6 +230,16 @@
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">连续</button>
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'step' }]" @click="changeJogMode('step')">步进</button>
             </div>
+            <div class="jog-mode-selector" title="仅反转 WASD 的 X/Y 方向；Shift/Space（Z）不受影响">
+              <button
+                :class="['jog-mode-btn', { 'jog-mode-btn--active': !wasdInvert }]"
+                @click="setWasdInvert(false)"
+              >WASD 正向</button>
+              <button
+                :class="['jog-mode-btn', { 'jog-mode-btn--active': wasdInvert }]"
+                @click="setWasdInvert(true)"
+              >WASD 反转</button>
+            </div>
             <div v-if="jogMode === 'step'" class="inch-setting">
               <span class="amp-limit-label">步长</span>
               <input v-model.number="jogInch" type="number" min="0.01" step="0.01" class="amp-input" @change="applyTeachInch" />
@@ -1064,6 +1074,17 @@ import { useRoute, useRouter } from 'vue-router'
 import * as api from '../services/api'
 import { clearToken } from '../services/api'
 import { wsClient } from '../services/ws'
+import {
+  REF_JOINT,
+  REF_POSE,
+  forwardKinematics,
+  inverseKinematics,
+  jointsToObject,
+  jointsFromObject,
+  poseToObject,
+  applyJointDelta,
+  applyCartesianDelta,
+} from '../services/offlineKin'
 import { deviceStore } from '../stores/deviceStore'
 import Toast from '../components/Toast.vue'
 import type { DeviceConfig } from 'docat-shared/types'
@@ -1074,23 +1095,24 @@ const deviceId = route.params.id as string
 const toastRef = ref<InstanceType<typeof Toast>>()
 const modelIframeRef = ref<HTMLIFrameElement | null>(null)
 
-// ─── Mock 模式（URL ?mock=1 激活，无需设备即可调试 jog）───
+// ─── Mock / Dock 模式（URL ?mock=1 激活，无需设备即可调试 jog/移动/预设）───
+// 笛卡尔位姿用 offline_kin 标定模型做 FK/IK，与 scripts/offline_kin.py 一致。
 const isMock = route.query.mock === '1'
+const MOCK_PRESET_KEY = `docat:mock:postures:${deviceId}`
+
 if (isMock) {
-  console.log('[Mock] Jog debug mode active — API calls will be simulated')
-  // 伪装设备已连接 + 已使能
+  console.log('[Mock] Dock mode active — move/preset/jog 用离线运动学模拟')
   deviceStore.setConnected(deviceId, true, 'exclusive')
   deviceStore.setEnabled(deviceId, true)
-  // 注入 mock 设备配置
-  deviceStore.setDevices([{ id: deviceId, ip: '0.0.0.0', name: 'MOCK DEVICE', type: 'MG6', autoConnect: false, createdAt: '' }])
+  deviceStore.setDevices([{ id: deviceId, ip: '0.0.0.0', name: 'MOCK DEVICE (dock)', type: 'MG6', autoConnect: false, createdAt: '' }])
 }
 
 const device = ref<DeviceConfig | null>(deviceStore.getDevice(deviceId))
 
-// Mock 状态：包含关节和位姿数据，jog 时本地模拟变化
+// Mock 初始状态：标定参考点（朝下姿态族），保证 FK/IK 开箱可用
 const mockState = reactive({
-  pose: { x: 100, y: 200, z: 300, r: 0, rx: 0, ry: 0, rz: 0 },
-  joints: { j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 },
+  pose: poseToObject([...REF_POSE]),
+  joints: jointsToObject([...REF_JOINT]),
 })
 
 const state = ref<Record<string, unknown>>(
@@ -1098,6 +1120,65 @@ const state = ref<Record<string, unknown>>(
     ? { ...mockState, io: {}, alarm: [], status: { connected: true, mode: 'auto' }, timestamp: Date.now() }
     : (deviceStore.statuses[deviceId]?.state ?? { pose: { x: 0, y: 0, z: 0, r: 0 }, joints: {} })
 )
+
+/** Mock 运动动画句柄（关节/位姿 move 共用） */
+let mockMoveRaf: number | null = null
+let mockMoveAbort = false
+
+function cancelMockMove() {
+  mockMoveAbort = true
+  if (mockMoveRaf != null) {
+    cancelAnimationFrame(mockMoveRaf)
+    mockMoveRaf = null
+  }
+}
+
+/** 把 mock 关节/位姿写回 state，并驱动 3D */
+function commitMockState(joints: Record<string, number>, pose: Record<string, number>) {
+  const next = {
+    ...state.value,
+    joints: { ...joints },
+    pose: { ...pose },
+    timestamp: Date.now(),
+  }
+  state.value = next
+  // 保持 mockState 同步（部分旧逻辑可能读它）
+  Object.assign(mockState.joints, joints)
+  Object.assign(mockState.pose, pose)
+}
+
+/**
+ * Mock 平滑插补到目标关节（约 durationMs）。
+ * 到位后用 FK 刷新 pose，保证笛卡尔显示一致。
+ */
+function mockAnimateToJoints(target: number[], durationMs = 600): Promise<boolean> {
+  cancelMockMove()
+  mockMoveAbort = false
+  const start = jointsFromObject(state.value.joints as Record<string, number>)
+  const t0 = performance.now()
+  return new Promise((resolve) => {
+    const step = (now: number) => {
+      if (mockMoveAbort) {
+        mockMoveRaf = null
+        resolve(false)
+        return
+      }
+      const u = Math.min(1, (now - t0) / durationMs)
+      // ease-in-out
+      const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2
+      const cur = start.map((s, i) => s + (target[i] - s) * e)
+      const fk = forwardKinematics(cur)
+      commitMockState(jointsToObject(cur), poseToObject(fk))
+      if (u < 1) {
+        mockMoveRaf = requestAnimationFrame(step)
+      } else {
+        mockMoveRaf = null
+        resolve(true)
+      }
+    }
+    mockMoveRaf = requestAnimationFrame(step)
+  })
+}
 const connecting = ref(false)
 const isLocked = ref(false)
 const enabled = ref(deviceStore.isEnabled(deviceId))
@@ -1686,12 +1767,12 @@ function normalizeJogKey(e: KeyboardEvent): string {
 }
 
 /**
- * 飞行键：WASD + Shift/Space + 方向键 → 笛卡尔 X/Y/Z
+ * 飞行键基准映射：WASD + Shift/Space + 方向键 → 笛卡尔 X/Y/Z
  * W=Y+  A=X-  S=Y-  D=X+  Shift=Z-  Space=Z+
  * ↑=Y+  ↓=Y-  ←=X-  →=X+
- * 任意坐标系模式下都优先走这组键，并自动切到笛卡尔。
+ * WASD 可通过 wasdInvert 反转 X/Y 方向；Shift/Space（Z）不参与反转。
  */
-const flightKeyMap: Record<string, { axis: string; dir: string }> = {
+const FLIGHT_KEY_BASE: Record<string, { axis: string; dir: string }> = {
   w: { axis: 'y', dir: '+' },
   a: { axis: 'x', dir: '-' },
   s: { axis: 'y', dir: '-' },
@@ -1704,6 +1785,35 @@ const flightKeyMap: Record<string, { axis: string; dir: string }> = {
   arrowright: { axis: 'x', dir: '+' },
 }
 
+/** 仅这些键受「WASD 反转」影响（Shift/Space/方向键不参与） */
+const WASD_INVERT_KEYS = new Set(['w', 'a', 's', 'd'])
+
+const WASD_INVERT_STORAGE_KEY = 'docat.wasdInvert'
+const wasdInvert = ref(false)
+try {
+  wasdInvert.value = localStorage.getItem(WASD_INVERT_STORAGE_KEY) === '1'
+} catch { /* ignore */ }
+
+function setWasdInvert(on: boolean) {
+  if (wasdInvert.value === on) return
+  // 切换时若正在用 WASD 点动，先停，避免方向突变
+  if (jogActive.value) stopJog()
+  keysDown.clear()
+  wasdInvert.value = on
+  try {
+    localStorage.setItem(WASD_INVERT_STORAGE_KEY, on ? '1' : '0')
+  } catch { /* ignore */ }
+}
+
+function resolveFlightMapping(key: string): { axis: string; dir: string } | undefined {
+  const base = FLIGHT_KEY_BASE[key]
+  if (!base) return undefined
+  if (wasdInvert.value && WASD_INVERT_KEYS.has(key)) {
+    return { axis: base.axis, dir: base.dir === '+' ? '-' : '+' }
+  }
+  return base
+}
+
 const jointKeyMap: Record<string, { axis: string; dir: string }> = {
   y: { axis: 'j1', dir: '+' }, h: { axis: 'j1', dir: '-' },
   u: { axis: 'j2', dir: '+' }, j: { axis: 'j2', dir: '-' },
@@ -1714,7 +1824,7 @@ const jointKeyMap: Record<string, { axis: string; dir: string }> = {
 }
 
 const cartesianKeyMap: Record<string, { axis: string; dir: string }> = {
-  // 保留原 YUHJ… 映射；飞行键由 flightKeyMap 优先处理
+  // 保留原 YUHJ… 映射；飞行键由 resolveFlightMapping 优先处理
   y: { axis: 'x', dir: '+' }, h: { axis: 'x', dir: '-' },
   u: { axis: 'y', dir: '+' }, j: { axis: 'y', dir: '-' },
   i: { axis: 'z', dir: '+' }, k: { axis: 'z', dir: '-' },
@@ -1732,34 +1842,39 @@ const jointShortcutHints = [
   { label: 'J6', pos: '[', neg: "'" },
 ]
 
-const cartesianShortcutHints = [
-  { label: 'X', pos: 'D / →', neg: 'A / ←' },
-  { label: 'Y', pos: 'W / ↑', neg: 'S / ↓' },
-  { label: 'Z', pos: 'Space', neg: 'Shift' },
-  { label: 'RX', pos: 'O', neg: 'L' },
-  { label: 'RY', pos: 'P', neg: ';' },
-  { label: 'RZ', pos: '[', neg: "'" },
-]
+const cartesianShortcutHints = computed(() => {
+  // WASD 提示随反转开关更新；方向键 / Z 固定
+  const xPos = wasdInvert.value ? 'A' : 'D'
+  const xNeg = wasdInvert.value ? 'D' : 'A'
+  const yPos = wasdInvert.value ? 'S' : 'W'
+  const yNeg = wasdInvert.value ? 'W' : 'S'
+  return [
+    { label: 'X', pos: `${xPos} / →`, neg: `${xNeg} / ←` },
+    { label: 'Y', pos: `${yPos} / ↑`, neg: `${yNeg} / ↓` },
+    { label: 'Z', pos: 'Space', neg: 'Shift' },
+    { label: 'RX', pos: 'O', neg: 'L' },
+    { label: 'RY', pos: 'P', neg: ';' },
+    { label: 'RZ', pos: '[', neg: "'" },
+  ]
+})
 
 /** 关节模式下也提示飞行键（XYZ） */
-const jointWithFlightHints = [
-  { label: 'X', pos: 'D / →', neg: 'A / ←' },
-  { label: 'Y', pos: 'W / ↑', neg: 'S / ↓' },
-  { label: 'Z', pos: 'Space', neg: 'Shift' },
+const jointWithFlightHints = computed(() => [
+  ...cartesianShortcutHints.value.slice(0, 3),
   ...jointShortcutHints,
-]
+])
 
 const activeKeyMap = computed(() =>
   jogCoordinate.value === 'joint' ? jointKeyMap : cartesianKeyMap
 )
 const activeShortcutHints = computed(() =>
-  jogCoordinate.value === 'joint' ? jointWithFlightHints : cartesianShortcutHints
+  jogCoordinate.value === 'joint' ? jointWithFlightHints.value : cartesianShortcutHints.value
 )
 
 const keysDown = new Set<string>()
 
 function isJogHotkey(key: string): boolean {
-  return Boolean(flightKeyMap[key] || jointKeyMap[key] || cartesianKeyMap[key])
+  return Boolean(FLIGHT_KEY_BASE[key] || jointKeyMap[key] || cartesianKeyMap[key])
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -1776,8 +1891,8 @@ function onKeyDown(e: KeyboardEvent) {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.closest('.monaco-editor')) return
 
   const key = normalizeJogKey(e)
-  // 飞行键优先（笛卡尔 X/Y/Z），任意模式下可用
-  const flight = flightKeyMap[key]
+  // 飞行键优先（笛卡尔 X/Y/Z），任意模式下可用；WASD 方向受反转开关影响
+  const flight = resolveFlightMapping(key)
   const mapped = flight || activeKeyMap.value[key]
   if (!mapped) return
   if (keysDown.has(key)) return  // already held
@@ -1845,6 +1960,7 @@ function readCurrentPoseToTarget() {
 
 async function moveToPose() {
   if (!checkEnabled()) return
+  if (moving.value || poseMoving.value) return
   const pt: TrajPoint = {
     x: Number(targetPose.x || 0),
     y: Number(targetPose.y || 0),
@@ -1860,7 +1976,22 @@ async function moveToPose() {
   }
   poseMoving.value = true
   try {
-    // 当前关节作就近选解；同时带 pose 目标
+    if (isMock) {
+      // Dock：离线 IK → 关节插补动画（MovJ/MovL 在 mock 里都走关节插补可视化）
+      const near = jointsFromObject(state.value.joints as Record<string, number>)
+      const ik = inverseKinematics([pt.x, pt.y, pt.z, pt.rx, pt.ry, pt.rz], near)
+      if (!ik.ok || !ik.joint) {
+        toastRef.value?.error(`离线 IK 失败: ${ik.message}`)
+        return
+      }
+      // 同步关节编辑框，方便对照
+      setMoveTargetJoints(ik.joint)
+      const ok = await mockAnimateToJoints(ik.joint, 700)
+      if (ok) toastRef.value?.success(`已到达位姿目标（${movePath.value} / dock）`)
+      else toastRef.value?.info('运动已停止')
+      return
+    }
+    // 真机：当前关节作就近选解；同时带 pose 目标
     const joints = getMoveTargetJoints()
     const res = await api.movePoint(deviceId, {
       path: movePath.value,
@@ -2437,17 +2568,28 @@ function sendJogCmd(dir: string, gen: number = jogGeneration) {
 
   if (isMock) {
     const axis = jogAxis.value
+    // 关节点动步长 °；笛卡尔平移 mm / 旋转 °
     const delta = dir === '+' ? 0.4 : -0.4
+    const joints = { ...(state.value.joints as Record<string, number>) }
+    const pose = { ...(state.value.pose as Record<string, number>) }
     if (axis.startsWith('j')) {
-      const joints = state.value.joints as Record<string, number>
-      const prev = joints[axis] ?? 0
-      joints[axis] = prev + delta
-      state.value = { ...state.value, joints: { ...joints }, timestamp: Date.now() }
+      const next = applyJointDelta(joints, pose, axis, delta)
+      commitMockState(next.joints, next.pose)
     } else {
-      const pose = state.value.pose as Record<string, number>
-      const prev = pose[axis] ?? 0
-      pose[axis] = prev + delta
-      state.value = { ...state.value, pose: { ...pose }, timestamp: Date.now() }
+      // 平移用较大步长更跟手；旋转保持 0.4°
+      const cartDelta = (axis === 'x' || axis === 'y' || axis === 'z')
+        ? (dir === '+' ? 1.0 : -1.0)
+        : delta
+      const next = applyCartesianDelta(joints, pose, axis, cartDelta)
+      if (!next.ok) {
+        // 仍更新 pose 显示，但 toast 提示一次（避免连发刷屏：仅 step 模式提示）
+        if (jogMode.value === 'step') {
+          toastRef.value?.error(next.message || '离线 IK 无解')
+        }
+        commitMockState(joints, next.pose)
+      } else {
+        commitMockState(next.joints, next.pose)
+      }
     }
     return
   }
@@ -2539,6 +2681,7 @@ function readCurrentJoints() {
 /**
  * 关节目标移动：用当前路径类型（MovJ/MovL）+ joint 目标。
  * 文档允许 MovL({joint=...})，即直线路径到关节角对应位姿。
+ * Dock(?mock=1)：本地离线 FK 动画，不连控制器。
  */
 async function doMove() {
   if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
@@ -2549,6 +2692,15 @@ async function doMove() {
   moving.value = true
   moveTargetJoints = joints
   try {
+    if (isMock) {
+      const ok = await mockAnimateToJoints(joints, 700)
+      if (ok) {
+        toastRef.value?.success(`已到达 J[${joints.map(v => v.toFixed(1)).join(', ')}]（${movePath.value} / dock）`)
+      } else {
+        toastRef.value?.info('运动已停止')
+      }
+      return
+    }
     const res = await api.movePoint(deviceId, {
       path: movePath.value,
       joint: joints,
@@ -2583,6 +2735,11 @@ async function stopMoveJoints(showToast = true) {
   moveTargetJoints = null
   const wasMoving = moving.value
   moving.value = false
+  if (isMock) {
+    cancelMockMove()
+    if (showToast && wasMoving) toastRef.value?.info('运动已停止')
+    return
+  }
   // 打断进行中的服务端 moveJoints：发 value:false + 通用 stop
   if (joints) {
     await api.moveJointsCommand(deviceId, joints, false).catch(() => {})
@@ -2605,6 +2762,14 @@ async function doHome() {
 }
 
 async function doStop() {
+  if (isMock) {
+    cancelMockMove()
+    moving.value = false
+    poseMoving.value = false
+    moveTargetJoints = null
+    toastRef.value?.info('运动已停止')
+    return
+  }
   try {
     const res = await api.stopDevice(deviceId)
     if (res.success) { toastRef.value?.info('运动已停止') }
@@ -3013,6 +3178,55 @@ function formatPostureDetail(p: { type?: api.CustomPostureType; joint?: number[]
 }
 
 async function loadPostures() {
+  if (isMock) {
+    try {
+      const raw = localStorage.getItem(MOCK_PRESET_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as api.CustomPostureItem[]
+        customPostures.value = (Array.isArray(parsed) ? parsed : []).map((p, i) => normalizePostureItem(p, i))
+      } else {
+        // 默认塞入标定参考点，方便开箱演示
+        customPostures.value = [
+          normalizePostureItem({
+            name: '标定点1',
+            type: 'joint',
+            joint: [...REF_JOINT],
+          }, 0),
+          normalizePostureItem({
+            name: '标定点1-位姿',
+            type: 'cartesian',
+            joint: [...REF_JOINT],
+            pose: {
+              x: REF_POSE[0], y: REF_POSE[1], z: REF_POSE[2],
+              rx: REF_POSE[3], ry: REF_POSE[4], rz: REF_POSE[5],
+            },
+          }, 1),
+          normalizePostureItem({
+            name: '标定点2-位姿',
+            type: 'cartesian',
+            joint: [-76.022, 12.2459, -118.3444, 16.0986, 90, 193.978],
+            pose: { x: -27.047, y: -227.9198, z: 236.033, rx: 180, ry: 0, rz: 0 },
+          }, 2),
+        ]
+        localStorage.setItem(MOCK_PRESET_KEY, JSON.stringify(customPostures.value))
+      }
+    } catch (err) {
+      console.warn('[Mock] loadPostures failed:', err)
+      customPostures.value = []
+    }
+    // 初始化 moveTarget / targetPose
+    if (!moveTargetInit.value) {
+      const joints = state.value.joints as Record<string, number>
+      for (let j = 1; j <= 6; j++) moveTarget['j' + j] = Math.round((joints['j' + j] || 0) * 10) / 10
+      const pt = getCurrentCartesian()
+      if (pt) {
+        targetPose.x = pt.x; targetPose.y = pt.y; targetPose.z = pt.z
+        targetPose.rx = pt.rx; targetPose.ry = pt.ry; targetPose.rz = pt.rz
+      }
+      moveTargetInit.value = true
+    }
+    return
+  }
   const res = await api.getCustomPostures(deviceId)
   if (res.success && res.data) {
     customPostures.value = res.data.map((p, i) => normalizePostureItem(p, i))
@@ -3126,6 +3340,16 @@ async function savePostures(successMessage?: string): Promise<boolean> {
   // 规范化后再提交，避免脏数据
   const payload = customPostures.value.map((p, i) => normalizePostureItem(p, i))
   customPostures.value = payload
+  if (isMock) {
+    try {
+      localStorage.setItem(MOCK_PRESET_KEY, JSON.stringify(payload))
+      toastRef.value?.success(successMessage || '预设已保存（dock 本地）')
+      return true
+    } catch (err) {
+      toastRef.value?.error(`保存预设失败：${(err as Error).message}`)
+      return false
+    }
+  }
   const res = await api.setCustomPostures(deviceId, payload)
   if (res.success) {
     toastRef.value?.success(successMessage || '预设已保存')
@@ -3209,7 +3433,9 @@ function confirmRenamePosture(p: PostureItem) {
   toastRef.value?.success(`已重命名为 "${renamePostureValue.value.trim()}"`)
 }
 
-/** 点击预设：关节填充 moveTarget；笛卡尔填充 targetPose */
+/** 点击预设：关节填充 moveTarget；笛卡尔填充 targetPose。
+ *  Dock 模式下用离线 FK/IK 交叉填充另一侧，方便直接点「移动」。
+ */
 function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose; name?: string }) {
   if (p.type === 'cartesian' && p.pose) {
     targetPose.x = p.pose.x
@@ -3218,11 +3444,36 @@ function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?:
     targetPose.rx = p.pose.rx
     targetPose.ry = p.pose.ry
     targetPose.rz = p.pose.rz
+    if (isMock) {
+      const near = jointsFromObject(state.value.joints as Record<string, number>)
+      const ik = inverseKinematics(
+        [p.pose.x, p.pose.y, p.pose.z, p.pose.rx, p.pose.ry, p.pose.rz],
+        near,
+      )
+      if (ik.ok && ik.joint) setMoveTargetJoints(ik.joint)
+    } else if (p.joint && p.joint.length >= 6) {
+      setMoveTargetJoints(p.joint)
+    }
     toastRef.value?.info(`已填充位姿预设${p.name ? ` "${p.name}"` : ''}`)
     return
   }
   const joint = p.joint || []
   for (let j = 1; j <= 6; j++) moveTarget['j' + j] = joint[j - 1] ?? 0
+  if (isMock && joint.length >= 6) {
+    try {
+      const fk = forwardKinematics(joint)
+      if (Number.isFinite(fk[0])) {
+        targetPose.x = +fk[0].toFixed(4)
+        targetPose.y = +fk[1].toFixed(4)
+        targetPose.z = +fk[2].toFixed(4)
+        if (Number.isFinite(fk[3])) {
+          targetPose.rx = fk[3]
+          targetPose.ry = fk[4]
+          targetPose.rz = fk[5]
+        }
+      }
+    } catch { /* ignore */ }
+  }
   toastRef.value?.info(`已填充关节角预设${p.name ? ` "${p.name}"` : ''}`)
 }
 
@@ -3714,6 +3965,7 @@ onUnmounted(() => {
   if (fallbackTimer) clearInterval(fallbackTimer)
   stopES01StatusPoll()
   stopJog()
+  cancelMockMove()
   keysDown.clear()
   wsClient.unsubscribe(deviceId)
 })
