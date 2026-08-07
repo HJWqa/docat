@@ -2089,7 +2089,7 @@ function normalizeJogKey(e: KeyboardEvent): string {
 /**
  * 飞行键基准映射：WASD + Shift/Space + 方向键 → 笛卡尔 X/Y/Z
  * W=Y+  A=X-  S=Y-  D=X+  Shift=Z-  Space=Z+
- * -/_=Z-  =/+=Z+（编辑框内也可用）
+ * -/_=Z-  =/+=Z+（编辑框内：- 留给负号输入，用 _ 与 =/+ 调 Z）
  * ↑=Y+  ↓=Y-  ←=X-  →=X+
  * 「WASD 反转」同时反转 WASD 与方向键的 X/Y；Shift/Space（Z）不参与反转。
  */
@@ -2120,8 +2120,8 @@ try {
   wasdInvert.value = localStorage.getItem(WASD_INVERT_STORAGE_KEY) === '1'
 } catch { /* ignore */ }
 
-/** 坐标编辑框内仍放行的点动键：WASD（X/Y）+ -/=（Z）；方向键等仍留给编辑 */
-const JOG_IN_EDIT_KEYS = new Set(['w', 'a', 's', 'd', 'minus', 'equal'])
+/** 坐标编辑框内仍放行的点动键：WASD（X/Y）+ =（Z+）；普通 - 保留给负号输入，仅 _（Shift+-）触发 Z- */
+const JOG_IN_EDIT_KEYS = new Set(['w', 'a', 's', 'd', 'equal'])
 
 function setWasdInvert(on: boolean) {
   if (wasdInvert.value === on) return
@@ -2353,10 +2353,12 @@ function onKeyDown(e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey || e.altKey) return
 
   const panelShortcutKey = key === 'b' || key === 'n' || key === 'm'
-  // 编辑框聚焦时按键交给浏览器；仅 移动/预设 坐标框内放行 B/N/M 聚焦快捷键、WASD/-= 点动键与 ZXC 吸盘键
+  // 编辑框聚焦时按键交给浏览器；仅 移动/预设 坐标框内放行 B/N/M 聚焦快捷键、WASD 点动键、=/+ 与 _ 调 Z、ZXC 吸盘键
+  // 普通 - 不点动：负数坐标输入要用
   const editable = isEditableTarget(e.target)
   const es01EditKey = hasDobotES01.value ? ES01_KEY_MAP[key] : undefined
-  if (editable && !(isMoveCoordInput(target) && (panelShortcutKey || JOG_IN_EDIT_KEYS.has(key) || Boolean(es01EditKey)))) return
+  const jogInEdit = JOG_IN_EDIT_KEYS.has(key) || (key === 'minus' && e.shiftKey)
+  if (editable && !(isMoveCoordInput(target) && (panelShortcutKey || jogInEdit || Boolean(es01EditKey)))) return
 
   // B/N/M 只聚焦、不读取：B（左）→ 手动点动板块；N → J1；M → X（Shift 组合不触发）
   if (panelShortcutKey && !e.shiftKey) {
