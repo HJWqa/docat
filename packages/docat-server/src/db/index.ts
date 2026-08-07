@@ -204,6 +204,19 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 006_preset_cartesian applied')
   }
 
+  // ─── 007: 全局应用设置（键值）────────────────────
+  if (!applied.has('007_app_settings')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT ''
+      );
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('007_app_settings')").run()
+    console.log('[DB] Migration 007_app_settings applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 

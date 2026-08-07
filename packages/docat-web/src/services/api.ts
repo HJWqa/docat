@@ -587,6 +587,32 @@ export async function setDeviceAlias(id: string, alias: string): Promise<ApiResp
   return request('POST', `/api/devices/${id}/deviceAlias`, { alias })
 }
 
+// ─── 标定导出 & 应用设置 ────────────────────────
+
+export interface CalibrationExportRow {
+  imgX: number
+  imgY: number
+  physX: number
+  physY: number
+  angle: number
+}
+
+export async function exportCalibration(
+  id: string,
+  rows: CalibrationExportRow[],
+  name?: string,
+): Promise<ApiResponse<{ path: string; filename: string }>> {
+  return request('POST', `/api/devices/${id}/calibration/export`, { rows, name })
+}
+
+export async function getSystemSettings(): Promise<ApiResponse<{ calibExportDir: string }>> {
+  return request('GET', `/api/system/settings`)
+}
+
+export async function saveSystemSettings(settings: { calibExportDir: string }): Promise<ApiResponse<null>> {
+  return request('POST', `/api/system/settings`, settings)
+}
+
 // ─── User Management ──────────────────────────
 
 export interface ControllerUserItem {

@@ -5,7 +5,7 @@
 import type { FastifyInstance } from 'fastify'
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
@@ -14,6 +14,7 @@ import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
 import { createStoredZip, type ZipEntryInput } from '../../utils/zip.js'
+import { getSetting, SETTING_CALIB_EXPORT_DIR, DEFAULT_EXPORT_DIR, resolveExportDir } from './system.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
 import type { LoadParams, CustomPosture, SystemTime, CoordinateData, UserList, UserPermissionConfig } from '../../device/DeviceDriver.js'
 
@@ -28,6 +29,43 @@ const SYSTEM_JOINT_PRESETS = [
 
 type ControlLogLevel = typeof CONTROL_LOG_LEVELS[number]
 type ControlLogDisplayLevel = ControlLogLevel | 'plain'
+
+interface CalibrationExportRow {
+  imgX: number
+  imgY: number
+  physX: number
+  physY: number
+  angle?: number
+}
+
+/** 清洗文件主名：剔除路径分隔符与控制字符 */
+function sanitizeFileStem(name: string): string {
+  return name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim()
+}
+
+/** 导出文件时间戳 yyyyMMdd_HHmmss */
+function timestampStem(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+/** 数值格式化：统一保留 3 位小数 */
+function fmtNum(v: number): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '0.000'
+  return n.toFixed(3)
+}
+
+/** 格式化导出行：每列左对齐补足到该列最大宽度，列间 3 个空格，与原始 txt 对齐风格一致 */
+function formatExportLines(rows: CalibrationExportRow[]): string[] {
+  const cols = rows.map(r => [fmtNum(r.imgX), fmtNum(r.imgY), fmtNum(r.physX), fmtNum(r.physY), fmtNum(r.angle ?? 0)])
+  const widths = [0, 0, 0, 0, 0]
+  cols.forEach(r => r.forEach((v, i) => {
+    if (v.length > widths[i]) widths[i] = v.length
+  }))
+  return cols.map(r => r.map((v, i) => v.padEnd(widths[i])).join('   '))
+}
 
 interface JointPresetRow {
   id: string
@@ -1133,6 +1171,37 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
         await entry.driver.setDeviceAlias(request.body.alias)
         return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 标定数据导出（服务端写文件）───────────────
+
+  app.post<{ Params: { id: string }; Body: { rows?: CalibrationExportRow[]; name?: string } }>(
+    '/api/devices/:id/calibration/export',
+    async (request, reply): Promise<ApiResponse<{ path: string; filename: string }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const rows = request.body?.rows ?? []
+        if (rows.length === 0) {
+          return { success: false, error: { code: 40000, message: '没有可导出的标定数据' } }
+        }
+
+        const dir = resolveExportDir(getSetting(SETTING_CALIB_EXPORT_DIR) || DEFAULT_EXPORT_DIR)
+        mkdirSync(dir, { recursive: true })
+
+        const safeName = sanitizeFileStem(request.body?.name ?? request.params.id).slice(0, 40) || 'device'
+        const filename = `calib_${safeName}_${timestampStem()}.txt`
+        const filePath = path.join(dir, filename)
+
+        const lines = formatExportLines(rows)
+        writeFileSync(filePath, lines.join('\r\n') + '\r\n', 'utf8')
+        return { success: true, data: { path: filePath, filename } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }

@@ -108,22 +108,122 @@
       <div class="card model-panel">
         <div class="model-panel-header">
           <div>
-            <div class="hud-label" style="margin-bottom:0">3D 模型</div>
-            <div class="model-subtitle">{{ robotModelType }} · 实时关节姿态</div>
+            <div class="hud-label" style="margin-bottom:0">{{ calibMode ? '标定辅助' : '3D 模型' }}</div>
+            <div class="model-subtitle" v-if="!calibMode">{{ robotModelType }} · 实时关节姿态</div>
+            <div class="model-subtitle" v-else>图像坐标 → 物理坐标 · {{ calibModelLabel }} / {{ calibWeightLabel }}</div>
           </div>
-          <button class="btn btn-secondary btn-sm" @click="reset3DView">重置视角</button>
+          <div class="model-panel-actions">
+            <button v-if="!calibMode" class="btn btn-secondary btn-sm" @click="reset3DView">重置视角</button>
+            <button
+              class="btn-icon btn-icon--convert"
+              :class="{ 'btn-icon--active': calibMode }"
+              :title="calibMode ? '返回 3D 模型' : '标定辅助（图像坐标 ↔ 物理坐标）'"
+              @click="toggleCalibMode"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-3 3M14 5H2M5 14l-3-3 3-3M2 11h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
         </div>
-        <div class="model-frame-shell">
-          <iframe
-            ref="modelIframeRef"
-            class="model-frame"
-            src="/3d/index.html"
-            title="Dobot 3D 模型"
-            @load="on3DModelLoad"
-          />
-          <div v-if="!modelReady" class="model-loading">
-            <span class="loading-ring"></span>
-            <strong>加载模型中</strong>
+        <template v-if="!calibMode">
+          <div class="model-frame-shell">
+            <iframe
+              ref="modelIframeRef"
+              class="model-frame"
+              src="/3d/index.html"
+              title="Dobot 3D 模型"
+              @load="on3DModelLoad"
+            />
+            <div v-if="!modelReady" class="model-loading">
+              <span class="loading-ring"></span>
+              <strong>加载模型中</strong>
+            </div>
+          </div>
+        </template>
+
+        <!-- 标定辅助 -->
+        <div v-else class="calib-panel">
+          <div class="calib-toolbar">
+            <label title="几何变换模型">模型
+              <select v-model="calibModel" class="calib-select">
+                <option value="affine">仿射</option>
+                <option value="homography">透视</option>
+              </select>
+            </label>
+            <label title="权重函数 / 稳健估计方法">权重
+              <select v-model="calibWeightFn" class="calib-select">
+                <option value="lsq">最小二乘</option>
+                <option value="huber">Huber</option>
+                <option value="tukey">Tukey</option>
+                <option value="ransac">RANSAC</option>
+              </select>
+            </label>
+            <label v-if="calibWeightFn === 'ransac'" title="判定内点的允许误差上限 (mm)">阈值
+              <input v-model.number="calibRansacThresh" type="number" min="0.01" step="0.1" class="calib-thresh-input" />
+            </label>
+            <span class="calib-rmse" :class="{ 'calib-rmse--bad': calibFit && !calibFit.usable }" :title="calibFitHint">
+              RMSE {{ calibFit ? (Number.isFinite(calibFit.rmse) ? calibFit.rmse.toFixed(3) : '—') : '—' }} mm
+            </span>
+            <span v-if="calibFit && calibFit.pointCount > 0" class="calib-inlier">内点 {{ calibFit.inlierCount }}/{{ calibFit.pointCount }}</span>
+            <label title="行数（最小点数：仿射3 / 透视4）">行数
+              <input v-model.number="calibRowCount" type="number" min="1" max="99" step="1" class="calib-rowcount-input" @change="syncCalibRows" @keyup.enter="syncCalibRows" />
+            </label>
+            <button class="btn-icon btn-icon--toolbar" @click="triggerCalibImport('image')" @contextmenu.prevent="triggerCalibImport('full')" title="文件导入（左键：仅图像坐标；右键：保留全部数据）">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M9.5 1.5H4A1.5 1.5 0 002.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5z" stroke="currentColor" stroke-width="1.3"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="btn-icon btn-icon--toolbar" @click="startClipboardImport('image')" @contextmenu.prevent="startClipboardImport('full')" title="从剪贴板导入 OCR 坐标（左键：仅图像坐标；右键：保留全部数据）">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 6h7M4.5 8.5h4.5M4.5 11h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </button>
+            <button class="btn-icon btn-icon--toolbar" @click="exportCalibrationToServer" @contextmenu.prevent="downloadCalibration" title="导出（左键：服务端写入导出目录；右键：下载 txt 文件）">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M8 10l-3-3M8 10l3-3M2 13h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <input ref="calibFileInputRef" type="file" accept=".txt,.text" style="display:none" @change="onCalibFileChange" />
+          </div>
+
+          <div v-if="calibPasteOpen" class="calib-paste-box">
+            <span class="calib-paste-hint">将 OCR 坐标文本粘贴到此（{{ calibPasteMode === 'full' ? '全部数据' : '仅图像坐标' }}，数量须为当前行数 {{ calibRowCount }} 的 {{ calibPasteMode === 'full' ? 5 : 2 }} 倍）</span>
+            <textarea ref="calibPasteRef" v-model="calibPasteText" class="calib-paste-input" rows="3" @keyup.esc="cancelCalibPaste" placeholder="每行一个数字，按列顺序粘贴"></textarea>
+            <div class="calib-paste-actions">
+              <button class="btn btn-primary btn-sm" @click="confirmCalibPaste">确定</button>
+              <button class="btn btn-secondary btn-sm" @click="cancelCalibPaste">取消</button>
+            </div>
+          </div>
+
+          <div class="calib-table-wrap">
+            <table class="calib-table">
+              <thead>
+                <tr>
+                  <th style="width:28px">#</th>
+                  <th>图像X</th>
+                  <th>图像Y</th>
+                  <th>物理X</th>
+                  <th>物理Y</th>
+                  <th>角度</th>
+                  <th style="width:74px">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, i) in calibRows" :key="i" :class="{ 'calib-row--inactive': calibInactiveSet[i] }">
+                  <td class="calib-idx">{{ i + 1 }}</td>
+                  <td><input v-model.number="row.imgX" type="number" step="any" title="图像坐标 X" /></td>
+                  <td><input v-model.number="row.imgY" type="number" step="any" title="图像坐标 Y" /></td>
+                  <td><input v-model.number="row.physX" type="number" step="any" title="物理坐标 X" /></td>
+                  <td><input v-model.number="row.physY" type="number" step="any" title="物理坐标 Y" /></td>
+                  <td><input v-model.number="row.angle" type="number" step="any" title="角度（当前仅记录参考）" /></td>
+                  <td>
+                    <button class="btn btn-secondary btn-xs" :disabled="!hasLivePose" @click="readCurrentXY(i)" title="读取当前物理坐标填入物理X/Y">读取XY</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="calib-convert">
+            <span class="calib-convert-label">图像坐标</span>
+            <input v-model.trim="calibConvertInput" class="calib-convert-input" placeholder="图X,图Y" title="输入图像坐标，逗号分隔" @keyup.enter="runCalibConvert" />
+            <button class="btn btn-primary btn-sm" :disabled="!calibFit || !calibFit.usable" @click="runCalibConvert">转换</button>
+            <input v-model.trim="calibConvertResult" class="calib-convert-input calib-convert-result" placeholder="物理X,物理Y"
+              title="转换结果；Shift/Ctrl+Enter 移动到该位置"
+              @keydown="onCalibResultKeydown" />
           </div>
         </div>
       </div>
@@ -1171,6 +1271,22 @@
                   <div v-if="dobotPlusCallError" class="text-danger" style="font-size:0.75rem;margin-top:6px">{{ dobotPlusCallError }}</div>
                 </div>
               </div>
+
+              <!-- docat 设置 -->
+              <div v-else-if="settingsTab === 'docat'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>标定导出目录</h4></div>
+                  <div style="display:flex;gap:8px">
+                    <input v-model.trim="calibExportDir" class="input-sm settings-alias-input" placeholder="服务端导出目录，如 ./data/exports" @keyup.enter="saveCalibExportDir" />
+                    <button class="btn btn-primary btn-sm" :disabled="!calibExportDir" @click="saveCalibExportDir">
+                      {{ savingCalibExportDir ? '保存中...' : '保存' }}
+                    </button>
+                  </div>
+                  <div class="text-muted" style="margin-top:8px;font-size:0.68rem;line-height:1.6">
+                    标定辅助「导出」按钮：左键将标定数据写入该目录下的 txt 文件（服务端）；右键由浏览器直接下载文件。
+                  </div>
+                </div>
+              </div>
           </div>
         </div>
       </div>
@@ -1182,7 +1298,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as api from '../services/api'
 import { clearToken } from '../services/api'
@@ -1201,6 +1317,17 @@ import {
 import { deviceStore } from '../stores/deviceStore'
 import Toast from '../components/Toast.vue'
 import type { DeviceConfig } from 'docat-shared/types'
+import {
+  fitCalibration,
+  applyCalibration,
+  parseCalibTxt,
+  parseCalibTxtFull,
+  parseNumericTokens,
+  type CalibPoint,
+  type CalibModel,
+  type WeightFn,
+  type CalibResult,
+} from '../services/calibration'
 
 const route = useRoute()
 const router = useRouter()
@@ -1444,6 +1571,7 @@ const settingsTabs = [
   { key: 'motion', icon: '🏃', label: '运动' },
   { key: 'comm', icon: '🌐', label: '通讯' },
   { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
+  { key: 'docat', icon: '🐱', label: 'docat' },
 ]
 const loadingLogs = ref(false)
 const logListRef = ref<HTMLElement>()
@@ -2467,6 +2595,381 @@ function getAxisValue(): number {
   const key = jogAxis.value === 'r' ? 'rx' : jogAxis.value
   return pose?.[key] ?? 0
 }
+
+// ─── 标定辅助（图像坐标 ↔ 物理坐标）──────────────────
+
+const CALIB_STORAGE_KEY = `docat:calib:${deviceId}`
+const calibMode = ref(false)
+const calibModel = ref<CalibModel>('affine')
+const calibWeightFn = ref<WeightFn>('lsq')
+const calibRansacThresh = ref(1)
+const calibRowCount = ref(9)
+const calibRows = ref<CalibPoint[]>([])
+const calibFit = ref<CalibResult | null>(null)
+const calibConvertInput = ref('')
+const calibConvertResult = ref('')
+const calibFileInputRef = ref<HTMLInputElement | null>(null)
+const calibImportMode = ref<'image' | 'full'>('image')
+const calibPasteOpen = ref(false)
+const calibPasteText = ref('')
+const calibPasteRef = ref<HTMLTextAreaElement | null>(null)
+let calibPasteMode: 'image' | 'full' = 'image'
+
+const calibModelLabel = computed(() => calibModel.value === 'affine' ? '仿射' : '透视')
+const calibWeightLabel = computed(() => {
+  const map: Record<WeightFn, string> = { lsq: '最小二乘', huber: 'Huber', tukey: 'Tukey', ransac: 'RANSAC' }
+  return map[calibWeightFn.value]
+})
+const hasLivePose = computed(() => getCurrentCartesian() !== null)
+
+/** 行是否参与拟合（图像/物理坐标四值均有效） */
+function isRowActiveInFit(i: number): boolean {
+  const r = calibRows.value[i]
+  if (!r) return false
+  return [r.imgX, r.imgY, r.physX, r.physY].every(v => Number.isFinite(v))
+}
+
+/** 未参与拟合（缺数据）的行索引集合，用于样式置灰 */
+const calibInactiveSet = computed<Record<number, boolean>>(() => {
+  const set: Record<number, boolean> = {}
+  calibRows.value.forEach((_, i) => {
+    if (!isRowActiveInFit(i)) set[i] = true
+  })
+  return set
+})
+
+function fmtNum(v: number): string {
+  return String(Math.round(v * 1000) / 1000)
+}
+
+function round3(v: number): number {
+  return Math.round(v * 1000) / 1000
+}
+
+function newCalibRow(): CalibPoint {
+  return { imgX: 0, imgY: 0, physX: 0, physY: 0, angle: 0 }
+}
+
+function syncCalibRows() {
+  const target = Math.max(1, Math.min(99, Math.floor(Number(calibRowCount.value) || 1)))
+  calibRowCount.value = target
+  while (calibRows.value.length < target) calibRows.value.push(newCalibRow())
+  if (calibRows.value.length > target) calibRows.value.splice(target)
+}
+
+function toggleCalibMode() {
+  calibMode.value = !calibMode.value
+}
+
+function triggerCalibImport(mode: 'image' | 'full') {
+  calibImportMode.value = mode
+  calibFileInputRef.value?.click()
+}
+
+function onCalibFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const full = calibImportMode.value === 'full'
+  const reader = new FileReader()
+  reader.onload = () => {
+    const fullPoints = parseCalibTxtFull(String(reader.result ?? ''))
+    if (fullPoints.length === 0) {
+      toastRef.value?.error('未解析到有效数据（每行至少两个数值）')
+      return
+    }
+    if (fullPoints.length > calibRows.value.length) {
+      calibRowCount.value = fullPoints.length
+      syncCalibRows()
+    }
+    const points = full ? fullPoints : parseCalibTxt(String(reader.result ?? ''))
+    points.forEach((p, i) => {
+      const row = calibRows.value[i]
+      if (!row) return
+      row.imgX = p.imgX
+      row.imgY = p.imgY
+      if (full) {
+        row.physX = (p as CalibPoint).physX
+        row.physY = (p as CalibPoint).physY
+        row.angle = (p as CalibPoint).angle
+      }
+    })
+    toastRef.value?.success(`已导入 ${points.length} 行${full ? '（全部数据）' : '（仅图像坐标）'}`)
+  }
+  reader.readAsText(file)
+}
+
+async function startClipboardImport(mode: 'image' | 'full') {
+  calibPasteMode = mode
+  try {
+    if (navigator.clipboard?.readText) {
+      const text = await navigator.clipboard.readText()
+      if (text && text.trim()) {
+        applyClipboardText(text, mode)
+        return
+      }
+      toastRef.value?.info('剪贴板没有文本内容（图片/图标暂不支持 OCR）')
+    }
+  } catch {
+    // 权限拒绝或非安全上下文，走粘贴框回退
+  }
+  openCalibPasteBox()
+}
+
+function openCalibPasteBox() {
+  calibPasteText.value = ''
+  calibPasteOpen.value = true
+  void nextTick(() => calibPasteRef.value?.focus())
+}
+
+function confirmCalibPaste() {
+  const text = calibPasteText.value
+  calibPasteOpen.value = false
+  if (!text || !text.trim()) {
+    toastRef.value?.error('粘贴内容为空')
+    return
+  }
+  applyClipboardText(text, calibPasteMode)
+}
+
+function cancelCalibPaste() {
+  calibPasteOpen.value = false
+  calibPasteText.value = ''
+}
+
+/** 应用剪贴板 OCR 数据：列优先排列（图X×n、图Y×n、[物理X×n、物理Y×n、角度×n]），数量必须等于当前行数 */
+function applyClipboardText(text: string, mode: 'image' | 'full') {
+  const tokens = parseNumericTokens(text)
+  if (!tokens) {
+    toastRef.value?.error('剪贴板含非数值数据，已中断导入')
+    return
+  }
+  const n = Math.max(1, Math.floor(Number(calibRowCount.value) || 1))
+  const cols = mode === 'full' ? 5 : 2
+  if (tokens.length !== cols * n) {
+    toastRef.value?.error(`数据数量不符：期望 ${cols * n} 个（${cols} 列 × 当前行数 ${n}），实际 ${tokens.length} 个`)
+    return
+  }
+  calibRows.value.forEach((row, i) => {
+    row.imgX = tokens[i]
+    row.imgY = tokens[n + i]
+    if (mode === 'full') {
+      row.physX = tokens[2 * n + i]
+      row.physY = tokens[3 * n + i]
+      row.angle = tokens[4 * n + i]
+    }
+  })
+  toastRef.value?.success(`已从剪贴板导入 ${n} 行${mode === 'full' ? '（全部数据）' : '（仅图像坐标）'}`)
+}
+
+// ─── 导出 & 导出目录设置 ─────────────────────────
+
+const calibExportDir = ref('')
+const savingCalibExportDir = ref(false)
+
+function fmtExportNum(v: number): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '0.000'
+  return n.toFixed(3)
+}
+
+function buildCalibExportText(): string {
+  const cols = calibExportRows().map(r => [
+    fmtExportNum(r.imgX),
+    fmtExportNum(r.imgY),
+    fmtExportNum(r.physX),
+    fmtExportNum(r.physY),
+    fmtExportNum(r.angle),
+  ])
+  const widths = [0, 0, 0, 0, 0]
+  cols.forEach(r => r.forEach((v, i) => {
+    if (v.length > widths[i]) widths[i] = v.length
+  }))
+  return cols.map(r => r.map((v, i) => v.padEnd(widths[i])).join('   ')).join('\r\n') + '\r\n'
+}
+
+function calibExportRows(): api.CalibrationExportRow[] {
+  return calibRows.value.map(r => ({ imgX: r.imgX, imgY: r.imgY, physX: r.physX, physY: r.physY, angle: r.angle }))
+}
+
+function calibExportStem(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const safeName = (device.value?.name || deviceId).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').slice(0, 40) || 'device'
+  return `calib_${safeName}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+async function exportCalibrationToServer() {
+  if (calibRows.value.length === 0) {
+    toastRef.value?.error('没有可导出的标定数据')
+    return
+  }
+  const res = await api.exportCalibration(deviceId, calibExportRows(), device.value?.name)
+  if (res.success && res.data) {
+    toastRef.value?.success(`已导出到 ${res.data.path}`)
+  } else {
+    toastRef.value?.error(`导出失败: ${res.error?.message}`)
+  }
+}
+
+function downloadCalibration() {
+  if (calibRows.value.length === 0) {
+    toastRef.value?.error('没有可导出的标定数据')
+    return
+  }
+  const blob = new Blob([buildCalibExportText()], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${calibExportStem()}.txt`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  toastRef.value?.success(`已下载 ${a.download}`)
+}
+
+async function loadCalibExportDir() {
+  const res = await api.getSystemSettings()
+  if (res.success && res.data) {
+    calibExportDir.value = res.data.calibExportDir ?? ''
+  }
+}
+
+async function saveCalibExportDir() {
+  const dir = calibExportDir.value.trim()
+  if (!dir) {
+    toastRef.value?.error('请填写导出目录')
+    return
+  }
+  savingCalibExportDir.value = true
+  try {
+    const res = await api.saveSystemSettings({ calibExportDir: dir })
+    if (res.success) {
+      toastRef.value?.success('导出目录已保存')
+    } else {
+      toastRef.value?.error(`保存失败: ${res.error?.message}`)
+    }
+  } finally {
+    savingCalibExportDir.value = false
+  }
+}
+
+function readCurrentXY(i: number) {
+  const pt = getCurrentCartesian()
+  if (!pt) {
+    toastRef.value?.error('暂无位姿数据')
+    return
+  }
+  calibRows.value[i].physX = round3(pt.x)
+  calibRows.value[i].physY = round3(pt.y)
+}
+
+function refitCalib() {
+  const pts = calibRows.value.filter((r, i) => isRowActiveInFit(i))
+  if (pts.length === 0) {
+    calibFit.value = null
+    return
+  }
+  calibFit.value = fitCalibration(pts, calibModel.value, calibWeightFn.value, { ransacThreshold: Number(calibRansacThresh.value) || 1 })
+  persistCalib()
+}
+
+const calibFitHint = computed(() => {
+  if (!calibFit.value) return '拟合所需点数不足（仿射≥3 / 透视≥4）'
+  if (!calibFit.value.usable) return '拟合失败：所需点数不足'
+  return '拟合残差均方根 (mm)，越小越准'
+})
+
+function runCalibConvert() {
+  if (!calibFit.value || !calibFit.value.usable) {
+    toastRef.value?.error('拟合不可用：请先录入足够的标定点')
+    return
+  }
+  const parts = calibConvertInput.value.split(/[\s,，;；]+/).map(Number).filter(Number.isFinite)
+  if (parts.length < 2) {
+    toastRef.value?.error('请输入图像坐标，用逗号分隔，如 928.389,825.358')
+    return
+  }
+  const r = applyCalibration(calibFit.value, parts[0], parts[1])
+  calibConvertResult.value = `${fmtNum(r.x)},${fmtNum(r.y)}`
+}
+
+function onCalibResultKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter' || !(e.shiftKey || e.ctrlKey || e.metaKey)) return
+  e.preventDefault()
+  void runCalibToPosition()
+}
+
+async function runCalibToPosition() {
+  if (!isConnected.value) {
+    toastRef.value?.error('设备未连接')
+    return
+  }
+  const parts = calibConvertResult.value.split(/[\s,，;；]+/).map(Number).filter(Number.isFinite)
+  if (parts.length < 2) {
+    toastRef.value?.error('没有可用的物理坐标结果')
+    return
+  }
+  const cur = getCurrentCartesian()
+  targetPose.x = round3(parts[0])
+  targetPose.y = round3(parts[1])
+  if (cur) {
+    targetPose.z = round3(cur.z)
+    targetPose.rx = round3(cur.rx)
+    targetPose.ry = round3(cur.ry)
+    targetPose.rz = round3(cur.rz)
+  } else {
+    targetPose.z = 0
+    targetPose.rx = 0
+    targetPose.ry = 0
+    targetPose.rz = 0
+  }
+  await moveToPose()
+}
+
+function persistCalib() {
+  try {
+    localStorage.setItem(CALIB_STORAGE_KEY, JSON.stringify({
+      rows: calibRows.value,
+      rowCount: calibRowCount.value,
+      model: calibModel.value,
+      weightFn: calibWeightFn.value,
+      ransacThresh: calibRansacThresh.value,
+    }))
+  } catch (err) {
+    // localStorage 不可用时忽略
+  }
+}
+
+function loadCalib() {
+  try {
+    const raw = localStorage.getItem(CALIB_STORAGE_KEY)
+    if (!raw) return
+    const data = JSON.parse(raw) as {
+      rows?: CalibPoint[]
+      rowCount?: number
+      model?: CalibModel
+      weightFn?: WeightFn
+      ransacThresh?: number
+    }
+    if (Array.isArray(data.rows)) {
+      calibRows.value = data.rows.map(r => ({ imgX: r.imgX, imgY: r.imgY, physX: r.physX, physY: r.physY, angle: r.angle ?? 0 }))
+      calibRowCount.value = Math.max(1, calibRows.value.length)
+    }
+    if (data.model === 'affine' || data.model === 'homography') calibModel.value = data.model
+    if (data.weightFn === 'lsq' || data.weightFn === 'huber' || data.weightFn === 'tukey' || data.weightFn === 'ransac') calibWeightFn.value = data.weightFn
+    if (typeof data.ransacThresh === 'number' && Number.isFinite(data.ransacThresh) && data.ransacThresh > 0) calibRansacThresh.value = data.ransacThresh
+  } catch {
+    // 解析失败时使用默认值
+  }
+  syncCalibRows()
+  refitCalib()
+}
+
+watch([calibRows, calibModel, calibWeightFn, calibRansacThresh], () => refitCalib(), { deep: true })
+onMounted(loadCalib)
 
 // ─── Load / Connect ──────────────────────────────
 
@@ -4721,6 +5224,7 @@ watch(settingsTab, (tab) => {
   else if (tab === 'users') loadUsers()
   else if (tab === 'coordinates') loadCoords()
   else if (tab === 'postures') loadPostures()
+  else if (tab === 'docat') loadCalibExportDir()
 })
 
 // ─── Lifecycle ──────────────────────────────────
@@ -4974,6 +5478,87 @@ onUnmounted(() => {
   width: 18px; height: 18px; border: 2px solid rgba(122, 162, 255, 0.22);
   border-top-color: var(--cyan-300); border-radius: 50%; animation: spin 0.8s linear infinite;
 }
+
+/* 标定辅助面板 */
+.model-panel-actions { display: flex; align-items: center; gap: 8px; }
+.btn-icon--active { border-color: var(--cyan-500); color: var(--cyan-300); background: var(--cyan-900); }
+.btn-icon--convert { width: 30px; height: 30px; font-size: 0; }
+.calib-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; max-height: 440px; min-height: 260px;
+}
+.calib-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.calib-toolbar label {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-body); font-size: 0.66rem; font-weight: 500; color: var(--text-muted);
+  white-space: nowrap;
+}
+.calib-select {
+  padding: 2px 4px; font-family: var(--font-mono); font-size: 0.68rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); outline: none;
+}
+.calib-select:focus, .calib-thresh-input:focus, .calib-rowcount-input:focus { border-color: var(--accent); }
+.calib-thresh-input {
+  width: 52px; padding: 2px 4px; font-family: var(--font-mono); font-size: 0.68rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); text-align: center; outline: none;
+}
+.calib-rowcount-input {
+  width: 46px; padding: 2px 4px; font-family: var(--font-mono); font-size: 0.68rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); text-align: center; outline: none;
+}
+.calib-rmse { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); white-space: nowrap; }
+.calib-rmse--bad { color: var(--status-danger); }
+.calib-inlier { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); white-space: nowrap; }
+.calib-table-wrap { overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius); }
+.calib-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.68rem; }
+.calib-table th {
+  text-align: left; padding: 5px 6px; font-family: var(--font-body); font-size: 0.62rem; font-weight: 600;
+  color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); background: var(--void-surface); position: sticky; top: 0;
+}
+.calib-table td { padding: 3px 5px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.calib-table tr:last-child td { border-bottom: none; }
+.calib-table input {
+  width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 5px;
+  font-family: var(--font-mono); font-size: 0.68rem; text-align: right;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); outline: none;
+}
+.calib-table input:focus { border-color: var(--accent); }
+.calib-table input::-webkit-outer-spin-button,
+.calib-table input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.calib-idx { color: var(--text-muted); text-align: center; }
+.calib-row--inactive { opacity: 0.45; }
+.calib-convert {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-top: 10px; border-top: 1px solid var(--border);
+}
+.calib-convert-label { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.calib-convert-input {
+  flex: 1; min-width: 150px; padding: 5px 8px;
+  font-family: var(--font-mono); font-size: 0.74rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); outline: none;
+}
+.calib-convert-input:focus { border-color: var(--accent); }
+.calib-convert-result { color: var(--cyan-300); }
+.btn-icon--toolbar { width: 24px; height: 24px; font-size: 0; }
+.calib-paste-box {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; border: 1px solid var(--cyan-500); border-radius: var(--radius);
+  background: var(--cyan-900);
+}
+.calib-paste-hint { font-family: var(--font-body); font-size: 0.64rem; color: var(--cyan-300); }
+.calib-paste-input {
+  width: 100%; box-sizing: border-box; padding: 6px 8px;
+  font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.4;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); outline: none; resize: vertical;
+}
+.calib-paste-input:focus { border-color: var(--accent); }
+.calib-paste-actions { display: flex; gap: 6px; }
 .joint-readout { display: flex; flex-direction: column; gap: 5px; }
 .joint-row { display: flex; align-items: center; gap: 10px; }
 .joint-label { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; color: var(--text-muted); width: 22px; text-align: right; }
