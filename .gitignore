@@ -20,6 +20,11 @@ cjs/
 .vite/
 .vite_cache/
 
+# Optional local Dobot+ plugin resources (official UI/plugin packages).
+# Copy plugin folders (e.g. DobotES01_v1-0-3-stable/) here to use them as an
+# additional install source; docat auto-detects and uses them when present.
+packages/docat-web/public/dobot-plus/
+
 # Ignore checked-in 3D model assets except E6/MG6. Keep plugin runtime assets.
 packages/docat-web/public/3d/static/*
 !packages/docat-web/public/3d/static/mg6/

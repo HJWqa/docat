@@ -107,6 +107,9 @@ export class MG6Driver extends DeviceDriver {
     alarm: [],
     status: this.status,
     timestamp: Date.now(),
+    dragPlayback: false,
+    dragTrack: false,
+    dragTeach: false,
   }
 
   /** MG6 扩展状态 */
@@ -997,6 +1000,107 @@ export class MG6Driver extends DeviceDriver {
     if (!reply.status) throw new Error(`Set teach/coordinate failed: ${reply.message}`)
   }
 
+  // ─── 轨迹录制 / 复现（控制器端）────────────────
+
+  async setThreeSwitch(value: boolean): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/panel/threeSwitch',
+      portName: this.ip,
+      params: { value },
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Set threeSwitch failed: ${reply.message}`)
+  }
+
+  async setRecurrentTrack(value: boolean): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/recurrentTrack',
+      portName: this.ip,
+      params: { getpos: value },
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Set recurrentTrack failed: ${reply.message}`)
+    return (reply.data ?? {}) as Record<string, unknown>
+  }
+
+  async getRecurrentTrackStatus(): Promise<{ isFinish: boolean; result: boolean }> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/interface/recurrentTrack',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Get recurrentTrack failed: ${reply.message}`)
+    const data = (reply.data ?? {}) as { isFinish?: boolean; result?: boolean }
+    return { isFinish: !!data.isFinish, result: data.result === undefined ? true : !!data.result }
+  }
+
+  async getRetraceParams(): Promise<{ multi: number; const: number; loop: number }> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/reTraceParams',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Get reTraceParams failed: ${reply.message}`)
+    const data = (reply.data ?? {}) as Partial<{ multi: number; const: number; loop: number }>
+    return { multi: data.multi ?? 1, const: data.const ?? 0, loop: data.loop ?? 1 }
+  }
+
+  async setRetraceParams(params: { multi: number; const: number; loop: number }): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/reTraceParams',
+      portName: this.ip,
+      params,
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Set reTraceParams failed: ${reply.message}`)
+  }
+
+  async setDebugReTrace(cmd: 'start' | 'stop', addr: string): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/debugReTrace',
+      portName: this.ip,
+      params: { cmd: cmd === 'start' ? 'start' : 'stop', addr },
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Set debugReTrace failed: ${reply.message}`)
+  }
+
+  async getDebugReTrace(): Promise<{
+    addr: string
+    currentTimes: number
+    isDone: boolean
+    percent: number
+    result: boolean
+  }> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/interface/debugReTrace',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    if (!reply.status) throw new Error(`Get debugReTrace failed: ${reply.message}`)
+    const data = (reply.data ?? {}) as Partial<{
+      addr: string
+      currentTimes: number
+      isDone: boolean
+      percent: number
+      result: boolean
+    }>
+    return {
+      addr: data.addr ?? '',
+      currentTimes: data.currentTimes ?? 0,
+      isDone: !!data.isDone,
+      percent: data.percent ?? 0,
+      result: data.result === undefined ? true : !!data.result,
+    }
+  }
+
   // ─── Dobot+ 插件系统 ──────────────────────────
   // 管理接口在 22001；插件业务 API 在 getPorts 分配的动态端口（如 22100）
 
@@ -1098,12 +1202,17 @@ export class MG6Driver extends DeviceDriver {
     return hit ?? null
   }
 
+  /** 吸盘最近一次指令状态：DI 反馈不可靠时作为状态回退 */
+  private es01CmdState: 'grip' | 'release' | null = null
+
   /**
    * DobotES01 吸盘控制
    * - grip: ToolDO(1,1) 吸取
    * - release: ToolDO(1,0) 释放
    * - clearAlarm: ToolDO(2) 脉冲清错
-   * - status: 从 exchange endDI 推断 0=吸附 1=释放 2=异常/未知
+   * - status: 优先用 exchange endDI 推断 0=吸附 1=释放 2=异常/未知；
+   *           真实状态本应由 daemon 经 MQTT 推送（此处未接入），DI 未反映吸盘时回退到最近一次指令状态，
+   *           避免“刚吸取就显示已释放”。
    */
   async controlDobotES01(action: 'grip' | 'release' | 'clearAlarm' | 'status'): Promise<unknown> {
     if (action === 'status') {
@@ -1119,8 +1228,9 @@ export class MG6Driver extends DeviceDriver {
       let status = 1
       if (t2 === 1) status = 2
       else if (t1 === 1) status = 0
-      else status = 1
-      return { status, toolDI1: t1, toolDI2: t2 }
+      // DI 没反映吸盘（常见：ES01 经 485/插件通讯，末端 DI 恒为 0）时，跟随最近一次指令
+      else status = this.es01CmdState === 'grip' ? 0 : 1
+      return { status, toolDI1: t1, toolDI2: t2, source: t1 === 1 || t2 === 1 ? 'di' : 'cmd' }
     }
 
     const plugin = await this.findDobotES01Plugin()
@@ -1129,9 +1239,11 @@ export class MG6Driver extends DeviceDriver {
     }
 
     if (action === 'grip') {
+      this.es01CmdState = 'grip'
       return this.callDobotPlus(plugin, 'DeControl', [1])
     }
     if (action === 'release') {
+      this.es01CmdState = 'release'
       return this.callDobotPlus(plugin, 'DeControl', [0])
     }
     // clearAlarm
@@ -1354,6 +1466,9 @@ export class MG6Driver extends DeviceDriver {
               ? 'auto' : 'manual',
           },
           timestamp: Date.now(),
+          dragPlayback: !!raw.dragPlayback,
+          dragTrack: !!raw.dragTrack,
+          dragTeach: !!raw.dragTeach,
         }
 
         this.status = this.state.status

@@ -20,12 +20,17 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; rawBody?: BodyInit; contentType?: string },
 ): Promise<ApiResponse<T>> {
   const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const rawBody = opts?.rawBody
+  if (rawBody !== undefined) {
+    if (opts?.contentType) headers['Content-Type'] = opts.contentType
+  } else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
 
   const timeoutMs = opts?.timeoutMs
   const controller = timeoutMs ? new AbortController() : null
@@ -37,7 +42,7 @@ async function request<T>(
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: rawBody !== undefined ? rawBody : body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller?.signal,
     })
     return res.json()
@@ -699,11 +704,11 @@ export async function setEthernet(id: string, params: Record<string, unknown>): 
 
 // ─── Trajectory / Tracks (via controller SFTP) ─
 
-export async function startTrackRecording(id: string, name: string, interval?: number): Promise<ApiResponse<{ name: string }>> {
-  return request('POST', `/api/devices/${id}/tcp/record/start`, { name, interval })
+export async function startTrackRecording(id: string): Promise<ApiResponse<{ started: boolean }>> {
+  return request('POST', `/api/devices/${id}/tcp/record/start`)
 }
 
-export async function stopTrackRecording(id: string): Promise<ApiResponse<{ name: string }>> {
+export async function stopTrackRecording(id: string): Promise<ApiResponse<{ saved: boolean }>> {
   return request('POST', `/api/devices/${id}/tcp/record/stop`)
 }
 
@@ -725,6 +730,38 @@ export async function getTrackContent(id: string, trackName: string): Promise<Ap
   return request('GET', `/api/devices/${id}/tcp/tracks/${encodeURIComponent(trackName)}`)
 }
 
+export async function getRecordStatus(id: string): Promise<ApiResponse<{ recording: boolean; isFinish: boolean; result: boolean }>> {
+  return request('GET', `/api/devices/${id}/tcp/record/status`)
+}
+
+export async function startTrackPlayback(id: string, name: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/tcp/playback/start`, { name })
+}
+
+export async function stopTrackPlayback(id: string, name?: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/tcp/playback/stop`, { name })
+}
+
+export interface TrackPlaybackStatus {
+  addr: string
+  currentTimes: number
+  isDone: boolean
+  percent: number
+  result: boolean
+}
+
+export async function getTrackPlaybackStatus(id: string): Promise<ApiResponse<TrackPlaybackStatus>> {
+  return request('GET', `/api/devices/${id}/tcp/playback/status`)
+}
+
+export async function getTrackPlaybackParams(id: string): Promise<ApiResponse<{ multi: number; const: number; loop: number }>> {
+  return request('GET', `/api/devices/${id}/tcp/playback/params`)
+}
+
+export async function setTrackPlaybackParams(id: string, params: { multi: number; const: number; loop: number }): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/tcp/playback/params`, params)
+}
+
 // ─── Dobot+ ────────────────────────────────────
 
 export async function listDobotPlus(id: string): Promise<ApiResponse<string[]>> {
@@ -737,6 +774,42 @@ export async function manageDobotPlus(id: string, name: string, action: 'install
 
 export async function getDobotPlusPorts(id: string): Promise<ApiResponse<Record<string, unknown>>> {
   return request('GET', `/api/devices/${id}/dobotPlus/ports`)
+}
+
+export interface DobotPlusCatalog {
+  available: string[]
+  present: string[]
+  metadata: Record<string, { description?: string; version?: string }>
+}
+
+export interface DobotPlusPluginMeta {
+  name: string
+  description?: string
+  version?: string
+}
+
+/** 控制器上可安装的 Dobot+ 插件目录 */
+export async function getDobotPlusCatalog(id: string): Promise<ApiResponse<DobotPlusCatalog>> {
+  return request('GET', `/api/devices/${id}/dobotPlus/catalog`)
+}
+
+/** 本地放置的插件资源（可选，gitignored）：自动发现可安装/带界面的插件 */
+export async function getDobotPlusLocal(): Promise<ApiResponse<{ plugins: DobotPlusPluginMeta[] }>> {
+  return request('GET', '/api/dobotPlus/local')
+}
+
+/** 从本地插件资源安装：打包上传到控制器后自动安装 */
+export async function installLocalDobotPlusPlugin(id: string, name: string): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/dobotPlus/installLocal`, { name }, { timeoutMs: 120000 })
+}
+
+/** 上传插件 zip 到控制器并安装（name 为插件完整名，如 DobotES01_v1-0-3-stable） */
+export async function uploadDobotPlusPlugin(id: string, name: string, file: Blob): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/dobotPlus/upload?name=${encodeURIComponent(name)}`, undefined, {
+    rawBody: file,
+    contentType: 'application/octet-stream',
+    timeoutMs: 300000,
+  })
 }
 
 export async function callDobotPlus(
@@ -789,25 +862,6 @@ export async function disconnectCRTcp(id: string): Promise<ApiResponse<null>> {
 
 export async function setCRAutoReconnect(id: string, autoReconnect: boolean): Promise<ApiResponse<{ autoReconnect: boolean }>> {
   return request('POST', `/api/devices/${id}/tcp/autoReconnect`, { autoReconnect })
-}
-
-// ─── Trajectory Recording ──────────────────────
-
-export interface TrackItem {
-  name: string; size: number; mtime: string
-}
-export interface TrackPoint {
-  j1: number; j2: number; j3: number; j4: number; j5: number; j6: number
-}
-
-export async function startRecord(id: string, name: string): Promise<ApiResponse<{ name: string }>> {
-  return request('POST', `/api/devices/${id}/tcp/record/start`, { name })
-}
-export async function stopRecord(id: string): Promise<ApiResponse<{ name: string }>> {
-  return request('POST', `/api/devices/${id}/tcp/record/stop`)
-}
-export async function getRecordStatus(id: string): Promise<ApiResponse<{ recording: boolean; name?: string }>> {
-  return request('GET', `/api/devices/${id}/tcp/record/status`)
 }
 
 // ─── Scripts ────────────────────────────────────

@@ -68,6 +68,13 @@ async function main(): Promise<void> {
     },
   })
 
+  // 允许上传插件 zip 等二进制内容（body 以 Buffer 形式进入路由）
+  app.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: 200 * 1024 * 1024 },
+    (_request, body, done) => done(null, body)
+  )
+
   // 5. 注册插件
   await app.register(cors, { origin: true, credentials: true })
   await app.register(fastifyWebsocket)

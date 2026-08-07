@@ -40,6 +40,9 @@ export class StubDriver extends DeviceDriver {
     alarm: [],
     status: this.status,
     timestamp: Date.now(),
+    dragPlayback: false,
+    dragTrack: false,
+    dragTeach: false,
   }
 
   private http: HttpTransport
@@ -391,6 +394,39 @@ export class StubDriver extends DeviceDriver {
   async setTeachCoordinateParams(params: Record<string, unknown>): Promise<void> {
     const reply = await this.http.send({ method: 'post', url: '/settings/teach/coordinate', portName: this.ip, params, timeout: 10000 })
     if (!reply.status) throw new Error(`Set teach/coordinate failed: ${reply.message}`)
+  }
+
+  // ─── 轨迹录制 / 复现（控制器端）────────────────
+
+  private recurrentTrackOn = false
+
+  async setThreeSwitch(_value: boolean): Promise<void> { return }
+
+  async setRecurrentTrack(value: boolean): Promise<Record<string, unknown>> {
+    this.recurrentTrackOn = !!value
+    return { result: true }
+  }
+
+  async getRecurrentTrackStatus(): Promise<{ isFinish: boolean; result: boolean }> {
+    return { isFinish: !this.recurrentTrackOn, result: true }
+  }
+
+  async getRetraceParams(): Promise<{ multi: number; const: number; loop: number }> {
+    return { multi: 1, const: 0, loop: 1 }
+  }
+
+  async setRetraceParams(_params: { multi: number; const: number; loop: number }): Promise<void> { return }
+
+  async setDebugReTrace(_cmd: 'start' | 'stop', _addr: string): Promise<void> { return }
+
+  async getDebugReTrace(): Promise<{
+    addr: string
+    currentTimes: number
+    isDone: boolean
+    percent: number
+    result: boolean
+  }> {
+    return { addr: '', currentTimes: 0, isDone: false, percent: 0, result: true }
   }
 
   // ─── Dobot+ 插件系统 ──────────────────────────

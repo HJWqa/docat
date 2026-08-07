@@ -133,6 +133,12 @@ export interface DeviceState {
   alarm: AlarmInfo[]
   status: DeviceStatus
   timestamp: number
+  /** 控制器实时状态：是否正在轨迹复现（拖拽复现） */
+  dragPlayback?: boolean
+  /** 控制器实时状态：是否正在轨迹录制（拖拽录制） */
+  dragTrack?: boolean
+  /** 控制器实时状态：是否正在拖拽示教 */
+  dragTeach?: boolean
 }
 
 export interface DeviceStatus {

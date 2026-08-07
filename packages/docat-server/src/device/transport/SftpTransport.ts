@@ -89,6 +89,14 @@ export class SftpTransport {
     })
   }
 
+  async writeBuffer(remotePath: string, content: Buffer, mode = 0o777): Promise<void> {
+    await this.withClient(async client => {
+      const modeClient = client as SftpClientWithMode
+      await client.put(content, toControllerPath(remotePath))
+      await modeClient.chmod(toControllerPath(remotePath), mode).catch(() => undefined)
+    })
+  }
+
   async writeTexts(files: Array<{ path: string; content: string; mode?: number }>): Promise<void> {
     await this.withClient(async client => {
       const modeClient = client as SftpClientWithMode

@@ -180,6 +180,35 @@ export abstract class DeviceDriver {
   /** 设置示教坐标参数 */
   abstract setTeachCoordinateParams(params: Record<string, unknown>): Promise<void>
 
+  // ─── 轨迹录制 / 复现（控制器端）────────────────
+
+  /** 三位开关控制（轨迹拖拽录制前需要打开） */
+  abstract setThreeSwitch(value: boolean): Promise<void>
+
+  /** 启停控制器端轨迹录制（getpos: true 开始采集，false 保存） */
+  abstract setRecurrentTrack(value: boolean): Promise<Record<string, unknown>>
+
+  /** 查询轨迹录制状态（isFinish: 控制器已停止录制并生成文件） */
+  abstract getRecurrentTrackStatus(): Promise<{ isFinish: boolean; result: boolean }>
+
+  /** 获取轨迹复现参数（multi 速度倍率 / const 是否匀速 / loop 次数） */
+  abstract getRetraceParams(): Promise<{ multi: number; const: number; loop: number }>
+
+  /** 设置轨迹复现参数 */
+  abstract setRetraceParams(params: { multi: number; const: number; loop: number }): Promise<void>
+
+  /** 启停轨迹复现（addr 为控制器上的轨迹文件名，含后缀） */
+  abstract setDebugReTrace(cmd: 'start' | 'stop', addr: string): Promise<void>
+
+  /** 查询轨迹复现状态 */
+  abstract getDebugReTrace(): Promise<{
+    addr: string
+    currentTimes: number
+    isDone: boolean
+    percent: number
+    result: boolean
+  }>
+
   // ─── Dobot+ 插件系统 ──────────────────────────
 
   /** 列出已安装的 Dobot+ 插件 */

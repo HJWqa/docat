@@ -4,12 +4,16 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { v4 as uuidv4 } from 'uuid'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import * as path from 'node:path'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import type { DevicePool, ConnectionMode } from '../../device/DevicePool.js'
 import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
+import { createStoredZip, type ZipEntryInput } from '../../utils/zip.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
 import type { LoadParams, CustomPosture, SystemTime, CoordinateData, UserList, UserPermissionConfig } from '../../device/DeviceDriver.js'
 
@@ -56,6 +60,125 @@ interface ControlLogLine {
   line: number
   level: ControlLogDisplayLevel
   text: string
+}
+
+const PLUGIN_NAME_RE = /^[A-Za-z0-9][\w.-]*$/
+
+/** 官方插件描述（本地资源里的 description 多为 %{tr_...} 占位符，这里提供中文兜底） */
+const PLUGIN_DESCRIPTIONS: Record<string, string> = {
+  DobotES01: 'DobotES吸盘，与协作机器人即插即用',
+  SafeSkin: '安全皮肤插件',
+  ConveyorTrack: '传送带跟踪插件',
+  DHGrip: 'DH系列电爪，与协作机器人即插即用',
+  EndButtonSetting: '允许将末端生态按键设置为存点功能',
+  EwellixLiftkit: '伊维莱升降柱插件',
+  EXTIO: '扩展IO插件',
+  ForceTorqueSensor: '六维力插件',
+  JodellGrip: '适配钧舵EGP系列、RG系列中所有支持Modbus RTU通讯的夹爪',
+  OnRobot: 'onrobot 插件，适配 2FG7 夹爪、RG 系列、VG 系列吸盘。',
+  OperateInterface: '支持用户自定义程序运行界面',
+  Palletizing: '码垛插件',
+  RobotiqEpick: 'Robotiq 系列吸盘插件',
+  RobotiqGrip: 'Robotiq 系列夹爪插件',
+  CodeLibrary: '代码库',
+}
+
+/** 描述解析：明文直接用；%{tr_...} 占位符用内置表兜底 */
+function resolvePluginDescription(baseName: string, raw?: unknown): string {
+  if (typeof raw === 'string' && raw.trim() && !raw.trim().startsWith('%{') && !raw.trim().startsWith('tr_')) {
+    return raw.trim()
+  }
+  return PLUGIN_DESCRIPTIONS[baseName] ?? ''
+}
+
+/** 可选本地插件资源目录（gitignored，env 可覆盖）；放插件文件夹即可被自动发现 */
+function resolveLocalDobotPlusDir(): string | null {
+  const env = process.env.DOCAT_DOBOT_PLUS_UI_DIR?.trim()
+  const cwd = process.cwd()
+  const candidates: string[] = []
+  if (env) candidates.push(env)
+  // 兼容 turbo / 单包启动：从当前目录逐级向上找仓库里的插件目录
+  let dir = cwd
+  for (let depth = 0; depth < 6 && dir; depth++) {
+    candidates.push(path.join(dir, 'packages/docat-web/public/dobot-plus'))
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  candidates.push(path.join(cwd, 'dobot-plus-ui'))
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+function listLocalDobotPlusPlugins(dir: string): string[] {
+  const plugins: string[] = []
+  for (const name of readdirSync(dir)) {
+    if (!PLUGIN_NAME_RE.test(name)) continue
+    const entry = path.join(dir, name)
+    if (statSync(entry).isDirectory() && existsSync(path.join(entry, 'Main', 'index.html'))) {
+      plugins.push(name)
+    }
+  }
+  return plugins.sort((a, b) => a.localeCompare(b))
+}
+
+function readLocalPluginMeta(dir: string, name: string): { description?: string; version?: string } {
+  try {
+    const raw = readFileSync(path.join(dir, name, 'Main', 'config.json'), 'utf8')
+    const cfg = JSON.parse(raw) as { name?: unknown; description?: unknown; version?: unknown }
+    const baseName = typeof cfg.name === 'string' && cfg.name ? cfg.name : name.replace(/_(?:v|V)\d.*$/, '')
+    return {
+      description: resolvePluginDescription(baseName, cfg.description) || undefined,
+      version: typeof cfg.version === 'string' ? cfg.version : undefined,
+    }
+  } catch { return {} }
+}
+
+function collectLocalPluginFiles(dir: string, pluginName: string): ZipEntryInput[] {
+  const root = path.join(dir, pluginName)
+  const entries: ZipEntryInput[] = []
+  const walk = (current: string, rel: string) => {
+    for (const name of readdirSync(current)) {
+      const full = path.join(current, name)
+      const relPath = rel ? `${rel}/${name}` : name
+      const stat = statSync(full)
+      if (stat.isDirectory()) walk(full, relPath)
+      else if (!name.includes('Zone.Identifier')) entries.push({ path: relPath, data: readFileSync(full) })
+    }
+  }
+  walk(root, '')
+  return entries
+}
+
+/** 与官方一致：zip 内带 <插件名>/ 顶层目录 */
+function buildPluginZip(pluginName: string, files: ZipEntryInput[]): Buffer {
+  return createStoredZip(files.map(file => ({ path: `${pluginName}/${file.path}`, data: file.data })))
+}
+
+/** 更新控制器 hash.json，记录本地资源哈希（供官方 App 同步校验） */
+async function writePluginHashToController(sftp: SftpTransport, pluginName: string, zip: Buffer): Promise<void> {
+  const hash = createHash('sha1').update(zip).digest('hex')
+  const hashPath = '/developOnly/ecology/hash.json'
+  let existing: Record<string, unknown> = {}
+  try {
+    const raw = await sftp.readText(hashPath)
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') existing = parsed as Record<string, unknown>
+  } catch { /* 控制器暂无 hash.json */ }
+  existing[pluginName] = { pc_hash: hash }
+  await sftp.writeText(hashPath, JSON.stringify(existing, null, 2))
+}
+
+const PLUGIN_UPLOAD_EXCLUDED_DIRS = new Set(['Blocks', 'Main', 'Resources', 'Scripts', 'Toolbar'])
+
+/** 官方除了 zip 外，还会把 API 相关文件（config.json、*.lua 等）单独上传到 ecology/<插件名>/ */
+function collectPluginApiFiles(pluginName: string, files: ZipEntryInput[]): ZipEntryInput[] {
+  return files.filter(file => {
+    const top = file.path.split('/')[0]
+    return !PLUGIN_UPLOAD_EXCLUDED_DIRS.has(top)
+  })
 }
 
 function todayDateKey(): string {
@@ -1373,6 +1496,196 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  /** 本地放置的插件资源（可选，gitignored）：自动发现可安装/带界面的插件 */
+  app.get<{ Params: { id: string } }>(
+    '/api/dobotPlus/local',
+    async (request, reply): Promise<ApiResponse<{ plugins: Array<{ name: string; description?: string; version?: string }> }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const dir = resolveLocalDobotPlusDir()
+        const plugins = dir
+          ? listLocalDobotPlusPlugins(dir).map(name => ({ name, ...readLocalPluginMeta(dir, name) }))
+          : []
+        return { success: true, data: { plugins } }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 从本地插件资源安装：打包上传到控制器 /developOnly/ecology/<name>/<name>.zip 后调用安装 */
+  app.post<{ Params: { id: string }; Body: { name?: string } }>(
+    '/api/devices/:id/dobotPlus/installLocal',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const name = (request.body?.name ?? '').trim()
+        if (!name || !PLUGIN_NAME_RE.test(name)) {
+          return { success: false, error: { code: 40001, message: '缺少合法的插件名' } }
+        }
+        const dir = resolveLocalDobotPlusDir()
+        const pluginDir = dir ? path.join(dir, name) : ''
+        if (!dir || !existsSync(pluginDir) || !existsSync(path.join(pluginDir, 'Main', 'index.html'))) {
+          return { success: false, error: { code: 40402, message: `本地未找到插件 "${name}"（请先放置到 ${dir ?? '本地插件目录'}）` } }
+        }
+
+        const files = collectLocalPluginFiles(dir, name)
+        if (files.length === 0) {
+          return { success: false, error: { code: 40001, message: `本地插件 "${name}" 为空` } }
+        }
+        const zip = buildPluginZip(name, files)
+
+        const sftp = new SftpTransport(entry.driver.ip)
+        const remoteDir = `/developOnly/ecology/${name}`
+        await sftp.ensureDir(remoteDir)
+        await sftp.writeBuffer(`${remoteDir}/${name}.zip`, zip)
+
+        // 官方还会单独上传 API 文件到 ecology/<插件名>/ 下
+        const apiFiles = collectPluginApiFiles(name, files)
+        for (const file of apiFiles) {
+          await sftp.writeBuffer(`${remoteDir}/${file.path}`, file.data)
+        }
+
+        await writePluginHashToController(sftp, name, zip)
+        await entry.driver.installDobotPlus(name)
+
+        // 安装后校验插件是否真的出现在已安装列表
+        let installed = false
+        for (let i = 0; i < 5 && !installed; i++) {
+          const list = await entry.driver.listDobotPlus()
+          installed = list.some(n => n.toLowerCase() === name.toLowerCase())
+          if (!installed && i < 4) await new Promise(resolve => setTimeout(resolve, 500))
+        }
+        if (!installed) {
+          return {
+            success: false,
+            error: {
+              code: 50001,
+              message: `安装接口已调用，但插件 "${name}" 未出现在已安装列表中，请检查控制器日志`,
+            },
+          }
+        }
+
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 控制器上可安装的 Dobot+ 插件目录（来自 /developOnly/ecology/） */
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/dobotPlus/catalog',
+    async (request, reply): Promise<ApiResponse<{
+      available: string[]
+      present: string[]
+      metadata: Record<string, { description?: string; version?: string }>
+    }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const sftp = new SftpTransport(entry.driver.ip)
+        const available: string[] = []
+        const present: string[] = []
+        const metadata: Record<string, { description?: string; version?: string }> = {}
+
+        // eco_config.json 是控制器维护的可安装插件清单
+        try {
+          const raw = await sftp.readText('/developOnly/ecology/eco_config.json')
+          const parsed: unknown = JSON.parse(raw)
+          if (Array.isArray(parsed)) available.push(...parsed.map(String))
+        } catch { /* 控制器无 eco_config.json 时忽略 */ }
+
+        // 已存在于控制器 ecology 目录中的插件（含已安装）
+        try {
+          const entries = await sftp.list('/developOnly/ecology')
+          for (const e of entries) {
+            if (e.type !== 'd') continue
+            if (e.name === 'uninstalledBackupFiles' || e.name === 'static') continue
+            present.push(e.name)
+          }
+        } catch { /* ecology 目录不可读时忽略 */ }
+
+        // 读取控制器上插件目录的 config.json（可能含可读描述）
+        if (present.length > 0) {
+          try {
+            const texts = await sftp.readTexts(
+              present.map(n => `/developOnly/ecology/${n}/config.json`)
+            )
+            for (const [filePath, content] of texts) {
+              try {
+                const cfg = JSON.parse(content) as { name?: unknown; description?: unknown; version?: unknown }
+                const pluginName = filePath.split('/').pop() ?? ''
+                const baseName = typeof cfg.name === 'string' && cfg.name ? cfg.name : pluginName.replace(/_(?:v|V)\d.*$/, '')
+                metadata[pluginName] = {
+                  description: resolvePluginDescription(baseName, cfg.description) || undefined,
+                  version: typeof cfg.version === 'string' ? cfg.version : undefined,
+                }
+              } catch { /* 单个 config.json 解析失败忽略 */ }
+            }
+          } catch { /* 控制器 config.json 不可读时忽略 */ }
+        }
+
+        return {
+          success: true,
+          data: {
+            available: [...new Set(available)].sort((a, b) => a.localeCompare(b)),
+            present: [...new Set(present)].sort((a, b) => a.localeCompare(b)),
+            metadata,
+          },
+        }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  /** 上传插件 zip 到控制器并安装（zip 需以 <插件名>.zip 命名） */
+  app.post<{ Params: { id: string }; Querystring: { name?: string } }>(
+    '/api/devices/:id/dobotPlus/upload',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const name = (request.query?.name ?? '').trim()
+        if (!name || !/^[A-Za-z0-9][\w.-]*$/.test(name)) {
+          return { success: false, error: { code: 40001, message: '缺少合法的插件名（query 参数 name，如 DobotES01_v1-0-3-stable）' } }
+        }
+
+        const body = request.body
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          return { success: false, error: { code: 40001, message: '缺少插件包内容（application/octet-stream）' } }
+        }
+        if (body.length > 200 * 1024 * 1024) {
+          return { success: false, error: { code: 40001, message: '插件包过大（>200MB）' } }
+        }
+
+        const sftp = new SftpTransport(entry.driver.ip)
+        const dir = `/developOnly/ecology/${name}`
+        await sftp.ensureDir(dir)
+        await sftp.writeBuffer(`${dir}/${name}.zip`, body)
+        await entry.driver.installDobotPlus(name)
+
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   /** 通用 Dobot+ 插件函数调用 */
   app.post<{ Params: { id: string }; Body: { plugin: string; fn: string; data?: unknown } }>(
     '/api/devices/:id/dobotPlus/call',
@@ -1436,13 +1749,14 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
   // ─── CR TCP Dashboard (29999) + Feedback (30004) ──
 
   const crTcpCache = new Map<string, CRApiTcpTransport>()
-  let crTcpLatestFeed: CRFeedBackData | null = null
+  /** 每个设备各自缓存最新反馈，避免多设备录制时互相串数据 */
+  const crTcpLatestFeedByDevice = new Map<string, CRFeedBackData>()
 
   function getCrTcp(deviceId: string, ip: string): CRApiTcpTransport {
     let t = crTcpCache.get(deviceId)
     if (!t) {
       t = new CRApiTcpTransport(ip)
-      t.on('feedback', (data) => { crTcpLatestFeed = data })
+      t.on('feedback', (data) => { crTcpLatestFeedByDevice.set(deviceId, data) })
       t.connectDashboard()
       t.connectFeed()
       crTcpCache.set(deviceId, t)
@@ -1486,7 +1800,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           data: {
             dashboard: tcp.isDashboardConnected ? 'connected' : 'disconnected',
             feed: tcp.isFeedConnected ? 'connected' : 'disconnected',
-            feedback: crTcpLatestFeed,
+            feedback: crTcpLatestFeedByDevice.get(request.params.id) ?? null,
           },
         }
       } catch (err) {
@@ -1502,7 +1816,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
         const t = crTcpCache.get(request.params.id)
         if (t) { t.disconnect(); crTcpCache.delete(request.params.id) }
-        crTcpLatestFeed = null
+        crTcpLatestFeedByDevice.delete(request.params.id)
         return { success: true, data: null }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
@@ -1520,73 +1834,158 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
-  // ─── Trajectory Recording (CSV → Controller SFTP) ──
+  // ─── 轨迹录制 / 复现（控制器端）────────────────
+  // 参考 OpenDobot46（DobotStudio Pro 4.6）：
+  //  - 录制：POST /panel/threeSwitch {value:true} → POST /interface/recurrentTrack {getpos:true}
+  //    进入拖拽模式后控制器每 50ms 采一个点；结束：{getpos:false}（或末端按键触发 isFinish）
+  //  - 文件：SFTP /developOnly/process/trajectory/*.csv（默认按 年-月-日-时-分-秒 命名）
+  //  - 复现：POST /interface/debugReTrace {cmd:'start'|'stop', addr}，参数 /settings/function/reTraceParams
 
   const TRAJECTORY_DIR = '/developOnly/process/trajectory'
-  const trackRecording = new Map<string, { timer: ReturnType<typeof setInterval>; ip: string; name: string; lines: string[] }>()
+  const TRACK_NAME_RE = /^[^/\\:*?"<>|\s][^/\\:*?"<>|]{0,63}$/
 
-  app.post<{ Params: { id: string }; Body: { name: string; interval?: number } }>(
+  function sanitizeTrackName(name: string, fallback: string): string {
+    const trimmed = name.trim().replace(/\.csv$/i, '')
+    return TRACK_NAME_RE.test(trimmed) ? trimmed : fallback
+  }
+
+  app.post<{ Params: { id: string } }>(
     '/api/devices/:id/tcp/record/start',
-    async (request, reply): Promise<ApiResponse<{ name: string }>> => {
+    async (request, reply): Promise<ApiResponse<{ started: boolean }>> => {
       try {
         await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
 
-        const config = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(request.params.id) as { ip: string } | undefined
-        if (!config) return { success: false, error: { code: 40401, message: '设备不存在' } }
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
 
-        if (trackRecording.has(request.params.id)) {
-          return { success: false, error: { code: 40901, message: '已在录制中' } }
-        }
-
-        getCrTcp(request.params.id, config.ip) // ensure TCP connected
-        const name = request.body.name || `track_${Date.now()}`
-        const interval = request.body.interval || 100
-        const lines: string[] = ['timestamp,j1,j2,j3,j4,j5,j6,x,y,z,rx,ry,rz']
-
-        const timer = setInterval(() => {
-          if (crTcpLatestFeed && crTcpLatestFeed.ToolVectorActual) {
-            const joints = (crTcpLatestFeed.QActual || []).map(v => v.toFixed(4)).join(',')
-            const pose = crTcpLatestFeed.ToolVectorActual.map(v => v.toFixed(4)).join(',')
-            lines.push(`${Date.now()},${joints},${pose}`)
-          }
-        }, interval)
-
-        trackRecording.set(request.params.id, { timer, ip: config.ip, name, lines })
-        return { success: true, data: { name } }
+        // 与官方一致：先开三位开关（可拖拽），再让控制器开始采集
+        await entry.driver.setThreeSwitch(true)
+        await entry.driver.setRecurrentTrack(true)
+        return { success: true, data: { started: true } }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )
 
   app.post<{ Params: { id: string } }>(
     '/api/devices/:id/tcp/record/stop',
-    async (request, reply): Promise<ApiResponse<{ name: string }>> => {
+    async (request, reply): Promise<ApiResponse<{ saved: boolean }>> => {
       try {
         await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
 
-        const rec = trackRecording.get(request.params.id)
-        if (!rec) return { success: false, error: { code: 40401, message: '没有正在进行的录制' } }
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
 
-        clearInterval(rec.timer)
-        trackRecording.delete(request.params.id)
-
-        // Write CSV to controller via SFTP
-        const sftp = new SftpTransport(rec.ip)
-        const content = rec.lines.join('\n')
-        await sftp.ensureDir(TRAJECTORY_DIR)
-        await sftp.writeText(`${TRAJECTORY_DIR}/${rec.name}.csv`, content)
-
-        return { success: true, data: { name: rec.name } }
+        // 停止采集并退出拖拽，控制器落盘生成 CSV
+        await entry.driver.setRecurrentTrack(false)
+        await entry.driver.setThreeSwitch(false)
+        return { success: true, data: { saved: true } }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )
 
   app.get<{ Params: { id: string } }>(
     '/api/devices/:id/tcp/record/status',
-    async (request, reply): Promise<ApiResponse<{ recording: boolean; name?: string }>> => {
+    async (request, reply): Promise<ApiResponse<{ recording: boolean; isFinish: boolean; result: boolean }>> => {
       try {
         await authMiddleware(request, reply); if (reply.sent) return reply
-        const rec = trackRecording.get(request.params.id)
-        return { success: true, data: { recording: !!rec, name: rec?.name } }
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const status = await entry.driver.getRecurrentTrackStatus()
+        return {
+          success: true,
+          data: {
+            recording: !status.isFinish,
+            isFinish: status.isFinish,
+            result: status.result,
+          },
+        }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { name?: string } }>(
+    '/api/devices/:id/tcp/playback/start',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const name = (request.body?.name ?? '').trim()
+        if (!name) return { success: false, error: { code: 40001, message: '缺少轨迹文件名' } }
+
+        await entry.driver.setDebugReTrace('start', name)
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { name?: string } }>(
+    '/api/devices/:id/tcp/playback/stop',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        await entry.driver.setDebugReTrace('stop', (request.body?.name ?? '').trim())
+        return { success: true, data: null }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/playback/status',
+    async (request, reply): Promise<ApiResponse<{
+      addr: string
+      currentTimes: number
+      isDone: boolean
+      percent: number
+      result: boolean
+    }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        return { success: true, data: await entry.driver.getDebugReTrace() }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/tcp/playback/params',
+    async (request, reply): Promise<ApiResponse<{ multi: number; const: number; loop: number }>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        return { success: true, data: await entry.driver.getRetraceParams() }
+      } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { multi?: number; const?: number; loop?: number } }>(
+    '/api/devices/:id/tcp/playback/params',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        await entry.driver.setRetraceParams({
+          multi: request.body?.multi ?? 1,
+          const: request.body?.const ?? 0,
+          loop: request.body?.loop ?? 1,
+        })
+        return { success: true, data: null }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )
@@ -1626,7 +2025,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         const sftp = new SftpTransport(config.ip)
         await sftp.rename(
           `${TRAJECTORY_DIR}/${request.params.trackName}.csv`,
-          `${TRAJECTORY_DIR}/${request.body.newName}.csv`
+          `${TRAJECTORY_DIR}/${sanitizeTrackName(request.body.newName || '', request.params.trackName)}.csv`
         )
         return { success: true, data: null }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
@@ -1651,7 +2050,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
 
   app.get<{ Params: { id: string; trackName: string } }>(
     '/api/devices/:id/tcp/tracks/:trackName',
-    async (request, reply): Promise<ApiResponse<Array<{ j1: number; j2: number; j3: number; j4: number; j5: number; j6: number }>>> => {
+    async (request, reply): Promise<ApiResponse<string>> => {
       try {
         await authMiddleware(request, reply); if (reply.sent) return reply
 
@@ -1660,12 +2059,8 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
 
         const sftp = new SftpTransport(config.ip)
         const content = await sftp.readText(`${TRAJECTORY_DIR}/${request.params.trackName}.csv`)
-        const lines = content.trim().split('\n').slice(1)
-        const points = lines.map(line => {
-          const [ts, j1, j2, j3, j4, j5, j6] = line.split(',').map(Number)
-          return { j1, j2, j3, j4, j5, j6 }
-        })
-        return { success: true, data: points }
+        // 返回原始 CSV 文本，前端按表头解析位姿列
+        return { success: true, data: content }
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )

@@ -1,5 +1,5 @@
 <template>
-  <div class="device-page" tabindex="0" @keydown="onKeyDown" @keyup="onKeyUp" @click="onPageClick">
+  <div class="device-page" tabindex="0" @click="onPageClick">
     <!-- Top Bar -->
     <header class="workspace-header">
       <div class="workspace-header-left">
@@ -31,7 +31,7 @@
           {{ isLocked ? '🔒 已锁定' : isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
         </span>
         <!-- Enable Toggle Switch -->
-        <label v-if="isConnected" class="toggle-switch" title="使能开关">
+        <label v-if="isConnected" class="toggle-switch" title="使能开关 (Ctrl+E)">
           <input type="checkbox" :checked="enabled" @change="toggleEnable" />
           <span class="toggle-track">
             <span class="toggle-thumb" />
@@ -62,8 +62,8 @@
           <Transition name="fade">
             <div v-if="showDobotPlusBar" class="dobotplus-dropdown">
               <button v-for="name in dobotPlusList" :key="name" class="dobotplus-dropdown-item"
-                @click="openDobotPlusIframe(name); showDobotPlusBar = false"
-                :title="`端口: ${dobotPlusPorts[name] || '?'}`">
+                @click="openDobotPlusPlugin(name); showDobotPlusBar = false"
+                :title="dobotPlusTooltip(name)">
                 <span>🧩</span> {{ name }}
               </button>
             </div>
@@ -134,8 +134,9 @@
       <div class="alarm-panel-header">
         <span class="hud-label" style="margin-bottom:0;color:var(--status-danger)">⚠ 告警与警告</span>
         <div class="alarm-actions">
-          <button v-if="hasAlarms" class="btn btn-danger btn-sm" @click="doClearAlarm">清除告警</button>
-          <button v-if="isCollision" class="btn btn-warning btn-sm" @click="doResetCollision">复位碰撞</button>
+          <button v-if="hasAlarms" class="btn btn-danger btn-sm" @click="doClearAlarm" title="清除告警 (F9)">清除告警</button>
+          <button v-if="hasWarnings" class="btn btn-warning btn-sm" @click="dismissWarnings" title="清除警告（F9）">清除警告</button>
+          <button v-if="isCollision" class="btn btn-warning btn-sm" @click="doResetCollision" title="复位碰撞 (F9)">复位碰撞</button>
         </div>
       </div>
       <div class="alarm-list">
@@ -186,7 +187,7 @@
 
     <div class="control-grid mt-2">
       <!-- Jog Control Panel -->
-      <div class="card jog-panel">
+      <div class="card jog-panel" ref="jogPanelRef" tabindex="-1" title="按 B / Alt+B 快速聚焦此板块">
         <div class="jog-panel-header">
           <div class="hud-label">手动点动控制</div>
           <div class="jog-settings">
@@ -223,14 +224,22 @@
             <!-- Amplitude limit -->
             <div class="amp-limit">
               <span class="amp-limit-label">最大增量</span>
-              <input v-model.number="ampLimit" type="number" min="1" max="500" step="1" class="amp-input" />
+              <input
+                v-model.number="ampLimit"
+                type="number"
+                min="0"
+                max="500"
+                step="1"
+                class="amp-input"
+                title="聚焦时可改数值；填 0 表示不限制、持续移动。键盘点动请先点击页面空白处"
+              />
               <span class="amp-limit-unit">{{ jogAxisUnit }}</span>
             </div>
             <div class="jog-mode-selector">
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">连续</button>
               <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'step' }]" @click="changeJogMode('step')">步进</button>
             </div>
-            <div class="jog-mode-selector" title="仅反转 WASD 的 X/Y 方向；Shift/Space（Z）不受影响">
+            <div class="jog-mode-selector" title="反转 WASD + 方向键的 X/Y；Shift/Space（Z）不参与反转">
               <button
                 :class="['jog-mode-btn', { 'jog-mode-btn--active': !wasdInvert }]"
                 @click="setWasdInvert(false)"
@@ -284,10 +293,6 @@
         <div class="move-panel-header">
           <span class="hud-label" style="margin-bottom:0">移动 / 预设</span>
           <div class="move-panel-actions">
-            <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentJoints" title="读取当前关节值">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1010.9-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              读取
-            </button>
             <div class="jog-mode-selector" title="预设存什么：关节角 joint[]，或笛卡尔位姿 pose[]（与 MovJ/MovL 路径无关）">
               <button
                 :class="['jog-mode-btn', { 'jog-mode-btn--active': newPostureType === 'joint' }]"
@@ -322,13 +327,15 @@
         <div class="move-grid">
           <div v-for="j in 6" :key="j" class="move-field">
             <label class="move-label">J{{ j }}</label>
-            <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input" />
+            <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input"
+              title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('joint', $event)" ref="jointInputRefs" />
             <span class="move-unit">°</span>
           </div>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readJointsAndFocus" title="读取当前关节角与笛卡尔位姿，并聚焦 J1 (Alt+N)；N 仅聚焦 J1">读取当前关节</button>
           <button class="btn btn-primary move-btn" :disabled="!isConnected || moving || poseMoving" @click="doMove">
             {{ moving ? '移动中...' : (movePath + ' 关节目标') }}
           </button>
-          <button v-if="moving" class="btn btn-danger move-stop-btn" @click="() => stopMoveJoints()">
+          <button v-if="moving" class="btn btn-danger move-stop-btn" @click="() => stopMoveJoints()" title="停止运动 (Alt+Enter)">
             停止
           </button>
         </div>
@@ -336,14 +343,15 @@
         <div class="move-grid" style="margin-top:10px">
           <div v-for="axis in ['x','y','z','rx','ry','rz']" :key="axis" class="move-field">
             <label class="move-label">{{ axis.toUpperCase() }}</label>
-            <input v-model.number="targetPose[axis]" type="number" step="0.1" class="move-input" />
+            <input v-model.number="targetPose[axis]" type="number" step="0.1" class="move-input"
+              title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('pose', $event)" ref="poseInputRefs" />
             <span class="move-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
           </div>
-          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readCurrentPoseToTarget">读取当前位姿</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readPoseAndFocus" title="读取当前位姿并聚焦 X (Alt+M)；M 仅聚焦 X">读取当前位姿</button>
           <button class="btn btn-primary move-btn" :disabled="!isConnected || poseMoving || moving" @click="moveToPose">
             {{ poseMoving ? '移动中...' : (movePath + ' 位姿目标') }}
           </button>
-          <button v-if="poseMoving" class="btn btn-danger move-stop-btn" @click="doStop">停止</button>
+          <button v-if="poseMoving" class="btn btn-danger move-stop-btn" @click="doStop" title="停止运动 (Alt+Enter)">停止</button>
         </div>
 
         <!-- Postures (system + controller) -->
@@ -435,7 +443,7 @@
       </div>
       <span class="action-sep" />
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop">⏹ 停止</button>
+      <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop" title="停止运动 (Alt+Enter)">⏹ 停止</button>
       <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
       <button :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="toggleTrajectory" :disabled="!isConnected">
         📍 轨迹
@@ -446,9 +454,9 @@
         <div class="es01-control" :class="{ 'es01-control--busy': es01Busy }">
           <span class="es01-label">吸盘</span>
           <span :class="['es01-status', `es01-status--${es01StatusKey}`]">{{ es01StatusText }}</span>
-          <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')">吸取</button>
-          <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')">释放</button>
-          <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')" title="清错">清错</button>
+          <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')" title="吸取 (Z)">吸取</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')" title="释放 (X)">释放</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')" title="清错 (C)">清错</button>
         </div>
       </template>
     </div>
@@ -465,11 +473,17 @@
             <span v-if="trajPoints.length > 0" class="preset-count-badge">{{ trajPoints.length }}</span>
           </div>
           <div class="log-panel-actions">
+            <button
+              v-if="trajPlayingName"
+              class="btn btn-danger btn-sm"
+              @click="stopTrackPlayback(trajPlayingName)">⏹ 停止复现</button>
             <template v-if="!trajRecording">
-              <input v-model.trim="trajRecordName" class="preset-name-input" type="text" placeholder="文件名" style="width:100px" />
-              <button class="btn btn-primary btn-sm" :disabled="!isConnected || !trajRecordName" @click="startTrajRecord">⏺ 录制</button>
+              <button class="btn btn-primary btn-sm" :disabled="!isConnected" @click="startTrajRecord">⏺ 新建轨迹</button>
             </template>
-            <button v-else class="btn btn-danger btn-sm" @click="stopTrajRecord">⏹ 停止</button>
+            <template v-else>
+              <span class="recording-indicator">● 拖拽录制中</span>
+              <button class="btn btn-danger btn-sm" @click="stopTrajRecord">⏹ 保存</button>
+            </template>
             <button class="btn btn-secondary btn-sm" @click="loadTracksList">🔄 刷新</button>
             <button class="btn btn-secondary btn-sm" @click="showTrajectory = false">✕</button>
           </div>
@@ -477,12 +491,48 @@
         <!-- Saved tracks on controller -->
         <div v-if="savedTracks.length > 0" class="track-list-bar">
           <span style="font-size:0.55rem;color:var(--text-muted);margin-right:6px">控制器文件:</span>
-          <button v-for="t in savedTracks" :key="t.name"
-            :class="['btn btn-sm', loadedTrackName === t.name ? 'btn-primary' : 'btn-secondary']"
-            style="font-size:0.6rem;padding:2px 8px"
-            @click="loadTrackPoints(t.name)" :title="`${t.size} bytes · ${t.mtime}`">
-            {{ t.name }}
-          </button>
+          <div v-for="t in savedTracks" :key="t.name" class="track-item">
+            <button
+              :class="['btn btn-sm', loadedTrackName === t.name ? 'btn-primary' : 'btn-secondary']"
+              style="font-size:0.6rem;padding:2px 8px"
+              @click="loadTrackPoints(t.name)" :title="`${t.size} bytes · ${t.mtime}`">
+              {{ t.name }}
+            </button>
+            <button
+              v-if="trajPlayingName === t.name"
+              class="btn btn-danger btn-xs" title="停止复现"
+              @click="stopTrackPlayback(t.name)">■</button>
+            <button
+              v-else class="btn btn-secondary btn-xs" title="轨迹复现"
+              :disabled="trajPlayingName !== ''"
+              @click="startTrackPlayback(t.name)">▶</button>
+            <button class="track-item-action" title="重命名" @click="renameTrack(t.name)">✎</button>
+            <button class="track-item-action" title="删除" @click="deleteTrack(t.name)">🗑</button>
+          </div>
+        </div>
+        <!-- Playback progress + params -->
+        <div v-if="trajPlayingName" class="track-playback-bar">
+          <span class="track-playback-text">
+            ▶ 复现 {{ trajPlayingName }} · {{ trajPlaybackPercent }}% · 第 {{ trajPlaybackTimes }}/{{ retraceLoop }} 次
+          </span>
+          <button class="btn btn-secondary btn-xs" @click="stopTrackPlayback(trajPlayingName)">⏹ 停止</button>
+        </div>
+        <div v-else-if="savedTracks.length > 0" class="track-params-bar">
+          <label class="track-param">倍率
+            <select v-model.number="retraceMulti" class="preset-name-input" style="width:52px">
+              <option :value="0.25">0.25</option>
+              <option :value="0.5">0.5</option>
+              <option :value="1">1</option>
+              <option :value="2">2</option>
+            </select>
+          </label>
+          <label class="track-param">次数
+            <input v-model.number="retraceLoop" type="number" min="1" max="1000" class="preset-name-input" style="width:52px" />
+          </label>
+          <label class="track-param track-param--check">
+            <input type="checkbox" v-model="retraceUniform" /> 匀速
+          </label>
+          <button class="btn btn-secondary btn-xs" @click="saveRetraceParams">保存参数</button>
         </div>
         <!-- Loaded track points -->
         <div class="log-list" style="max-height:250px">
@@ -1006,9 +1056,9 @@
                     <span :class="['es01-status', `es01-status--${es01StatusKey}`]">{{ es01StatusText }}</span>
                   </div>
                   <div class="es01-settings-actions">
-                    <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')">吸取</button>
-                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')">释放</button>
-                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')">清错</button>
+                    <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')" title="吸取 (Z)">吸取</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')" title="释放 (X)">释放</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')" title="清错 (C)">清错</button>
                     <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="refreshES01Status">刷新状态</button>
                   </div>
                   <div class="text-muted" style="margin-top:8px;font-size:0.68rem">
@@ -1025,10 +1075,10 @@
                     <thead><tr><th>名称</th><th>端口</th><th style="width:80px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(name, i) in dobotPlusList" :key="i">
-                        <td class="preset-name">{{ name }}</td>
+                        <td class="preset-name" :title="dobotPlusDescription(name) || name">{{ name }}</td>
                         <td>{{ dobotPlusPorts[name] || '—' }}</td>
                         <td class="table-actions">
-                          <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="openDobotPlusIframe(name)">打开</button>
+                          <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="selectDobotPlusPlugin(name)">打开</button>
                           <button class="btn btn-secondary btn-xs" @click="uninstallDobotPlusPlugin(name)">✕</button>
                         </td>
                       </tr>
@@ -1037,25 +1087,88 @@
                   <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">暂无已安装插件</div>
                 </div>
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>安装插件</h4></div>
-                  <div style="display:flex;gap:6px">
-                    <input v-model.trim="dobotPlusInstallName" class="input-sm settings-alias-input" placeholder="插件包名" @keyup.enter="installDobotPlusPlugin" />
-                    <button class="btn btn-primary btn-sm" :disabled="!dobotPlusInstallName || installingDobotPlus" @click="installDobotPlusPlugin">
+                  <div class="settings-section-header">
+                    <h4>可安装插件</h4>
+                    <button class="btn btn-secondary btn-sm" @click="refreshDobotPlusSources" :disabled="loadingDobotPlusCatalog || loadingDobotPlusLocal">🔄 刷新</button>
+                  </div>
+                  <div v-if="loadingDobotPlusCatalog" class="text-muted" style="padding:8px 0;font-size:0.7rem">加载中...</div>
+                  <table v-else-if="installableDobotPlus.length > 0" class="load-config-table">
+                    <thead><tr><th>名称</th><th style="width:90px">操作</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(item, i) in installableDobotPlus" :key="i">
+                        <td class="preset-name" :title="item.description || item.name">
+                          {{ item.name }}
+                          <span v-if="item.local && !item.controller" class="text-muted" style="font-weight:400">· 本地</span>
+                          <span v-if="item.local && item.controller" class="text-muted" style="font-weight:400">· 本地+控制器</span>
+                        </td>
+                        <td class="table-actions">
+                          <button class="btn btn-primary btn-xs" :disabled="installingDobotPlus || installingName === item.name" @click="installDobotPlusPlugin(item.name)">
+                            {{ installingName === item.name ? '安装中...' : '安装' }}
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-else class="text-muted" style="padding:12px 0;font-size:0.75rem">
+                    未从控制器读到可安装插件 — 可上传插件包或手动输入完整包名安装。
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:10px">
+                    <input v-model.trim="dobotPlusInstallName" class="input-sm settings-alias-input" placeholder="插件完整名（手动安装）" @keyup.enter="installDobotPlusPlugin()" />
+                    <button class="btn btn-secondary btn-sm" :disabled="!dobotPlusInstallName || installingDobotPlus" @click="installDobotPlusPlugin()">
                       {{ installingDobotPlus ? '安装中...' : '安装' }}
                     </button>
                   </div>
                 </div>
-                <!-- Plugin iframe -->
-                <div v-if="dobotPlusIframeName" class="settings-section">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>上传插件包安装</h4></div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    <input type="file" accept=".zip" class="input-sm dobotplus-file-input" @change="onDobotPlusFileChange" />
+                    <span v-if="dobotPlusUploadFile" class="text-muted" style="font-size:0.7rem">{{ dobotPlusUploadFile.name }}</span>
+                    <button class="btn btn-primary btn-sm" :disabled="!dobotPlusUploadFile || uploadingDobotPlus || !isConnected" @click="uploadDobotPlusPlugin">
+                      {{ uploadingDobotPlus ? '上传安装中...' : '上传并安装' }}
+                    </button>
+                  </div>
+                  <div class="text-muted" style="margin-top:6px;font-size:0.68rem;line-height:1.6">
+                    zip 文件名即插件名（如 DobotES01_v1-0-3-stable.zip）；上传到控制器 /developOnly/ecology/ 后自动安装。
+                  </div>
+                </div>
+                <!-- 插件界面（本地资源 iframe） -->
+                <div v-if="activeDobotPlusIframe" class="settings-section">
                   <div class="settings-section-header">
-                    <h4>{{ dobotPlusIframeName }}</h4>
-                    <button class="btn btn-secondary btn-sm" @click="dobotPlusIframeName = ''">✕ 关闭</button>
+                    <h4>{{ activeDobotPlusIframeName }} <span class="text-muted">本地界面</span></h4>
+                    <button class="btn btn-secondary btn-sm" @click="closeDobotPlusPanel">✕ 关闭</button>
                   </div>
                   <iframe
-                    :src="`http://${device?.ip}:${dobotPlusPorts[dobotPlusIframeName]}`"
+                    ref="dobotPlusIframeRef"
+                    :src="`/dobot-plus/${encodeURIComponent(activeDobotPlusIframe)}/Main/index.html`"
                     class="dobotplus-iframe"
                     sandbox="allow-scripts allow-same-origin"
+                    @load="onDobotPlusIframeLoad"
                   />
+                </div>
+                <!-- 插件控制台（原生，无本地界面时的回退） -->
+                <div v-else-if="activeDobotPlus" class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>{{ activeDobotPlus }} <span class="text-muted">端口 {{ dobotPlusPorts[activeDobotPlus] || '—' }}</span></h4>
+                    <button class="btn btn-secondary btn-sm" @click="closeDobotPlusPanel">✕ 关闭</button>
+                  </div>
+                  <div class="text-muted" style="margin-bottom:8px;font-size:0.7rem;line-height:1.6">
+                    控制器只提供 HTTP API（POST /dobotPlus/&lt;插件名&gt;/&lt;方法&gt;），下方直接调用插件方法；ES01 吸盘可用上方按钮快捷操作。
+                  </div>
+                  <div style="display:flex;gap:6px">
+                    <input v-model.trim="dobotPlusCallFn" class="input-sm settings-alias-input" placeholder="方法名，如 DeControl" @keyup.enter="callDobotPlusMethod" />
+                    <button class="btn btn-primary btn-sm" :disabled="!isConnected || dobotPlusCalling || !dobotPlusCallFn" @click="callDobotPlusMethod">
+                      {{ dobotPlusCalling ? '调用中...' : '调用' }}
+                    </button>
+                  </div>
+                  <textarea
+                    v-model="dobotPlusCallArgs"
+                    class="dobotplus-args-input"
+                    rows="2"
+                    placeholder="参数（JSON 数组），如 [1] 或 [0]；留空表示 []"
+                  />
+                  <pre v-if="dobotPlusCallResult !== null" class="dobotplus-result">{{ dobotPlusCallResult }}</pre>
+                  <div v-if="dobotPlusCallError" class="text-danger" style="font-size:0.75rem;margin-top:6px">{{ dobotPlusCallError }}</div>
                 </div>
               </div>
           </div>
@@ -1190,6 +1303,9 @@ const isOnlineMode = ref(true)
 const moving = ref(false)
 const moveTargetInit = ref(false)
 const moveTarget = reactive<Record<string, number>>({ j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 })
+const jointInputRefs = ref<HTMLInputElement[]>([])
+const poseInputRefs = ref<HTMLInputElement[]>([])
+const jogPanelRef = ref<HTMLElement | null>(null)
 const modelReady = ref(false)
 let last3DPose = ''
 
@@ -1436,14 +1552,72 @@ function on3DModelLoad() {
   modelReady.value = false
   last3DPose = ''
   reset3DView()
+  inject3DKeyForwarding()
+}
+
+/** 注入到 3D iframe 的按键转发脚本：iframe 内键盘事件不冒泡到父页面，需主动转发 */
+const JOG_KEY_FORWARD_SCRIPT = `
+(function () {
+  var FORWARD_KEYS = {
+    ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
+    Shift: 'shift', ' ': 'space',
+    '-': 'minus', '_': 'minus', '=': 'equal', '+': 'equal',
+    b: 'b', B: 'b', n: 'n', N: 'n', m: 'm', M: 'm'
+  }
+  function isEditable(el) {
+    if (!el) return false
+    var tag = el.tagName
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+  }
+  function forward(type, e) {
+    var norm = FORWARD_KEYS[e.key]
+    if (!norm) return
+    if (isEditable(e.target)) return
+    e.preventDefault()
+    try {
+      window.parent.postMessage({
+        iframeName: '3dmodelplugin',
+        method: 'jogKey',
+        type: type,
+        key: norm,
+        repeat: !!e.repeat,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey
+      }, '*')
+    } catch (err) {}
+  }
+  window.addEventListener('keydown', function (e) { forward('keydown', e) }, true)
+  window.addEventListener('keyup', function (e) { forward('keyup', e) }, true)
+})()
+`
+
+/** 3D iframe 加载后注入方向键转发（同源，可直接操作 contentDocument） */
+function inject3DKeyForwarding() {
+  const doc = modelIframeRef.value?.contentDocument
+  if (!doc || doc.getElementById('docat-jog-forward')) return
+  const script = doc.createElement('script')
+  script.id = 'docat-jog-forward'
+  script.textContent = JOG_KEY_FORWARD_SCRIPT
+  doc.body?.appendChild(script)
 }
 
 function handle3DModelMessage(event: MessageEvent) {
   const data = event.data
   if (!data || typeof data !== 'object') return
-  if ((data as Record<string, unknown>).iframeName === '3dmodelplugin' && (data as Record<string, unknown>).method === 'loadModelOver') {
+  const frame = modelIframeRef.value
+  const is3D = (data as Record<string, unknown>).iframeName === '3dmodelplugin'
+  // 只接受来自当前 3D iframe 的消息，防止外部窗口伪造 jog 消息
+  if (!is3D || event.source !== frame?.contentWindow) return
+  const method = (data as Record<string, unknown>).method
+  if (method === 'loadModelOver') {
     modelReady.value = true
     sync3DPose(true)
+    return
+  }
+  if (method === 'jogKey') {
+    handleJogKeyFrom3D(data as unknown as JogKeyFrom3DMessage)
   }
 }
 
@@ -1709,7 +1883,20 @@ const jogInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const stepTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const jogStartPose = ref<Record<string, number>>({})
 const ampTravel = ref(0)
-const ampLimit = ref(50)  // mm or °
+/** 最大增量（mm/°）；0 = 不限制、持续移动，值持久化到浏览器 */
+const AMP_LIMIT_STORAGE_KEY = 'docat.ampLimit'
+const ampLimit = ref(50)
+try {
+  const saved = Number(localStorage.getItem(AMP_LIMIT_STORAGE_KEY))
+  if (Number.isFinite(saved) && saved >= 0) ampLimit.value = saved
+} catch { /* ignore */ }
+watch(ampLimit, (v: number | string) => {
+  if (v === '' || v == null) return
+  const n = Number(v)
+  if (Number.isFinite(n) && n >= 0) {
+    try { localStorage.setItem(AMP_LIMIT_STORAGE_KEY, String(n)) } catch { /* ignore */ }
+  }
+})
 const appliedJogMode = ref<'jog' | 'step' | null>(null)
 const appliedTeachInch = ref<number | null>(null)
 const appliedJogCoordinate = ref<JogCoordinateMode | null>(null)
@@ -1762,6 +1949,8 @@ function normalizeJogKey(e: KeyboardEvent): string {
   if (k === ';' ) return 'semicolon'
   if (k === ' ' || k === 'Spacebar' || e.code === 'Space') return 'space'
   if (k === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') return 'shift'
+  if (k === '-' || k === '_') return 'minus'
+  if (k === '=' || k === '+') return 'equal'
   if (k.startsWith('Arrow')) return k.toLowerCase() // arrowup/down/left/right
   return k.toLowerCase()
 }
@@ -1769,8 +1958,9 @@ function normalizeJogKey(e: KeyboardEvent): string {
 /**
  * 飞行键基准映射：WASD + Shift/Space + 方向键 → 笛卡尔 X/Y/Z
  * W=Y+  A=X-  S=Y-  D=X+  Shift=Z-  Space=Z+
+ * -/_=Z-  =/+=Z+（编辑框内也可用）
  * ↑=Y+  ↓=Y-  ←=X-  →=X+
- * WASD 可通过 wasdInvert 反转 X/Y 方向；Shift/Space（Z）不参与反转。
+ * 「WASD 反转」同时反转 WASD 与方向键的 X/Y；Shift/Space（Z）不参与反转。
  */
 const FLIGHT_KEY_BASE: Record<string, { axis: string; dir: string }> = {
   w: { axis: 'y', dir: '+' },
@@ -1779,14 +1969,19 @@ const FLIGHT_KEY_BASE: Record<string, { axis: string; dir: string }> = {
   d: { axis: 'x', dir: '+' },
   shift: { axis: 'z', dir: '-' },
   space: { axis: 'z', dir: '+' },
+  minus: { axis: 'z', dir: '-' },
+  equal: { axis: 'z', dir: '+' },
   arrowup: { axis: 'y', dir: '+' },
   arrowdown: { axis: 'y', dir: '-' },
   arrowleft: { axis: 'x', dir: '-' },
   arrowright: { axis: 'x', dir: '+' },
 }
 
-/** 仅这些键受「WASD 反转」影响（Shift/Space/方向键不参与） */
-const WASD_INVERT_KEYS = new Set(['w', 'a', 's', 'd'])
+/** X/Y 水平键受「WASD 反转」影响；Shift/Space（Z）不在此集合 */
+const FLIGHT_XY_INVERT_KEYS = new Set([
+  'w', 'a', 's', 'd',
+  'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+])
 
 const WASD_INVERT_STORAGE_KEY = 'docat.wasdInvert'
 const wasdInvert = ref(false)
@@ -1794,9 +1989,12 @@ try {
   wasdInvert.value = localStorage.getItem(WASD_INVERT_STORAGE_KEY) === '1'
 } catch { /* ignore */ }
 
+/** 坐标编辑框内仍放行的点动键：WASD（X/Y）+ -/=（Z）；方向键等仍留给编辑 */
+const JOG_IN_EDIT_KEYS = new Set(['w', 'a', 's', 'd', 'minus', 'equal'])
+
 function setWasdInvert(on: boolean) {
   if (wasdInvert.value === on) return
-  // 切换时若正在用 WASD 点动，先停，避免方向突变
+  // 切换时若正在用飞行键点动，先停，避免方向突变
   if (jogActive.value) stopJog()
   keysDown.clear()
   wasdInvert.value = on
@@ -1808,7 +2006,7 @@ function setWasdInvert(on: boolean) {
 function resolveFlightMapping(key: string): { axis: string; dir: string } | undefined {
   const base = FLIGHT_KEY_BASE[key]
   if (!base) return undefined
-  if (wasdInvert.value && WASD_INVERT_KEYS.has(key)) {
+  if (wasdInvert.value && FLIGHT_XY_INVERT_KEYS.has(key)) {
     return { axis: base.axis, dir: base.dir === '+' ? '-' : '+' }
   }
   return base
@@ -1843,15 +2041,15 @@ const jointShortcutHints = [
 ]
 
 const cartesianShortcutHints = computed(() => {
-  // WASD 提示随反转开关更新；方向键 / Z 固定
-  const xPos = wasdInvert.value ? 'A' : 'D'
-  const xNeg = wasdInvert.value ? 'D' : 'A'
-  const yPos = wasdInvert.value ? 'S' : 'W'
-  const yNeg = wasdInvert.value ? 'W' : 'S'
+  // WASD + 方向键提示随反转开关更新；Z（Space/Shift）固定
+  const xPos = wasdInvert.value ? 'A / ←' : 'D / →'
+  const xNeg = wasdInvert.value ? 'D / →' : 'A / ←'
+  const yPos = wasdInvert.value ? 'S / ↓' : 'W / ↑'
+  const yNeg = wasdInvert.value ? 'W / ↑' : 'S / ↓'
   return [
-    { label: 'X', pos: `${xPos} / →`, neg: `${xNeg} / ←` },
-    { label: 'Y', pos: `${yPos} / ↑`, neg: `${yNeg} / ↓` },
-    { label: 'Z', pos: 'Space', neg: 'Shift' },
+    { label: 'X', pos: xPos, neg: xNeg },
+    { label: 'Y', pos: yPos, neg: yNeg },
+    { label: 'Z', pos: 'Space / = / +', neg: 'Shift / - / _' },
     { label: 'RX', pos: 'O', neg: 'L' },
     { label: 'RY', pos: 'P', neg: ';' },
     { label: 'RZ', pos: '[', neg: "'" },
@@ -1877,26 +2075,51 @@ function isJogHotkey(key: string): boolean {
   return Boolean(FLIGHT_KEY_BASE[key] || jointKeyMap[key] || cartesianKeyMap[key])
 }
 
-function onKeyDown(e: KeyboardEvent) {
-  // Esc 关闭顶层面板（设置 > 日志 > 轨迹 > Dobot+）
-  if (e.key === 'Escape') {
-    if (closeTopOverlay()) {
-      e.preventDefault()
-      return
-    }
-  }
-  // 跳过输入框/编辑器，避免打字触发 jog
-  const target = e.target as HTMLElement
-  const tag = target.tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.closest('.monaco-editor')) return
+/** 把焦点拉回设备页，避免 F7 光标/数字框吃掉方向键 */
+function focusDevicePage() {
+  const page = document.querySelector('.device-page') as HTMLElement | null
+  page?.focus({ preventScroll: true })
+}
 
-  const key = normalizeJogKey(e)
-  // 飞行键优先（笛卡尔 X/Y/Z），任意模式下可用；WASD 方向受反转开关影响
-  const flight = resolveFlightMapping(key)
-  const mapped = flight || activeKeyMap.value[key]
-  if (!mapped) return
-  if (keysDown.has(key)) return  // already held
-  e.preventDefault()
+/** 是否处于可编辑目标（输入框/文本域/下拉/可编辑区/Monaco）——聚焦时不响应点动热键 */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) return false
+  if (target.closest('.monaco-editor')) return true
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  return target.isContentEditable
+}
+
+/** 是否 移动/预设 的坐标编辑框（J1-6 / X-RZ）——R/T/Q 面板快捷键在这些框内也生效 */
+function isMoveCoordInput(target: EventTarget | null): boolean {
+  return !!target && target instanceof HTMLElement && target.classList.contains('move-input')
+}
+
+/** 吸盘快捷键：Z 吸取 / X 释放 / C 清错（相邻键位：抓/卸/清） */
+const ES01_KEY_MAP: Record<string, 'grip' | 'release' | 'clearAlarm'> = {
+  z: 'grip',
+  x: 'release',
+  c: 'clearAlarm',
+}
+
+/** 3D 模型内转发来的点动按键消息 */
+interface JogKeyFrom3DMessage {
+  type: 'keydown' | 'keyup'
+  key: string
+  repeat: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}
+
+/** 统一的点动启动：长按去重、换轴先停、飞行键强制笛卡尔坐标系 */
+function applyJogKey(key: string, mapped: { axis: string; dir: string }, flight: ReturnType<typeof resolveFlightMapping>, repeat: boolean) {
+  // 长按重复：只挡光标，不重复 startJog
+  if (keysDown.has(key) || repeat) {
+    keysDown.add(key)
+    return
+  }
   keysDown.add(key)
   // 如果已经在 jog（可能是其他轴），先停
   if (jogActive.value) stopJog()
@@ -1913,6 +2136,133 @@ function onKeyDown(e: KeyboardEvent) {
   startJog(mapped.dir)
 }
 
+/** 3D 模型内转发来的按键：方向键/WASD-Z（Shift/Space/-/=）点动 + B/N/M 聚焦 */
+function handleJogKeyFrom3D(msg: JogKeyFrom3DMessage) {
+  const key = msg.key
+  const flight = resolveFlightMapping(key)
+  const mapped = flight || activeKeyMap.value[key]
+
+  if (msg.type === 'keyup') {
+    // 非点动键（B/N/M 等）的松键不干预运动
+    if (!mapped) return
+    // 松手：清理残留并停止（与主页面 onKeyUp 一致）
+    keysDown.clear()
+    stopJog()
+    return
+  }
+  // 组合键不放行，与主页面规则一致
+  if (msg.ctrlKey || msg.metaKey || msg.altKey) return
+
+  // B/N/M 面板快捷键（穿透到 3D）：B → 手动点动；N → J1；M → X（Shift 组合不触发）
+  if (key === 'b' || key === 'n' || key === 'm') {
+    if (!msg.repeat && !msg.shiftKey) {
+      if (key === 'b') focusJogPanel()
+      else if (key === 'n') jointInputRefs.value[0]?.focus()
+      else poseInputRefs.value[0]?.focus()
+    }
+    return
+  }
+
+  if (!mapped) return
+  applyJogKey(key, mapped, flight, msg.repeat)
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  // Esc 关闭顶层面板（设置 > 日志 > 轨迹 > Dobot+）
+  if (e.key === 'Escape') {
+    if (closeTopOverlay()) {
+      e.preventDefault()
+      return
+    }
+  }
+
+  // 只在设备页活跃时处理（避免其它路由误触发）
+  if (!document.querySelector('.device-page')) return
+
+  // F9：一键处理告警面板（清除告警 / 清除警告 / 复位碰撞，按需执行；编辑框聚焦时也可用）
+  if (e.key === 'F9') {
+    e.preventDefault()
+    if (!e.repeat) void handleAlarmPanelShortcut()
+    return
+  }
+
+  const target = e.target as HTMLElement
+  const key = normalizeJogKey(e)
+
+  // Ctrl+E：使能 / 下使能（切换，等同使能开关；编辑框聚焦时也可用）
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
+    e.preventDefault()
+    if (!e.repeat) void toggleEnable()
+    return
+  }
+
+  // Alt+Enter：停止运动（等同点按“停止”；点动中也会一并停掉；编辑框聚焦时也可用）
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'Enter') {
+    e.preventDefault()
+    if (!e.repeat) {
+      stopJog()
+      void doStop()
+    }
+    return
+  }
+
+  // Alt+B/N/M：Alt+B 聚焦手动点动板块（不变）；Alt+N 读取关节并聚焦 J1；Alt+M 读取位姿并聚焦 X
+  // 用 Alt 组合避免与普通按键冲突，且 Alt+字母可被网页正常拦截（Ctrl+T 等浏览器保留键不行）
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (key === 'b' || key === 'n' || key === 'm')) {
+    e.preventDefault()
+    if (!e.repeat) {
+      if (key === 'b') focusJogPanel()
+      else if (key === 'n') readJointsAndFocus()
+      else readPoseAndFocus()
+    }
+    return
+  }
+
+  // 组合键（Ctrl/Cmd/Alt）不放行，避免 Ctrl+A/Ctrl+C 等被热键劫持
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+
+  const panelShortcutKey = key === 'b' || key === 'n' || key === 'm'
+  // 编辑框聚焦时按键交给浏览器；仅 移动/预设 坐标框内放行 B/N/M 聚焦快捷键、WASD/-= 点动键与 ZXC 吸盘键
+  const editable = isEditableTarget(e.target)
+  const es01EditKey = hasDobotES01.value ? ES01_KEY_MAP[key] : undefined
+  if (editable && !(isMoveCoordInput(target) && (panelShortcutKey || JOG_IN_EDIT_KEYS.has(key) || Boolean(es01EditKey)))) return
+
+  // B/N/M 只聚焦、不读取：B（左）→ 手动点动板块；N → J1；M → X（Shift 组合不触发）
+  if (panelShortcutKey && !e.shiftKey) {
+    e.preventDefault()
+    if (!e.repeat) {
+      if (key === 'b') focusJogPanel()
+      else if (key === 'n') jointInputRefs.value[0]?.focus()
+      else poseInputRefs.value[0]?.focus()
+    }
+    return
+  }
+
+  // 吸盘快捷键（仅在有 ES01 时生效；长按不重复触发）
+  if (hasDobotES01.value && ES01_KEY_MAP[key]) {
+    e.preventDefault()
+    if (!e.repeat) void doES01(ES01_KEY_MAP[key])
+    return
+  }
+
+  // 飞行键优先（笛卡尔 X/Y/Z），任意模式下可用；WASD 方向受反转开关影响
+  const flight = resolveFlightMapping(key)
+  const mapped = flight || activeKeyMap.value[key]
+  if (!mapped) return
+
+  // 关键：长按 key-repeat 也必须 preventDefault，否则 F7 光标/焦点会跟着方向键跑
+  e.preventDefault()
+  e.stopPropagation()
+
+  // 可聚焦按钮：blur 掉，避免下一拍又被系统焦点导航抢走
+  if (target && (target.tagName === 'BUTTON' || target.isContentEditable)) {
+    target.blur?.()
+    focusDevicePage()
+  }
+
+  applyJogKey(key, mapped, flight, e.repeat)
+}
+
 /** 点击页面时重新聚焦，解决 3D iframe 抢焦点后按键无效 */
 function onPageClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -1922,9 +2272,14 @@ function onPageClick(e: MouseEvent) {
 }
 
 function onKeyUp(e: KeyboardEvent) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return
   const key = normalizeJogKey(e)
   if (!isJogHotkey(key)) return
+  // 编辑框：仅坐标框内的点动键松键才拦截（WASD/-= 已在 keydown 启动点动，必须能停）
+  if (isEditableTarget(e.target) && !isMoveCoordInput(e.target)) return
+  // 松手同样拦截，避免浏览器/系统光标导航吃掉 keyup
   e.preventDefault()
+  e.stopPropagation()
   // 清理：滑键时旧键可能残留，松手时全部清空
   keysDown.clear()
   stopJog()
@@ -1950,12 +2305,68 @@ const poseMoving = ref(false)
  */
 const movePath = ref<'MovJ' | 'MovL'>('MovJ')
 
+/**
+ * 静默把当前关节/位姿填入「移动 / 预设」编辑框。
+ * 返回 true 表示关节与位姿都已填上（可标记 moveTargetInit 完成）。
+ * 仅有一侧数据时也会先写入，但返回 false，等下次状态再补全。
+ */
+function fillMoveTargetsFromState(silent = true): boolean {
+  const joints = state.value.joints as Record<string, number> | undefined
+  let hasJoints = false
+  let hasPose = false
+  if (joints) {
+    for (let j = 1; j <= 6; j++) {
+      moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
+    }
+    hasJoints = true
+  }
+  const pt = getCurrentCartesian()
+  if (pt) {
+    targetPose.x = Math.round(pt.x * 10) / 10
+    targetPose.y = Math.round(pt.y * 10) / 10
+    targetPose.z = Math.round(pt.z * 10) / 10
+    targetPose.rx = Math.round(pt.rx * 10) / 10
+    targetPose.ry = Math.round(pt.ry * 10) / 10
+    targetPose.rz = Math.round(pt.rz * 10) / 10
+    hasPose = true
+  }
+  const complete = hasJoints && hasPose
+  if (complete && !silent) {
+    toastRef.value?.info('当前坐标已读取')
+  }
+  return complete
+}
+
 function readCurrentPoseToTarget() {
   const pt = getCurrentCartesian()
-  if (!pt) return
-  targetPose.x = pt.x; targetPose.y = pt.y; targetPose.z = pt.z
-  targetPose.rx = pt.rx; targetPose.ry = pt.ry; targetPose.rz = pt.rz
+  if (!pt) {
+    toastRef.value?.error('暂无位姿数据')
+    return
+  }
+  targetPose.x = Math.round(pt.x * 10) / 10
+  targetPose.y = Math.round(pt.y * 10) / 10
+  targetPose.z = Math.round(pt.z * 10) / 10
+  targetPose.rx = Math.round(pt.rx * 10) / 10
+  targetPose.ry = Math.round(pt.ry * 10) / 10
+  targetPose.rz = Math.round(pt.rz * 10) / 10
   toastRef.value?.info('当前位姿已读取')
+}
+
+/** 读取当前关节（含位姿）并聚焦 J1 编辑框（快捷键 R） */
+function readJointsAndFocus() {
+  readCurrentJoints()
+  jointInputRefs.value[0]?.focus()
+}
+
+/** 读取当前位姿并聚焦 X 编辑框（快捷键 T） */
+function readPoseAndFocus() {
+  readCurrentPoseToTarget()
+  poseInputRefs.value[0]?.focus()
+}
+
+/** 聚焦手动点动控制板块（快捷键 Q），聚焦后即可用方向键/WASD 点动 */
+function focusJogPanel() {
+  jogPanelRef.value?.focus()
 }
 
 async function moveToPose() {
@@ -2310,13 +2721,45 @@ async function doClearAlarm() {
     if (res.success) {
       currentAlarms.value = []
       // 清除后立即刷新完整列表，同步主界面与日志面板
-      fetchDeviceLogs()
+      await fetchDeviceLogs()
       toastRef.value?.success('告警已清除')
     } else {
       toastRef.value?.error(`清除告警失败：${res.error?.message}`)
     }
   } catch (err) {
     toastRef.value?.error(`清除告警出错：${(err as Error).message}`)
+  }
+}
+
+/** 清除警告（仅清主界面显示；控制器无清除接口，下次状态更新会重新同步） */
+function dismissWarnings() {
+  if (currentWarnings.value.length === 0) {
+    toastRef.value?.info('当前没有警告')
+    return
+  }
+  currentWarnings.value = []
+  rebuildDeviceLogsFromPanels()
+  toastRef.value?.success('警告已清除')
+}
+
+/** F9：一键处理告警面板——清除告警、复位碰撞（设备动作），最后清本地警告显示 */
+async function handleAlarmPanelShortcut() {
+  let acted = false
+  if (currentAlarms.value.length > 0) {
+    acted = true
+    await doClearAlarm()
+  }
+  if (isCollision.value) {
+    acted = true
+    await doResetCollision()
+  }
+  // 警告只清本地显示，放在最后，避免被上面的设备刷新重新带回来
+  if (currentWarnings.value.length > 0) {
+    acted = true
+    dismissWarnings()
+  }
+  if (!acted) {
+    toastRef.value?.info('当前没有告警/警告/碰撞需要处理')
   }
 }
 
@@ -2650,8 +3093,10 @@ function checkAmplitude() {
   if (start == null) return
   const delta = Math.abs(current - start)
   ampTravel.value = delta
-  if (delta >= ampLimit.value) {
-    toastRef.value?.error(`已达幅度上限：${delta.toFixed(1)} >= ${ampLimit.value}`)
+  const limit = Number(ampLimit.value)
+  // 0 或空值表示不限制，持续移动
+  if (Number.isFinite(limit) && limit > 0 && delta >= limit) {
+    toastRef.value?.error(`已达幅度上限：${delta.toFixed(1)} >= ${limit}`)
     stopJog()
   }
 }
@@ -2671,11 +3116,24 @@ function getMoveTargetJoints() {
 /** 读取当前关节值到编辑框 */
 function readCurrentJoints() {
   const joints = state.value.joints as Record<string, number> | undefined
-  if (!joints) return
+  if (!joints) {
+    toastRef.value?.error('暂无关节数据')
+    return
+  }
   for (let j = 1; j <= 6; j++) {
     moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
   }
-  toastRef.value?.info('当前关节值已读取')
+  // 顶部「读取」同时刷新笛卡尔，避免位姿仍是 0
+  const pt = getCurrentCartesian()
+  if (pt) {
+    targetPose.x = Math.round(pt.x * 10) / 10
+    targetPose.y = Math.round(pt.y * 10) / 10
+    targetPose.z = Math.round(pt.z * 10) / 10
+    targetPose.rx = Math.round(pt.rx * 10) / 10
+    targetPose.ry = Math.round(pt.ry * 10) / 10
+    targetPose.rz = Math.round(pt.rz * 10) / 10
+  }
+  toastRef.value?.info(pt ? '当前关节与位姿已读取' : '当前关节值已读取')
 }
 
 /**
@@ -2683,6 +3141,14 @@ function readCurrentJoints() {
  * 文档允许 MovL({joint=...})，即直线路径到关节角对应位姿。
  * Dock(?mock=1)：本地离线 FK 动画，不连控制器。
  */
+/** 坐标编辑框 Shift/Ctrl/Cmd+Enter → 触发对应区域的移动 */
+function onMoveInputKeydown(kind: 'joint' | 'pose', e: KeyboardEvent) {
+  if (e.key !== 'Enter' || !(e.shiftKey || e.ctrlKey || e.metaKey)) return
+  e.preventDefault()
+  if (kind === 'joint') void doMove()
+  else void moveToPose()
+}
+
 async function doMove() {
   if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
   if (!checkEnabled()) return
@@ -3214,15 +3680,8 @@ async function loadPostures() {
       console.warn('[Mock] loadPostures failed:', err)
       customPostures.value = []
     }
-    // 初始化 moveTarget / targetPose
-    if (!moveTargetInit.value) {
-      const joints = state.value.joints as Record<string, number>
-      for (let j = 1; j <= 6; j++) moveTarget['j' + j] = Math.round((joints['j' + j] || 0) * 10) / 10
-      const pt = getCurrentCartesian()
-      if (pt) {
-        targetPose.x = pt.x; targetPose.y = pt.y; targetPose.z = pt.z
-        targetPose.rx = pt.rx; targetPose.ry = pt.ry; targetPose.rz = pt.rz
-      }
+    // 初始化 moveTarget / targetPose（关节 + 笛卡尔）
+    if (!moveTargetInit.value && fillMoveTargetsFromState()) {
       moveTargetInit.value = true
     }
     return
@@ -3556,9 +4015,73 @@ async function saveEthernet() {
 const dobotPlusList = ref<string[]>([])
 const dobotPlusPorts = ref<Record<string, string>>({})
 const dobotPlusInstallName = ref('')
+const dobotPlusCatalog = ref<api.DobotPlusCatalog>({ available: [], present: [], metadata: {} })
+const dobotPlusLocal = ref<api.DobotPlusPluginMeta[]>([])
 const loadingDobotPlus = ref(false)
+const loadingDobotPlusCatalog = ref(false)
+const loadingDobotPlusLocal = ref(false)
 const installingDobotPlus = ref(false)
-const dobotPlusIframeName = ref('')
+const installingName = ref('')
+const dobotPlusUploadFile = ref<File | null>(null)
+const uploadingDobotPlus = ref(false)
+const activeDobotPlus = ref('')
+const activeDobotPlusIframe = ref('')
+const activeDobotPlusIframeName = ref('')
+const dobotPlusIframeRef = ref<HTMLIFrameElement | null>(null)
+const dobotPlusCallFn = ref('')
+const dobotPlusCallArgs = ref('')
+const dobotPlusCalling = ref(false)
+const dobotPlusCallResult = ref<string | null>(null)
+const dobotPlusCallError = ref('')
+
+interface InstallablePlugin {
+  name: string
+  local: boolean
+  controller: boolean
+  description?: string
+}
+
+/** 可安装列表 = 控制器目录（eco_config + ecology 目录）+ 本地放置资源中尚未安装的插件 */
+const installableDobotPlus = computed<InstallablePlugin[]>(() => {
+  const installed = new Set(dobotPlusList.value)
+  const map = new Map<string, InstallablePlugin>()
+  const add = (name: string, source: 'local' | 'controller', description?: string) => {
+    if (installed.has(name)) return
+    const key = name.toLowerCase()
+    const existing = map.get(key)
+    if (existing) {
+      if (source === 'local') existing.local = true
+      else existing.controller = true
+      if (description && !existing.description) existing.description = description
+      return
+    }
+    map.set(key, { name, local: source === 'local', controller: source === 'controller', description })
+  }
+  for (const n of [...dobotPlusCatalog.value.available, ...dobotPlusCatalog.value.present]) {
+    const metaKey = Object.keys(dobotPlusCatalog.value.metadata).find(k => k.toLowerCase() === n.toLowerCase())
+    add(n, 'controller', metaKey ? dobotPlusCatalog.value.metadata[metaKey]?.description : undefined)
+  }
+  for (const p of dobotPlusLocal.value) {
+    add(p.name, 'local', p.description)
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+})
+
+/** 插件描述：本地资源优先，其次控制器 metadata，都没有则返回空 */
+function dobotPlusDescription(name: string): string {
+  const lower = name.toLowerCase()
+  const local = dobotPlusLocal.value.find(p => p.name.toLowerCase() === lower)
+  if (local?.description) return local.description
+  const key = Object.keys(dobotPlusCatalog.value.metadata).find(k => k.toLowerCase() === lower)
+  if (key) return dobotPlusCatalog.value.metadata[key]?.description ?? ''
+  return ''
+}
+
+function dobotPlusTooltip(name: string): string {
+  const port = dobotPlusPorts.value[name] || '?'
+  const desc = dobotPlusDescription(name)
+  return desc ? `端口 ${port} · ${desc}` : `端口 ${port}`
+}
 
 // DobotES01 吸盘
 const hasDobotES01 = computed(() => dobotPlusList.value.some(n => /^DobotES01/i.test(n)))
@@ -3646,40 +4169,192 @@ async function doES01(action: 'grip' | 'release' | 'clearAlarm') {
     es01Busy.value = false
   }
 }
-async function installDobotPlusPlugin() {
-  if (!dobotPlusInstallName.value.trim()) return
+async function loadDobotPlusCatalog() {
+  loadingDobotPlusCatalog.value = true
+  try {
+    const res = await api.getDobotPlusCatalog(deviceId)
+    if (res.success && res.data) dobotPlusCatalog.value = res.data
+  } catch (err) { console.warn('[DobotPlus] catalog load failed:', err) }
+  finally { loadingDobotPlusCatalog.value = false }
+}
+
+async function loadDobotPlusLocal() {
+  loadingDobotPlusLocal.value = true
+  try {
+    const res = await api.getDobotPlusLocal()
+    if (res.success && res.data) dobotPlusLocal.value = res.data.plugins
+  } catch (err) { console.warn('[DobotPlus] local load failed:', err) }
+  finally { loadingDobotPlusLocal.value = false }
+}
+
+function refreshDobotPlusSources() {
+  loadDobotPlusCatalog()
+  loadDobotPlusLocal()
+}
+
+async function installDobotPlusPlugin(name?: string) {
+  const target = (name ?? dobotPlusInstallName.value).trim()
+  if (!target || installingDobotPlus.value) return
+  const item = installableDobotPlus.value.find(p => p.name === target)
+  const useLocal = Boolean(item?.local) && !item?.controller
+  installingName.value = target
   installingDobotPlus.value = true
   try {
-    const res = await api.manageDobotPlus(deviceId, dobotPlusInstallName.value.trim(), 'install')
+    const res = useLocal
+      ? await api.installLocalDobotPlusPlugin(deviceId, target)
+      : await api.manageDobotPlus(deviceId, target, 'install')
     if (res.success) {
-      toastRef.value?.success(`插件 "${dobotPlusInstallName.value}" 已安装`)
+      toastRef.value?.success(`插件 "${target}" 已安装${useLocal ? '（本地资源）' : ''}`)
       dobotPlusInstallName.value = ''
-      await loadDobotPlusList()
+      await Promise.all([loadDobotPlusList(), loadDobotPlusCatalog(), loadDobotPlusLocal()])
     } else {
       toastRef.value?.error(`安装失败：${res.error?.message}`)
     }
   } catch (err) { toastRef.value?.error(`安装出错：${(err as Error).message}`) }
-  finally { installingDobotPlus.value = false }
+  finally {
+    installingDobotPlus.value = false
+    installingName.value = ''
+  }
 }
+
+function onDobotPlusFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  dobotPlusUploadFile.value = input.files?.[0] ?? null
+}
+
+async function uploadDobotPlusPlugin() {
+  const file = dobotPlusUploadFile.value
+  if (!file || uploadingDobotPlus.value) return
+  const name = file.name.replace(/\.zip$/i, '').trim()
+  if (!name || !/^[A-Za-z0-9][\w.-]*$/.test(name)) {
+    toastRef.value?.error('文件名需形如 <插件名>.zip，如 DobotES01_v1-0-3-stable.zip')
+    return
+  }
+  uploadingDobotPlus.value = true
+  try {
+    const res = await api.uploadDobotPlusPlugin(deviceId, name, file)
+    if (res.success) {
+      toastRef.value?.success(`插件 "${name}" 上传并安装成功`)
+      dobotPlusUploadFile.value = null
+      await Promise.all([loadDobotPlusList(), loadDobotPlusCatalog()])
+    } else {
+      toastRef.value?.error(`安装失败：${res.error?.message}`)
+    }
+  } catch (err) { toastRef.value?.error(`上传出错：${(err as Error).message}`) }
+  finally { uploadingDobotPlus.value = false }
+}
+
 async function uninstallDobotPlusPlugin(name: string) {
   try {
     const res = await api.manageDobotPlus(deviceId, name, 'uninstall')
     if (res.success) {
       toastRef.value?.success(`插件 "${name}" 已卸载`)
-      if (dobotPlusIframeName.value === name) dobotPlusIframeName.value = ''
-      await loadDobotPlusList()
+      if (activeDobotPlus.value === name || activeDobotPlusIframeName.value === name) closeDobotPlusPanel()
+      await Promise.all([loadDobotPlusList(), loadDobotPlusCatalog(), loadDobotPlusLocal()])
     } else {
       toastRef.value?.error(`卸载失败：${res.error?.message}`)
     }
   } catch (err) { toastRef.value?.error(`卸载出错：${(err as Error).message}`) }
 }
-function openDobotPlusIframe(name: string) {
-  dobotPlusIframeName.value = name
+
+/** 打开某个插件（顶部菜单入口：同时打开设置面板） */
+async function openDobotPlusPlugin(name: string) {
+  showSettings.value = true
+  settingsTab.value = 'dobotplus'
+  await Promise.all([loadDobotPlusLocal(), loadDobotPlusCatalog()])
+  selectDobotPlusPlugin(name)
+}
+
+/** 本地 UI 目录与设备返回的插件名做大小写不敏感匹配（兼容只返回基础名的情况） */
+function resolveLocalDobotPlusUiDir(name: string): string | null {
+  const dirs = dobotPlusLocal.value
+  if (dirs.some(p => p.name === name)) return name
+  const lower = name.toLowerCase()
+  const ci = dirs.find(p => p.name.toLowerCase() === lower)
+  if (ci) return ci.name
+  const base = lower.replace(/_(?:v|V)\d.*$/, '')
+  const match = dirs.find(p => p.name.toLowerCase() === base || p.name.toLowerCase().startsWith(`${base}_`))
+  return match ? match.name : null
+}
+
+function selectDobotPlusPlugin(name: string) {
+  closeDobotPlusPanel()
+  const dir = resolveLocalDobotPlusUiDir(name)
+  if (dir) {
+    activeDobotPlusIframe.value = dir
+    activeDobotPlusIframeName.value = name
+  } else {
+    activeDobotPlus.value = name
+  }
+  dobotPlusCallFn.value = ''
+  dobotPlusCallArgs.value = ''
+  dobotPlusCallResult.value = null
+  dobotPlusCallError.value = ''
+}
+
+function closeDobotPlusPanel() {
+  activeDobotPlus.value = ''
+  activeDobotPlusIframe.value = ''
+  activeDobotPlusIframeName.value = ''
+}
+
+/** 与官方一致：本地插件界面加载后注入设备 IP / 设备信息，插件 UI 据此直连设备 HTTP API 与 MQTT */
+function onDobotPlusIframeLoad() {
+  const frame = dobotPlusIframeRef.value
+  const ip = device.value?.ip
+  if (!frame?.contentWindow || !ip) return
+  const post = (payload: unknown) => frame.contentWindow?.postMessage(JSON.stringify(payload), '*')
+  post({ method: 'syncIP', data: { ip, port: '22000' }, from: 'DobotStudio2020' })
+  post({
+    method: 'syncDeviceInfo',
+    data: {
+      portName: ip,
+      deviceType: device.value?.type || '',
+      deviceName: device.value?.name || '',
+      cabinetType: '',
+    },
+    from: 'DobotStudio2020',
+  })
+  post({ method: 'changeLocale', data: 'zh-cn', from: 'DobotStudio2020' })
+}
+
+async function callDobotPlusMethod() {
+  const fn = dobotPlusCallFn.value.trim()
+  if (!activeDobotPlus.value || !fn || dobotPlusCalling.value || !isConnected.value) return
+  let data: unknown = []
+  const raw = dobotPlusCallArgs.value.trim()
+  if (raw) {
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      dobotPlusCallError.value = '参数不是合法的 JSON，应为数组，如 [1]'
+      return
+    }
+  }
+  dobotPlusCalling.value = true
+  dobotPlusCallResult.value = null
+  dobotPlusCallError.value = ''
+  try {
+    const res = await api.callDobotPlus(deviceId, activeDobotPlus.value, fn, data)
+    if (res.success) {
+      dobotPlusCallResult.value = JSON.stringify(res.data ?? null, null, 2)
+    } else {
+      dobotPlusCallError.value = res.error?.message ?? '调用失败'
+    }
+  } catch (err) {
+    dobotPlusCallError.value = (err as Error).message
+  } finally {
+    dobotPlusCalling.value = false
+  }
 }
 
 // Watch settings tab to auto-load Dobot+
 watch(settingsTab, (tab) => {
-  if (tab === 'dobotplus') loadDobotPlusList()
+  if (tab === 'dobotplus') {
+    loadDobotPlusList()
+    loadDobotPlusCatalog()
+    loadDobotPlusLocal()
+  }
 })
 
 // ─── Trajectory Recording (controller SFTP) ────
@@ -3691,11 +4366,19 @@ interface TrajPoint {
 
 const showTrajectory = ref(false)
 const trajRecording = ref(false)
-const trajRecordName = ref('')
 const trajPoints = ref<TrajPoint[]>([])
 const trajMovingIdx = ref(-1)
 const savedTracks = ref<api.TrackFileItem[]>([])
 const loadedTrackName = ref('')
+const trajPlayingName = ref('')
+const trajPlaybackPercent = ref(0)
+const trajPlaybackTimes = ref(0)
+let playbackStartTs = 0
+let trajPlaybackDoneStreak = 0
+let sawDragPlaybackTrue = false
+const retraceMulti = ref(1)
+const retraceUniform = ref(false)
+const retraceLoop = ref(1)
 
 const WORKSPACE_LIMITS = {
   x: { min: -550, max: 550 }, y: { min: -550, max: 550 }, z: { min: -100, max: 600 },
@@ -3737,11 +4420,12 @@ async function loadTracksList() {
 }
 
 async function startTrajRecord() {
-  if (!trajRecordName.value.trim()) return
-  const res = await api.startTrackRecording(deviceId, trajRecordName.value.trim())
+  if (!checkEnabled()) return
+  const res = await api.startTrackRecording(deviceId)
   if (res.success) {
     trajRecording.value = true
-    toastRef.value?.info(`录制开始 → ${trajRecordName.value}.csv`)
+    toastRef.value?.info('已进入拖拽录制 — 请拖动机器臂，完成后点「保存」或按末端按键')
+    pollTrajRecordStatus()
   } else {
     toastRef.value?.error(`录制失败: ${res.error?.message}`)
   }
@@ -3750,34 +4434,249 @@ async function startTrajRecord() {
 async function stopTrajRecord() {
   const res = await api.stopTrackRecording(deviceId)
   trajRecording.value = false
+  stopTrajRecordPoll()
   if (res.success) {
-    toastRef.value?.success(`录制停止 → ${res.data?.name}.csv`)
-    trajRecordName.value = ''
+    toastRef.value?.success('轨迹已保存到控制器')
     await loadTracksList()
+  } else {
+    toastRef.value?.error(`保存失败: ${res.error?.message}`)
+  }
+}
+
+let trajRecordPollTimer: number | null = null
+function pollTrajRecordStatus() {
+  if (trajRecordPollTimer !== null) return
+  const tick = async () => {
+    const res = await api.getRecordStatus(deviceId)
+    if (res.success && res.data) {
+      if (!res.data.recording) {
+        trajRecording.value = false
+        stopTrajRecordPoll()
+        if (res.data.isFinish) {
+          toastRef.value?.info('录制已结束（末端按键触发），轨迹已保存')
+          await loadTracksList()
+        }
+        return
+      }
+      trajRecordPollTimer = window.setTimeout(tick, 1500)
+    } else {
+      trajRecordPollTimer = window.setTimeout(tick, 2000)
+    }
+  }
+  trajRecordPollTimer = window.setTimeout(tick, 1000)
+}
+function stopTrajRecordPoll() {
+  if (trajRecordPollTimer !== null) {
+    clearTimeout(trajRecordPollTimer)
+    trajRecordPollTimer = null
   }
 }
 
 async function loadTrackPoints(trackName: string) {
   const res = await api.getTrackContent(deviceId, trackName)
-  if (res.success && res.data) {
-    const lines = res.data.trim().split('\n')
-    const header = lines[0].split(',')
-    // Find indices of x,y,z,rx,ry,rz columns
-    const xIdx = header.indexOf('x'), yIdx = header.indexOf('y'), zIdx = header.indexOf('z')
-    const rxIdx = header.indexOf('rx'), ryIdx = header.indexOf('ry'), rzIdx = header.indexOf('rz')
-    if (xIdx < 0) { toastRef.value?.error('CSV 文件没有位姿列'); return }
-    trajPoints.value = []
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',')
-      trajPoints.value.push({
-        x: Number(cols[xIdx] || 0), y: Number(cols[yIdx] || 0), z: Number(cols[zIdx] || 0),
-        rx: Number(cols[rxIdx] || 0), ry: Number(cols[ryIdx] || 0), rz: Number(cols[rzIdx] || 0),
-      })
-    }
-    loadedTrackName.value = trackName
-    toastRef.value?.success(`已加载 ${trackName} (${trajPoints.value.length} 个点)`)
-  } else {
+  if (!res.success) {
     toastRef.value?.error(`加载失败: ${res.error?.message}`)
+    return
+  }
+  const text = res.data ?? ''
+  const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/)
+  const header = (lines.shift() ?? '').split(',')
+  // 表头匹配大小写不敏感（x/y/z/rx/ry/rz 或 X/Y/Z/RX/RY/RZ）
+  const lowerHeader = header.map(h => h.trim().toLowerCase())
+  const xIdx = lowerHeader.indexOf('x'), yIdx = lowerHeader.indexOf('y'), zIdx = lowerHeader.indexOf('z')
+  const rxIdx = lowerHeader.indexOf('rx'), ryIdx = lowerHeader.indexOf('ry'), rzIdx = lowerHeader.indexOf('rz')
+  const dataRows = lines.filter(l => l.trim())
+  loadedTrackName.value = trackName
+  if (dataRows.length === 0) {
+    trajPoints.value = []
+    toastRef.value?.info(`${trackName} 是空文件或只有表头，无法预览点位`)
+    return
+  }
+  if (xIdx < 0 || yIdx < 0 || zIdx < 0) {
+    trajPoints.value = []
+    toastRef.value?.info(`${trackName} 无位姿列（${dataRows.length} 行数据），仅支持直接复现`)
+    return
+  }
+  const points: TrajPoint[] = []
+  for (const line of dataRows) {
+    const cols = line.split(',')
+    if (cols.length < Math.max(xIdx, yIdx, zIdx, rxIdx, ryIdx, rzIdx) + 1) continue
+    points.push({
+      x: Number(cols[xIdx] || 0), y: Number(cols[yIdx] || 0), z: Number(cols[zIdx] || 0),
+      rx: Number(cols[rxIdx] || 0), ry: Number(cols[ryIdx] || 0), rz: Number(cols[rzIdx] || 0),
+    })
+  }
+  trajPoints.value = points
+  toastRef.value?.success(`已加载 ${trackName} (${trajPoints.value.length} 个点)`)
+}
+
+/** 与服务端录制状态同步：页面刷新 / 多端操作后保持按钮状态正确 */
+async function syncTrajRecordStatus() {
+  const res = await api.getRecordStatus(deviceId)
+  if (res.success && res.data) {
+    trajRecording.value = res.data.recording
+    if (res.data.recording) pollTrajRecordStatus()
+  }
+}
+
+async function startTrackPlayback(trackName: string) {
+  if (!checkEnabled()) return
+  // 复现前先按面板当前参数下发（次数/倍率/匀速），避免控制器沿用上次保存的“无限/多次”设置
+  const paramsRes = await applyRetraceParams()
+  if (!paramsRes) {
+    toastRef.value?.error('复现参数下发失败，未开始复现')
+    return
+  }
+  const res = await api.startTrackPlayback(deviceId, `${trackName}.csv`)
+  if (res.success) {
+    trajPlayingName.value = trackName
+    trajPlaybackPercent.value = 0
+    trajPlaybackTimes.value = 0
+    trajPlaybackDoneStreak = 0
+    sawDragPlaybackTrue = false
+    playbackStartTs = Date.now()
+    toastRef.value?.success(`开始复现 ${trackName}`)
+    pollTrackPlaybackStatus()
+  } else {
+    toastRef.value?.error(`复现失败: ${res.error?.message}`)
+  }
+}
+
+async function stopTrackPlayback(trackName?: string) {
+  const file = trackName ? `${trackName.replace(/\.csv$/i, '')}.csv` : undefined
+  const res = await api.stopTrackPlayback(deviceId, file)
+  if (res.success) {
+    trajPlayingName.value = ''
+    trajPlaybackPercent.value = 0
+    trajPlaybackTimes.value = 0
+    trajPlaybackDoneStreak = 0
+    stopTrackPlaybackPoll()
+    toastRef.value?.info('已停止复现')
+  } else {
+    toastRef.value?.error(`停止失败: ${res.error?.message} — 若机械臂仍在运动，请使用急停`)
+  }
+}
+
+let trajPlaybackPollTimer: number | null = null
+function pollTrackPlaybackStatus() {
+  if (trajPlaybackPollTimer !== null) return
+  const tick = async () => {
+    const res = await api.getTrackPlaybackStatus(deviceId)
+    if (res.success && res.data) {
+      const st = res.data
+      const elapsed = Date.now() - playbackStartTs
+      // 控制器可能返回 0~1 或 0~100 的进度，统一成百分比
+      const rawPercent = st.percent || 0
+      const pct = rawPercent > 0 && rawPercent <= 1 ? rawPercent * 100 : rawPercent
+      trajPlaybackPercent.value = Math.max(0, Math.min(100, Math.round(pct)))
+      trajPlaybackTimes.value = st.currentTimes || 0
+      const stateObj = state.value as Record<string, unknown>
+      const dragPlayback = stateObj.dragPlayback
+      // 控制器 exchange 状态里的 dragPlayback 是“是否正在轨迹复现”的权威标志：
+      //  - true：机械臂确实在复现，停止按钮必须保留，继续轮询
+      //  - 看到过 true 后再变 false：复现真正结束
+      //  - 一直 false：可能是固件不上报或还没开始，最多等 30 秒，停止按钮全程保留
+      if (typeof dragPlayback === 'boolean') {
+        if (dragPlayback) {
+          sawDragPlaybackTrue = true
+          trajPlaybackPollTimer = window.setTimeout(tick, 1000)
+          return
+        }
+        if (sawDragPlaybackTrue) {
+          clearPlaybackState()
+          toastRef.value?.success(pct >= 100 ? '轨迹复现完成' : '轨迹复现已结束')
+          return
+        }
+        if (elapsed >= 30000) {
+          clearPlaybackState()
+          toastRef.value?.info('未检测到复现状态变化，已退出播放态；请确认机械臂已停止')
+          return
+        }
+        trajPlaybackPollTimer = window.setTimeout(tick, 1000)
+        return
+      }
+      // 兜底：控制器不上报 dragPlayback 时，
+      // 必须“isDone 且进度 100%”连续两拍且启动满 3 秒，才判定完成。
+      if (st.isDone && pct >= 100) trajPlaybackDoneStreak++
+      else trajPlaybackDoneStreak = 0
+      if (elapsed >= 3000 && trajPlaybackDoneStreak >= 2) {
+        clearPlaybackState()
+        toastRef.value?.success('轨迹复现完成')
+        return
+      }
+      trajPlaybackPollTimer = window.setTimeout(tick, 1000)
+    } else {
+      trajPlaybackPollTimer = window.setTimeout(tick, 2000)
+    }
+  }
+  trajPlaybackPollTimer = window.setTimeout(tick, 1000)
+}
+function clearPlaybackState() {
+  trajPlayingName.value = ''
+  trajPlaybackPercent.value = 0
+  trajPlaybackTimes.value = 0
+  trajPlaybackDoneStreak = 0
+  sawDragPlaybackTrue = false
+  stopTrackPlaybackPoll()
+}
+function stopTrackPlaybackPoll() {
+  if (trajPlaybackPollTimer !== null) {
+    clearTimeout(trajPlaybackPollTimer)
+    trajPlaybackPollTimer = null
+  }
+}
+
+/** 从控制器读取复现参数并回填到面板（与官方高级设置一致） */
+async function loadRetraceParams() {
+  const res = await api.getTrackPlaybackParams(deviceId)
+  if (res.success && res.data) {
+    retraceMulti.value = res.data.multi ?? 1
+    retraceUniform.value = (res.data.const ?? 0) === 1
+    retraceLoop.value = res.data.loop ?? 1
+  }
+}
+
+/** 把面板参数下发到控制器，成功返回 true */
+async function applyRetraceParams(): Promise<boolean> {
+  const res = await api.setTrackPlaybackParams(deviceId, {
+    multi: retraceMulti.value,
+    const: retraceUniform.value ? 1 : 0,
+    loop: Math.max(1, Math.min(1000, Math.round(retraceLoop.value || 1))),
+  })
+  return res.success
+}
+
+async function saveRetraceParams() {
+  if (await applyRetraceParams()) toastRef.value?.success('复现参数已保存')
+  else toastRef.value?.error('复现参数保存失败')
+}
+
+async function renameTrack(trackName: string) {
+  const newName = window.prompt(`重命名 "${trackName}"（不含 .csv）`, trackName)
+  const clean = (newName ?? '').trim().replace(/\.csv$/i, '')
+  if (!newName || clean === trackName) return
+  const res = await api.renameTrack(deviceId, trackName, clean)
+  if (res.success) {
+    toastRef.value?.success(`已重命名为 ${clean}`)
+    if (loadedTrackName.value === trackName) loadedTrackName.value = clean
+    await loadTracksList()
+  } else {
+    toastRef.value?.error(`重命名失败: ${res.error?.message}`)
+  }
+}
+
+async function deleteTrack(trackName: string) {
+  if (!window.confirm(`确认删除轨迹 "${trackName}"？`)) return
+  const res = await api.deleteTrack(deviceId, trackName)
+  if (res.success) {
+    toastRef.value?.success(`已删除 ${trackName}`)
+    if (loadedTrackName.value === trackName) {
+      trajPoints.value = []
+      loadedTrackName.value = ''
+    }
+    await loadTracksList()
+  } else {
+    toastRef.value?.error(`删除失败: ${res.error?.message}`)
   }
 }
 
@@ -3805,7 +4704,16 @@ async function goToTrajPoint(i: number) {
 }
 
 // Auto-load tracks list when panel opens
-watch(showTrajectory, (v) => { if (v) loadTracksList() })
+watch(showTrajectory, (v) => {
+  if (v) {
+    loadTracksList()
+    syncTrajRecordStatus()
+    loadRetraceParams()
+  } else {
+    stopTrajRecordPoll()
+    stopTrackPlaybackPoll()
+  }
+})
 
 // Watch settings tab to auto-load
 watch(settingsTab, (tab) => {
@@ -3824,6 +4732,9 @@ onMounted(async () => {
   void import('./ProgrammingView.vue')
   window.addEventListener('message', handle3DModelMessage)
   window.addEventListener('blur', onWindowBlur)
+  // 捕获阶段挂 window：不依赖 .device-page 焦点，长按方向键也能 preventDefault 挡住 F7 光标
+  window.addEventListener('keydown', onKeyDown, true)
+  window.addEventListener('keyup', onKeyUp, true)
   await load()
   if (!isMock && !isConnected.value) await doConnect()
   if (!isMock && isConnected.value) {
@@ -3850,13 +4761,9 @@ onMounted(async () => {
     const ext = raw._ext as Record<string, unknown> | undefined
     state.value = raw
     deviceStore.setState(deviceId, raw)
-    // Init moveTarget from current joints (once)
-    if (!moveTargetInit.value) {
-      const joints = (raw as Record<string, unknown>).joints as Record<string, number> | undefined
-      if (joints) {
-        for (let j = 1; j <= 6; j++) moveTarget['j' + j] = Math.round((joints['j' + j] || 0) * 10) / 10
-        moveTargetInit.value = true
-      }
+    // 首次状态到达：自动填关节目标 + 笛卡尔位姿（避免打开是 0 0 0 0 0 0）
+    if (!moveTargetInit.value && fillMoveTargetsFromState()) {
+      moveTargetInit.value = true
     }
     // Update enabled state
     const status = raw.status as Record<string, unknown> | undefined
@@ -3919,12 +4826,8 @@ onMounted(async () => {
         if (s.data.state) {
           if (isMock) { console.warn('[Mock] REST fallback unexpectedly set state — skipping'); }
           else { state.value = s.data.state; deviceStore.setState(deviceId, s.data.state) }
-          if (!moveTargetInit.value) {
-            const joints = s.data.state.joints as Record<string, number> | undefined
-            if (joints) {
-              for (let j = 1; j <= 6; j++) moveTarget['j' + j] = Math.round((joints['j' + j] || 0) * 10) / 10
-              moveTargetInit.value = true
-            }
+          if (!moveTargetInit.value && fillMoveTargetsFromState()) {
+            moveTargetInit.value = true
           }
         }
         const status = s.data.status as Record<string, unknown> | undefined
@@ -3962,6 +4865,8 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('message', handle3DModelMessage)
   window.removeEventListener('blur', onWindowBlur)
+  window.removeEventListener('keydown', onKeyDown, true)
+  window.removeEventListener('keyup', onKeyUp, true)
   if (fallbackTimer) clearInterval(fallbackTimer)
   stopES01StatusPoll()
   stopJog()
@@ -4032,6 +4937,7 @@ onUnmounted(() => {
 .status-grid { display: grid; grid-template-columns: minmax(240px, 0.85fr) minmax(300px, 1fr) minmax(420px, 1.45fr); gap: 16px; align-items: stretch; }
 .control-grid { display: grid; grid-template-columns: minmax(420px, 1.05fr) minmax(420px, 0.95fr); gap: 16px; align-items: stretch; }
 .pose-card, .joint-card, .model-panel, .jog-panel, .move-panel { min-width: 0; }
+.jog-panel:focus { outline: 1px solid var(--cyan-500); outline-offset: 2px; }
 @media (max-width: 1200px) {
   .workspace-header { grid-template-columns: 1fr; align-items: stretch; }
   .workspace-header-center { justify-content: flex-start; }
@@ -4324,9 +5230,35 @@ onUnmounted(() => {
 .coord-add-row { display: flex; gap: 6px; align-items: center; padding: 8px 0; }
 .motion-params-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-.dobotplus-iframe { width: 100%; height: 400px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: #fff; }
+.dobotplus-args-input {
+  width: 100%; margin-top: 8px; padding: 6px 8px;
+  font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.5;
+  color: var(--text-primary); background: var(--void-deep);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  outline: none; resize: vertical; box-sizing: border-box;
+}
+.dobotplus-args-input:focus { border-color: var(--accent); }
+.dobotplus-result {
+  margin-top: 8px; padding: 8px 10px; overflow: auto; max-height: 220px;
+  font-family: var(--font-mono); font-size: 0.7rem; line-height: 1.5;
+  color: var(--cyan-300); background: var(--void-deep);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius);
+  white-space: pre-wrap; word-break: break-all;
+}
 
 .dobotplus-toolbar { position: relative; }
+.dobotplus-iframe {
+  width: 100%; height: 560px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius); background: #fff;
+}
+.dobotplus-file-input { max-width: 260px; }
+.dobotplus-file-input::file-selector-button {
+  margin-right: 8px; padding: 3px 8px;
+  font-family: var(--font-body); font-size: 0.68rem;
+  color: var(--text-secondary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
 .dobotplus-dropdown {
   position: absolute; top: 100%; right: 0; z-index: 250;
   min-width: 180px; margin-top: 4px; padding: 4px;
@@ -4342,6 +5274,27 @@ onUnmounted(() => {
 .dobotplus-dropdown-item:hover { background: var(--surface-1); color: var(--cyan-300); }
 
 /* Trajectory recording */
+.track-item { display: inline-flex; align-items: center; gap: 2px; }
+.track-item-action {
+  border: none; background: transparent; color: var(--text-muted);
+  font-size: 0.6rem; padding: 1px 3px; cursor: pointer; line-height: 1;
+  border-radius: 3px;
+}
+.track-item-action:hover { color: var(--text-primary); background: var(--surface-2); }
+.recording-indicator {
+  color: #ff5252; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em;
+  animation: traj-blink 1.2s ease-in-out infinite;
+}
+@keyframes traj-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.track-playback-bar, .track-params-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 10px; margin-bottom: 4px;
+  background: var(--surface-2); border-radius: var(--radius-sm);
+  font-size: 0.62rem; color: var(--text-secondary);
+}
+.track-playback-text { flex: 1; font-family: var(--font-mono); }
+.track-param { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); }
+.track-param--check { cursor: pointer; }
 .traj-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.65rem; }
 .traj-table th { text-align: left; padding: 4px 6px; font-family: var(--font-display); font-size: 0.48rem; font-weight: 700; letter-spacing: 0.08em; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; background: var(--void-surface); }
 .traj-table td { padding: 3px 6px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
