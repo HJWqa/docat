@@ -1208,6 +1208,39 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
     }
   )
 
+  // ─── 标定 XML 导出（客户端生成 XML，服务端落盘）──────
+
+  app.post<{ Params: { id: string }; Body: { content?: string; name?: string } }>(
+    '/api/devices/:id/calibration/exportXml',
+    async (request, reply): Promise<ApiResponse<{ path: string; filename: string }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const content = request.body?.content ?? ''
+        if (!content.trim()) {
+          return { success: false, error: { code: 40000, message: '没有可导出的 XML 内容' } }
+        }
+        if (content.length > 2 * 1024 * 1024) {
+          return { success: false, error: { code: 40000, message: 'XML 内容过大' } }
+        }
+
+        const dir = resolveExportDir(getSetting(SETTING_CALIB_EXPORT_DIR) || DEFAULT_EXPORT_DIR)
+        mkdirSync(dir, { recursive: true })
+
+        const safeName = sanitizeFileStem(request.body?.name ?? request.params.id).slice(0, 40) || 'device'
+        const filename = `calib_${safeName}_${timestampStem()}.xml`
+        const filePath = path.join(dir, filename)
+
+        writeFileSync(filePath, content, 'utf8')
+        return { success: true, data: { path: filePath, filename } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   // ─── 用户管理 ──────────────────────────────────
 
   app.get<{ Params: { id: string } }>(

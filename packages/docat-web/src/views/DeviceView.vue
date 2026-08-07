@@ -163,7 +163,6 @@
             <span class="calib-rmse" :class="{ 'calib-rmse--bad': calibFit && !calibFit.usable }" :title="calibFitHint">
               RMSE {{ calibFit ? (Number.isFinite(calibFit.rmse) ? calibFit.rmse.toFixed(3) : '—') : '—' }} mm
             </span>
-            <span v-if="calibFit && calibFit.pointCount > 0" class="calib-inlier">内点 {{ calibFit.inlierCount }}/{{ calibFit.pointCount }}</span>
             <label title="行数（最小点数：仿射3 / 透视4）">行数
               <input v-model.number="calibRowCount" type="number" min="1" max="99" step="1" class="calib-rowcount-input" @change="syncCalibRows" @keyup.enter="syncCalibRows" />
             </label>
@@ -173,10 +172,13 @@
             <button class="btn-icon btn-icon--toolbar" @click="startClipboardImport('image')" @contextmenu.prevent="startClipboardImport('full')" title="从剪贴板导入 OCR 坐标（左键：仅图像坐标；右键：保留全部数据）">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 6h7M4.5 8.5h4.5M4.5 11h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
             </button>
-            <button class="btn-icon btn-icon--toolbar" @click="exportCalibrationToServer" @contextmenu.prevent="downloadCalibration" title="导出（左键：服务端写入导出目录；右键：下载 txt 文件）">
+            <button class="btn-icon btn-icon--toolbar" @click="exportCalibrationToServer" @contextmenu.prevent="downloadCalibration" title="导出 txt（左键：服务端写入导出目录；右键：下载 txt 文件）">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M8 10l-3-3M8 10l3-3M2 13h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <input ref="calibFileInputRef" type="file" accept=".txt,.text" style="display:none" @change="onCalibFileChange" />
+            <button class="btn-icon btn-icon--toolbar" @click="exportCalibrationXmlToServer" @contextmenu.prevent="downloadCalibrationXml" title="导出 xml（左键：服务端写入导出目录；右键：下载 xml 文件）">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5 4l-3 4 3 4M11 4l3 4-3 4M9.5 3l-3 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <input ref="calibFileInputRef" type="file" accept=".txt,.text,.xml" style="display:none" @change="onCalibFileChange" />
           </div>
 
           <div v-if="calibPasteOpen" class="calib-paste-box">
@@ -219,10 +221,10 @@
 
           <div class="calib-convert">
             <span class="calib-convert-label">图像坐标</span>
-            <input v-model.trim="calibConvertInput" class="calib-convert-input" placeholder="图X,图Y" title="输入图像坐标，逗号分隔" @keyup.enter="runCalibConvert" />
+            <input v-model.trim="calibConvertInput" class="calib-convert-input" placeholder="图X 图Y 或 图X,图Y" title="输入图像坐标，用逗号或任意个数空格分隔" @keyup.enter="runCalibConvert" />
             <button class="btn btn-primary btn-sm" :disabled="!calibFit || !calibFit.usable" @click="runCalibConvert">转换</button>
-            <input v-model.trim="calibConvertResult" class="calib-convert-input calib-convert-result" placeholder="物理X,物理Y"
-              title="转换结果；Shift/Ctrl+Enter 移动到该位置"
+            <input v-model.trim="calibConvertResult" class="calib-convert-input calib-convert-result" placeholder="物理X 物理Y 或 物理X,物理Y"
+              title="转换结果；用逗号或任意个数空格分隔；Shift/Ctrl+Enter 移动到该位置"
               @keydown="onCalibResultKeydown" />
           </div>
         </div>
@@ -1283,7 +1285,7 @@
                     </button>
                   </div>
                   <div class="text-muted" style="margin-top:8px;font-size:0.68rem;line-height:1.6">
-                    标定辅助「导出」按钮：左键将标定数据写入该目录下的 txt 文件（服务端）；右键由浏览器直接下载文件。
+                    标定辅助「导出」按钮：左键将标定数据写入该目录下的 txt/xml 文件（服务端）；右键由浏览器直接下载文件。
                   </div>
                 </div>
               </div>
@@ -1323,6 +1325,7 @@ import {
   parseCalibTxt,
   parseCalibTxtFull,
   parseNumericTokens,
+  buildCalibXml,
   type CalibPoint,
   type CalibModel,
   type WeightFn,
@@ -2674,7 +2677,12 @@ function onCalibFileChange(e: Event) {
   const full = calibImportMode.value === 'full'
   const reader = new FileReader()
   reader.onload = () => {
-    const fullPoints = parseCalibTxtFull(String(reader.result ?? ''))
+    const text = String(reader.result ?? '')
+    if (/\.xml$/i.test(file.name) || text.trimStart().startsWith('<')) {
+      applyCalibXmlImport(text, full)
+      return
+    }
+    const fullPoints = parseCalibTxtFull(text)
     if (fullPoints.length === 0) {
       toastRef.value?.error('未解析到有效数据（每行至少两个数值）')
       return
@@ -2683,7 +2691,7 @@ function onCalibFileChange(e: Event) {
       calibRowCount.value = fullPoints.length
       syncCalibRows()
     }
-    const points = full ? fullPoints : parseCalibTxt(String(reader.result ?? ''))
+    const points = full ? fullPoints : parseCalibTxt(text)
     points.forEach((p, i) => {
       const row = calibRows.value[i]
       if (!row) return
@@ -2698,6 +2706,58 @@ function onCalibFileChange(e: Event) {
     toastRef.value?.success(`已导入 ${points.length} 行${full ? '（全部数据）' : '（仅图像坐标）'}`)
   }
   reader.readAsText(file)
+}
+
+/** 解析 Dobot 标定 XML（CalibInfo），提取 ImagePointLst / WorldPointLst */
+function parseCalibXmlText(text: string): CalibPoint[] {
+  const doc = new DOMParser().parseFromString(text, 'application/xml')
+  const readList = (name: string): Array<{ x: number; y: number; r: number }> => {
+    const list = doc.querySelector(`CalibPointFListParam[ParamName="${name}"]`)
+    if (!list) return []
+    return Array.from(list.querySelectorAll('PointF')).map(pf => ({
+      x: Number(pf.querySelector('X')?.textContent ?? NaN),
+      y: Number(pf.querySelector('Y')?.textContent ?? NaN),
+      r: Number(pf.querySelector('R')?.textContent ?? NaN),
+    }))
+  }
+  const img = readList('ImagePointLst')
+  const world = readList('WorldPointLst')
+  const n = Math.max(img.length, world.length)
+  const rows: CalibPoint[] = []
+  for (let i = 0; i < n; i++) {
+    rows.push({
+      imgX: img[i]?.x ?? 0,
+      imgY: img[i]?.y ?? 0,
+      physX: world[i]?.x ?? 0,
+      physY: world[i]?.y ?? 0,
+      angle: img[i]?.r ?? world[i]?.r ?? 0,
+    })
+  }
+  return rows
+}
+
+function applyCalibXmlImport(text: string, full: boolean) {
+  const points = parseCalibXmlText(text)
+  if (points.length === 0) {
+    toastRef.value?.error('未解析到有效 XML 标定点')
+    return
+  }
+  if (points.length > calibRows.value.length) {
+    calibRowCount.value = points.length
+    syncCalibRows()
+  }
+  points.forEach((p, i) => {
+    const row = calibRows.value[i]
+    if (!row) return
+    row.imgX = p.imgX
+    row.imgY = p.imgY
+    if (full) {
+      row.physX = p.physX
+      row.physY = p.physY
+      row.angle = p.angle
+    }
+  })
+  toastRef.value?.success(`已从 XML 导入 ${points.length} 行${full ? '（全部数据）' : '（仅图像坐标）'}`)
 }
 
 async function startClipboardImport(mode: 'image' | 'full') {
@@ -2800,6 +2860,12 @@ function calibExportStem(): string {
   return `calib_${safeName}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
 }
 
+/** 从 API 响应中提取错误信息（兼容标准 error 与 Fastify 的 {message} 形式） */
+function apiErrorText(res: { error?: { message?: string }; message?: string } | undefined): string {
+  if (!res) return '无响应'
+  return res.error?.message || res.message || '未知错误'
+}
+
 async function exportCalibrationToServer() {
   if (calibRows.value.length === 0) {
     toastRef.value?.error('没有可导出的标定数据')
@@ -2809,7 +2875,7 @@ async function exportCalibrationToServer() {
   if (res.success && res.data) {
     toastRef.value?.success(`已导出到 ${res.data.path}`)
   } else {
-    toastRef.value?.error(`导出失败: ${res.error?.message}`)
+    toastRef.value?.error(`导出失败: ${apiErrorText(res)}`)
   }
 }
 
@@ -2828,6 +2894,38 @@ function downloadCalibration() {
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
   toastRef.value?.success(`已下载 ${a.download}`)
+}
+
+function downloadCalibrationXml() {
+  if (calibRows.value.length === 0) {
+    toastRef.value?.error('没有可导出的标定数据')
+    return
+  }
+  const xml = buildCalibXml(calibRows.value, calibFit.value)
+  const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${calibExportStem()}.xml`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  toastRef.value?.success(`已下载 ${a.download}`)
+}
+
+async function exportCalibrationXmlToServer() {
+  if (calibRows.value.length === 0) {
+    toastRef.value?.error('没有可导出的标定数据')
+    return
+  }
+  const xml = buildCalibXml(calibRows.value, calibFit.value)
+  const res = await api.exportCalibrationXml(deviceId, xml, device.value?.name)
+  if (res.success && res.data) {
+    toastRef.value?.success(`已导出到 ${res.data.path}`)
+  } else {
+    toastRef.value?.error(`导出失败: ${apiErrorText(res)}`)
+  }
 }
 
 async function loadCalibExportDir() {
@@ -2882,14 +2980,19 @@ const calibFitHint = computed(() => {
   return '拟合残差均方根 (mm)，越小越准'
 })
 
+/** 解析坐标对：逗号/分号或任意个数空格（含混用）分隔，取前两个数值 */
+function parseCoordPair(text: string): number[] {
+  return text.split(/[\s,，;；]+/).map(Number).filter(Number.isFinite)
+}
+
 function runCalibConvert() {
   if (!calibFit.value || !calibFit.value.usable) {
     toastRef.value?.error('拟合不可用：请先录入足够的标定点')
     return
   }
-  const parts = calibConvertInput.value.split(/[\s,，;；]+/).map(Number).filter(Number.isFinite)
+  const parts = parseCoordPair(calibConvertInput.value)
   if (parts.length < 2) {
-    toastRef.value?.error('请输入图像坐标，用逗号分隔，如 928.389,825.358')
+    toastRef.value?.error('请输入图像坐标，用逗号或空格分隔，如 928.389 825.358 或 928.389,825.358')
     return
   }
   const r = applyCalibration(calibFit.value, parts[0], parts[1])
@@ -2907,7 +3010,7 @@ async function runCalibToPosition() {
     toastRef.value?.error('设备未连接')
     return
   }
-  const parts = calibConvertResult.value.split(/[\s,，;；]+/).map(Number).filter(Number.isFinite)
+  const parts = parseCoordPair(calibConvertResult.value)
   if (parts.length < 2) {
     toastRef.value?.error('没有可用的物理坐标结果')
     return
@@ -5487,7 +5590,7 @@ onUnmounted(() => {
   display: flex; flex-direction: column; gap: 10px;
   padding: 12px 14px; max-height: 440px; min-height: 260px;
 }
-.calib-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.calib-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .calib-toolbar label {
   display: inline-flex; align-items: center; gap: 4px;
   font-family: var(--font-body); font-size: 0.66rem; font-weight: 500; color: var(--text-muted);
@@ -5511,7 +5614,6 @@ onUnmounted(() => {
 }
 .calib-rmse { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); white-space: nowrap; }
 .calib-rmse--bad { color: var(--status-danger); }
-.calib-inlier { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); white-space: nowrap; }
 .calib-table-wrap { overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius); }
 .calib-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.68rem; }
 .calib-table th {

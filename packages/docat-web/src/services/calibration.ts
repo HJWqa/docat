@@ -301,3 +301,124 @@ export function parseCalibTxtFull(text: string): CalibPoint[] {
     })
     .filter((p): p is CalibPoint => p !== null)
 }
+
+// ─── Dobot 标定 XML 导出 ─────────────────────────
+
+/** 数值格式化：四舍五入到 9 位有效数字，去掉浮点噪声与尾零 */
+function xmlNum(v: number): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '0'
+  return String(Number(n.toPrecision(9)))
+}
+
+/** 把拟合系数转为 3×3 CalibMatrix（图像→物理，行主序） */
+export function calibMatrixFromFit(fit: CalibResult | null): number[] {
+  const ident = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  if (!fit || !fit.usable || fit.coefs.length < 6) return ident
+  const c = fit.coefs
+  if (fit.model === 'affine') {
+    return [c[1], c[2], c[0], c[4], c[5], c[3], 0, 0, 1]
+  }
+  return [c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], 1]
+}
+
+/**
+ * 生成 Dobot 标定 XML（与 0807-1-correct.xml 同结构）。
+ * 误差/精度字段为近似值：TransWorldError=RMSE(mm)，
+ * PixelPrecision=sqrt(|det(线性部分)|) 比例尺，TransError=RMSE/比例尺。
+ */
+export function buildCalibXml(rows: CalibPoint[], fit: CalibResult | null): string {
+  const now = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const calibTime = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`
+
+  const usable = !!fit && fit.usable
+  const matrix = calibMatrixFromFit(fit)
+
+  let scale = 0
+  if (usable && fit!.coefs.length >= 6) {
+    const c = fit!.coefs
+    const [m00, m01, m10, m11] = fit!.model === 'affine'
+      ? [c[1], c[2], c[4], c[5]]
+      : [c[0], c[1], c[3], c[4]]
+    scale = Math.sqrt(Math.abs(m00 * m11 - m01 * m10))
+  }
+
+  const transWorldError = usable ? fit!.rmse : -999
+  const transError = usable && scale > 0 ? fit!.rmse / scale : -999
+  const calibErrStatus = usable ? 0 : 1
+
+  const pointBlock = (xKey: 'imgX' | 'physX', yKey: 'imgY' | 'physY', rKey: 'angle') =>
+    rows.map(r => `            <PointF>\n                <X>${xmlNum(r[xKey])}</X>\n                <Y>${xmlNum(r[yKey])}</Y>\n                <R>${xmlNum(r[rKey])}</R>\n            </PointF>`).join('\n')
+
+  const matrixBlock = matrix.map(v => `            <ParamValue>${xmlNum(v)}</ParamValue>`).join('\n')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<CalibInfo>
+    <CalibInputParam>
+        <CalibParam ParamName="CreateCalibTime" DataType="string">
+            <ParamValue>${calibTime}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="CalibType" DataType="string">
+            <ParamValue>NPointCalib</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="TransNum" DataType="int">
+            <ParamValue>${rows.length}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="RotNum" DataType="int">
+            <ParamValue>0</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="CalibErrStatus" DataType="int">
+            <ParamValue>${calibErrStatus}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="TransError" DataType="float">
+            <ParamValue>${xmlNum(transError)}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="RotError" DataType="float">
+            <ParamValue>-999</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="TransWorldError" DataType="float">
+            <ParamValue>${xmlNum(transWorldError)}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="RotWorldError" DataType="float">
+            <ParamValue>-999</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="PixelPrecisionX" DataType="float">
+            <ParamValue>${xmlNum(scale)}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="PixelPrecisionY" DataType="float">
+            <ParamValue>${xmlNum(scale)}</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="PixelPrecision" DataType="float">
+            <ParamValue>${xmlNum(scale)}</ParamValue>
+        </CalibParam>
+        <CalibPointFListParam ParamName="ImagePointLst" DataType="CalibPointList">
+${pointBlock('imgX', 'imgY', 'angle')}
+        </CalibPointFListParam>
+        <CalibPointFListParam ParamName="WorldPointLst" DataType="CalibPointList">
+${pointBlock('physX', 'physY', 'angle')}
+        </CalibPointFListParam>
+    </CalibInputParam>
+    <CalibOutputParam>
+        <CalibParam ParamName="RotDirectionState" DataType="int">
+            <ParamValue>-999</ParamValue>
+        </CalibParam>
+        <CalibParam ParamName="IsRightCoorA" DataType="int">
+            <ParamValue>-1</ParamValue>
+        </CalibParam>
+        <PointF ParamName="RotCenterImagePoint" DataType="CalibPointF">
+            <RotCenterImagePointX>0</RotCenterImagePointX>
+            <RotCenterImagePointY>0</RotCenterImagePointY>
+            <RotCenterImageR>-999</RotCenterImageR>
+        </PointF>
+        <PointF ParamName="RotCenterWorldPoint" DataType="CalibPointF">
+            <RotCenterWorldPointX>0</RotCenterWorldPointX>
+            <RotCenterWorldPointY>0</RotCenterWorldPointY>
+            <RotCenterWorldR>-999</RotCenterWorldR>
+        </PointF>
+        <CalibFloatListParam ParamName="CalibMatrix" DataType="FloatList">
+${matrixBlock}
+        </CalibFloatListParam>
+    </CalibOutputParam>
+</CalibInfo>`
+}

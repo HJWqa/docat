@@ -605,6 +605,14 @@ export async function exportCalibration(
   return request('POST', `/api/devices/${id}/calibration/export`, { rows, name })
 }
 
+export async function exportCalibrationXml(
+  id: string,
+  content: string,
+  name?: string,
+): Promise<ApiResponse<{ path: string; filename: string }>> {
+  return request('POST', `/api/devices/${id}/calibration/exportXml`, { content, name })
+}
+
 export async function getSystemSettings(): Promise<ApiResponse<{ calibExportDir: string }>> {
   return request('GET', `/api/system/settings`)
 }
