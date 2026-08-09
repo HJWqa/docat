@@ -2618,7 +2618,7 @@ const calibImportMode = ref<'image' | 'full'>('image')
 const calibPasteOpen = ref(false)
 const calibPasteText = ref('')
 const calibPasteRef = ref<HTMLTextAreaElement | null>(null)
-let calibPasteMode: 'image' | 'full' = 'image'
+const calibPasteMode = ref<'image' | 'full'>('image')
 
 const calibModelLabel = computed(() => calibModel.value === 'affine' ? '仿射' : '透视')
 const calibWeightLabel = computed(() => {
@@ -2763,7 +2763,7 @@ function applyCalibXmlImport(text: string, full: boolean) {
 }
 
 async function startClipboardImport(mode: 'image' | 'full') {
-  calibPasteMode = mode
+  calibPasteMode.value = mode
   try {
     if (navigator.clipboard?.readText) {
       const text = await navigator.clipboard.readText()
@@ -2792,7 +2792,7 @@ function confirmCalibPaste() {
     toastRef.value?.error('粘贴内容为空')
     return
   }
-  applyClipboardText(text, calibPasteMode)
+  applyClipboardText(text, calibPasteMode.value)
 }
 
 function cancelCalibPaste() {

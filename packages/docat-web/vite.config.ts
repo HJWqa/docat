@@ -14,6 +14,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    optimizeDeps: {
+      entries: ['index.html'],
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,
