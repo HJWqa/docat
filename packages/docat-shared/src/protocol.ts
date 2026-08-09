@@ -21,6 +21,7 @@ export const DEVICE_PORTS = {
 /** 设备发现默认 IP 列表 */
 export const DEFAULT_SCAN_IPS = [
   '192.168.5.1',
+  '192.168.200.1',
   '192.168.201.1',
   '127.0.0.1',
 ] as const

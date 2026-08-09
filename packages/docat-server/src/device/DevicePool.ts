@@ -59,22 +59,22 @@ export class DevicePool {
     return this.devices.get(driverId)
   }
 
-  /** 扫描网络上的 Dobot 设备 */
+  /** 扫描网络上的 Dobot 设备（并行探测所有候选 IP） */
   async scan(): Promise<DeviceInfo[]> {
-    const results: DeviceInfo[] = []
+    const results = await Promise.all(
+      this.scanIps.map(async (ip) => {
+        try {
+          const http = new HttpTransport(ip, 22000, 500)
+          const reply: TransportReply = await http.send({
+            method: 'get',
+            url: '/properties/controllerType',
+            portName: ip,
+            needBaseUrl: true,
+            timeout: 500,
+          })
 
-    for (const ip of this.scanIps) {
-      try {
-        const http = new HttpTransport(ip, 22000, 500)
-        const reply: TransportReply = await http.send({
-          method: 'get',
-          url: '/properties/controllerType',
-          portName: ip,
-          needBaseUrl: true,
-          timeout: 500,
-        })
+          if (!reply.status || !reply.data) return null
 
-        if (reply.status && reply.data) {
           const data = reply.data as Record<string, unknown>
           const isVirtual = (VIRTUAL_DEVICE_IPS as readonly string[]).includes(ip)
 
@@ -88,21 +88,22 @@ export class DevicePool {
           let status = stateData?.value ?? 'unconnected'
           if (status === 'connected') status = 'unconnected'
 
-          results.push({
+          return {
             portName: ip,
             status,
             type: (data.name as string) || 'Unknown',
             alias: (data.alias as string) || '',
             buildType: isVirtual ? ControllerBuildType.Virtually : ControllerBuildType.Real,
             controllerTypeExt: (data.controllerTypeExt as string) || '',
-          })
+          } satisfies DeviceInfo
+        } catch {
+          // 设备不在线或无响应，跳过
+          return null
         }
-      } catch {
-        // 设备不在线或无响应，跳过
-      }
-    }
+      })
+    )
 
-    return results
+    return results.filter((r): r is DeviceInfo => r !== null)
   }
 
   /** 连接设备

@@ -338,7 +338,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         if (reply.sent) return reply
         requireOperator(request, reply)
 
-        const { ip, name, type = '', autoConnect = true } = request.body
+        const { ip, name, type = '', autoConnect = false } = request.body
         if (!ip || !name) {
           return { success: false, error: { code: 42200, message: '缺少 ip 或 name' } }
         }

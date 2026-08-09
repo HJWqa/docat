@@ -236,6 +236,35 @@
         </div>
       </div>
     </Transition>
+
+    <!-- Duplicate Device Confirm Modal -->
+    <Transition name="fade">
+      <div v-if="showDup && dupExisting" class="modal-overlay" @click.self="cancelDup">
+        <div class="modal card">
+          <div class="modal-header">
+            <h3>检测到重复设备</h3>
+            <button class="modal-close" @click="cancelDup">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
+            </button>
+          </div>
+          <p class="mt-1" style="color:var(--status-danger);font-size:13px;">
+            已存在名称与 IP 完全相同的设备：
+            <strong>{{ dupExisting.name }}</strong>（{{ dupExisting.ip }}）
+          </p>
+          <p style="color:var(--text-secondary);font-size:13px;margin-top:6px;">
+            是否仍然添加？可修改名称以区分；若不修改直接提交，将允许同名同 IP。
+          </p>
+          <div class="field-group mt-2">
+            <label class="field-label">设备名称</label>
+            <input v-model="dupName" class="input" placeholder="设备名称" />
+          </div>
+          <div class="modal-actions mt-2">
+            <button type="button" class="btn btn-secondary flex-1" @click="cancelDup">取消</button>
+            <button type="button" class="btn btn-primary flex-1" @click="confirmDup">仍然添加</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -264,7 +293,7 @@ const toastRef = ref<InstanceType<typeof Toast>>()
 const newIp = ref('')
 const newName = ref('')
 const newType = ref('')
-const newAutoConnect = ref(true)
+const newAutoConnect = ref(false)
 const showUserDropdown = ref(false)
 const showChangePassword = ref(false)
 const showSwitchUser = ref(false)
@@ -274,6 +303,12 @@ const editingDevice = ref<DeviceConfig | null>(null)
 const editIp = ref('')
 const editName = ref('')
 const editAutoConnect = ref(true)
+
+// Duplicate device confirm state
+const showDup = ref(false)
+const dupExisting = ref<DeviceConfig | null>(null)
+const dupName = ref('')
+let dupContinue: ((finalName: string) => Promise<void>) | null = null
 
 const currentUser = computed(() => userStore.currentUser)
 
@@ -329,15 +364,65 @@ async function scan() {
 
 async function addDevice() {
   if (!newIp.value || !newName.value) return
-  await api.registerDevice(newIp.value, newName.value, newAutoConnect.value)
+  const ip = newIp.value.trim()
+  const name = newName.value.trim()
+  const dup = findDuplicate(name, ip)
+  if (dup) {
+    promptDuplicate(dup, name, (finalName) => doAdd(finalName, ip))
+    return
+  }
+  await doAdd(name, ip)
+}
+
+async function doAdd(name: string, ip: string) {
+  await api.registerDevice(ip, name, newAutoConnect.value)
   showAdd.value = false; newIp.value = ''; newName.value = ''
   await load()
 }
 
 async function addFromScan(d: DeviceInfo) {
-  await api.registerDevice(d.portName, d.alias || d.type, true)
-  scanResults.value = scanResults.value.filter(s => s.portName !== d.portName)
+  const ip = d.portName
+  const name = d.alias || d.type
+  const dup = findDuplicate(name, ip)
+  if (dup) {
+    promptDuplicate(dup, name, (finalName) => doRegisterFromScan(finalName, ip))
+    return
+  }
+  await doRegisterFromScan(name, ip)
+}
+
+async function doRegisterFromScan(name: string, ip: string) {
+  await api.registerDevice(ip, name, false)
+  scanResults.value = scanResults.value.filter(s => s.portName !== ip)
   await load()
+}
+
+function findDuplicate(name: string, ip: string): DeviceConfig | null {
+  return devices.value.find(d => d.name === name && d.ip === ip) ?? null
+}
+
+function promptDuplicate(existing: DeviceConfig, name: string, onContinue: (finalName: string) => Promise<void>) {
+  dupExisting.value = existing
+  dupName.value = name
+  dupContinue = onContinue
+  showDup.value = true
+}
+
+async function confirmDup() {
+  const onContinue = dupContinue
+  const fallbackName = dupExisting.value?.name ?? dupName.value
+  showDup.value = false
+  dupExisting.value = null
+  dupContinue = null
+  if (!onContinue) return
+  // 用户不改编辑框（为空则回退原名）也直接提交，允许同名同 IP
+  await onContinue(dupName.value.trim() || fallbackName)
+}
+
+function cancelDup() {
+  showDup.value = false
+  dupExisting.value = null
+  dupContinue = null
 }
 
 async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive') {

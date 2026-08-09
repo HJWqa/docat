@@ -110,7 +110,7 @@ export async function scanDevices(): Promise<ApiResponse<DeviceInfo[]>> {
   return request('GET', '/api/devices/scan')
 }
 
-export async function registerDevice(ip: string, name: string, autoConnect = true): Promise<ApiResponse<DeviceConfig>> {
+export async function registerDevice(ip: string, name: string, autoConnect = false): Promise<ApiResponse<DeviceConfig>> {
   return request('POST', '/api/devices', { ip, name, autoConnect })
 }
 
