@@ -1394,10 +1394,13 @@ function commitMockState(joints: Record<string, number>, pose: Record<string, nu
 /**
  * Mock 平滑插补到目标关节（约 durationMs）。
  * 到位后用 FK 刷新 pose，保证笛卡尔显示一致。
+ * 时长按速度滑块换算：duration = baseDurationMs * (100 / speedRatio)，100% 时为 baseDurationMs。
  */
-function mockAnimateToJoints(target: number[], durationMs = 600): Promise<boolean> {
+function mockAnimateToJoints(target: number[], baseDurationMs = 200): Promise<boolean> {
   cancelMockMove()
   mockMoveAbort = false
+  const ratio = Math.min(100, Math.max(1, speedRatio.value || 100))
+  const durationMs = Math.round(baseDurationMs * (100 / ratio))
   const start = jointsFromObject(state.value.joints as Record<string, number>)
   const t0 = performance.now()
   return new Promise((resolve) => {
@@ -2531,7 +2534,7 @@ async function moveToPose() {
       }
       // 同步关节编辑框，方便对照
       setMoveTargetJoints(ik.joint)
-      const ok = await mockAnimateToJoints(ik.joint, 700)
+      const ok = await mockAnimateToJoints(ik.joint)
       if (ok) toastRef.value?.success(`已到达位姿目标（${movePath.value} / dock）`)
       else toastRef.value?.info('运动已停止')
       return
@@ -3222,6 +3225,8 @@ function onSpeedInput() {
 function onSpeedPointerUp() {
   isDraggingSpeed.value = false
   if (!isConnected.value) return
+  // Mock 模式：比例只作用于本地模拟动画，无需请求设备
+  if (isMock) return
   if (speedDebounceTimer) clearTimeout(speedDebounceTimer)
   api.setDeviceSpeed(deviceId, speedRatio.value).then(res => {
     if (!res.success) {
@@ -3621,16 +3626,19 @@ function sendJogCmd(dir: string, gen: number = jogGeneration) {
   if (isMock) {
     const axis = jogAxis.value
     // 关节点动步长 °；笛卡尔平移 mm / 旋转 °
-    const delta = dir === '+' ? 0.4 : -0.4
+    // 连续模式按速度滑块放大步长（更快），步进模式保持固定步长
+    const ratio = Math.min(100, Math.max(1, speedRatio.value || 100)) / 100
+    const speedScale = jogMode.value === 'step' ? 1 : ratio
+    const delta = (dir === '+' ? 0.8 : -0.8) * speedScale
     const joints = { ...(state.value.joints as Record<string, number>) }
     const pose = { ...(state.value.pose as Record<string, number>) }
     if (axis.startsWith('j')) {
       const next = applyJointDelta(joints, pose, axis, delta)
       commitMockState(next.joints, next.pose)
     } else {
-      // 平移用较大步长更跟手；旋转保持 0.4°
+      // 平移用较大步长更跟手；旋转保持与关节一致
       const cartDelta = (axis === 'x' || axis === 'y' || axis === 'z')
-        ? (dir === '+' ? 1.0 : -1.0)
+        ? (dir === '+' ? 2.0 : -2.0) * speedScale
         : delta
       const next = applyCartesianDelta(joints, pose, axis, cartDelta)
       if (!next.ok) {
@@ -3768,7 +3776,7 @@ async function doMove() {
   moveTargetJoints = joints
   try {
     if (isMock) {
-      const ok = await mockAnimateToJoints(joints, 700)
+      const ok = await mockAnimateToJoints(joints)
       if (ok) {
         toastRef.value?.success(`已到达 J[${joints.map(v => v.toFixed(1)).join(', ')}]（${movePath.value} / dock）`)
       } else {
