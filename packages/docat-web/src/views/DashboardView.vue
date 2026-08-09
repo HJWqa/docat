@@ -247,6 +247,7 @@ import { clearToken, setToken } from '../services/api'
 import { wsClient } from '../services/ws'
 import { deviceStore } from '../stores/deviceStore'
 import { userStore } from '../stores/userStore'
+import { clearWorkspace } from '../stores/workspaceState'
 import Toast from '../components/Toast.vue'
 import ChangePasswordModal from '../components/ChangePasswordModal.vue'
 import SwitchUserModal from '../components/SwitchUserModal.vue'
@@ -276,7 +277,7 @@ const editAutoConnect = ref(true)
 
 const currentUser = computed(() => userStore.currentUser)
 
-function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); userStore.reset(); router.push('/login') }
+function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); userStore.reset(); clearWorkspace(); router.push('/login') }
 
 async function onPasswordChanged() {
   toastRef.value?.success('密码修改成功')

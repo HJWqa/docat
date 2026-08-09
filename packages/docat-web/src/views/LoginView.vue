@@ -75,6 +75,8 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { login, register, setToken } from '../services/api'
+import { wsClient } from '../services/ws'
+import { initRuntimeStore } from '../stores/runtimeStore'
 
 const router = useRouter()
 const mode = ref<'login' | 'register'>('login')
@@ -112,6 +114,9 @@ async function handleLogin() {
       if (!res.success || !res.data) throw new Error(res.error?.message ?? '登录失败')
       setToken(res.data.token)
     }
+    // 登录后建立 WS 连接并注册运行状态订阅（登出再登录时同样生效）
+    wsClient.connect()
+    initRuntimeStore()
     router.push('/')
   } catch (e) {
     error.value = (e as Error).message

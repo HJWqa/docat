@@ -8,6 +8,7 @@ import { getDb } from '../../db/index.js'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import { HttpTransport } from '../../device/transport/HttpTransport.js'
 import { SftpTransport } from '../../device/transport/SftpTransport.js'
+import { ensureRuntimeTcp } from '../../device/runtimeTcp.js'
 import type { DevicePool } from '../../device/DevicePool.js'
 import type { ApiResponse, Script, ScriptLanguage } from 'docat-shared/types'
 
@@ -535,6 +536,9 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         requireOperator(request, reply)
         if (reply.sent) return reply
         const project = assertProjectName(request.params.projectName)
+        // 确保运行数据通道（65501/65502）已监听（含 claim），光标/日志才能推送到前端
+        const deviceIp = getDeviceIp(request.params.id)
+        if (deviceIp) void ensureRuntimeTcp(request.params.id, deviceIp)
         const sftp = getProjectSftp(request.params.id)
         const summary = await summarizeProject(sftp, project)
         const debuggerResult = await startProject(request.params.id, project, summary.language, request.body.line ?? 0)

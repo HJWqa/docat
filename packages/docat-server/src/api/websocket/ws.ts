@@ -7,6 +7,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { WebSocket } from 'ws'
 import { validateToken } from '../../auth/auth.js'
+import { getDb } from '../../db/index.js'
+import { ensureRuntimeTcp } from '../../device/runtimeTcp.js'
 import type { DevicePool } from '../../device/DevicePool.js'
 import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { eventBus } from '../../event/EventBus.js'
@@ -83,6 +85,14 @@ export function websocketRoutes(
             if (!deviceId) return
 
             client.subscriptions.add(deviceId)
+
+            // 确保运行数据通道（65501/65502）已监听（含 claim），脚本运行时数据才能推送
+            try {
+              const dev = getDb().prepare('SELECT ip FROM devices WHERE id = ?').get(deviceId) as { ip: string } | undefined
+              if (dev) void ensureRuntimeTcp(deviceId, dev.ip)
+            } catch {
+              // 设备未注册时忽略
+            }
 
             const joined = scheduler.joinSharedSession(deviceId, {
               id: client.userId,

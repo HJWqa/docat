@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { getDb } from '../db/index.js'
 import { eventBus } from '../event/EventBus.js'
 import { DeviceDriver } from './DeviceDriver.js'
+import { releaseRuntimeTcp } from './runtimeTcp.js'
 import { createDriver } from './DeviceFactory.js'
 import { HttpTransport, createDeviceTransports } from './transport/HttpTransport.js'
 import { TcpManager } from './transport/TcpTransport.js'
@@ -312,6 +313,9 @@ export class DevicePool {
       const entry: DeviceEntry = { id: driverId, driver, http: transports, tcp, pollTimer, mode }
       this.devices.set(driverId, entry)
 
+      // 独占连接已接管 TCP，释放独立运行监听避免重复
+      releaseRuntimeTcp(driverId)
+
       eventBus.emit('device:connected', { id: driverId, ip, mode })
 
       return {
@@ -431,6 +435,12 @@ export class DevicePool {
     for (const id of ids) {
       await this.disconnect(id)
     }
+  }
+
+  /** 该设备是否已由池持有有效 TCP（用于避免独立运行监听重复连接） */
+  hasActiveTcp(deviceId: string): boolean {
+    const entry = this.devices.get(deviceId)
+    return !!entry && entry.tcp.connectedCount > 0
   }
 
   /** 从数据库加载自动连接的设备列表 */

@@ -9,6 +9,7 @@ import { Command } from 'commander'
 import { loadConfig } from './config/index.js'
 import { initDb, closeDb } from './db/index.js'
 import { DevicePool } from './device/DevicePool.js'
+import { setRuntimePoolTcpCheck } from './device/runtimeTcp.js'
 import { AccessScheduler } from './access/AccessScheduler.js'
 import { authRoutes } from './auth/routes.js'
 import { deviceRoutes } from './api/rest/devices.js'
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
   // 3. 创建核心模块
   const pool = new DevicePool(config.scanIps)
   const scheduler = new AccessScheduler()
+  setRuntimePoolTcpCheck(deviceId => pool.hasActiveTcp(deviceId))
 
   // 4. 创建 Fastify 服务
   const app = Fastify({

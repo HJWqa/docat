@@ -15,6 +15,8 @@ import { useRouter } from 'vue-router'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import { me, clearToken, getToken } from './services/api'
 import { wsClient } from './services/ws'
+import { initRuntimeStore } from './stores/runtimeStore'
+import { clearWorkspace } from './stores/workspaceState'
 import { userStore } from './stores/userStore'
 import Toast from './components/Toast.vue'
 
@@ -57,6 +59,7 @@ async function checkAuth() {
         toastRef.value?.error(`${address} · ${message}`)
       })
       wsClient.connect()
+      initRuntimeStore()
     } else {
       clearToken()
       userStore.reset()
@@ -71,6 +74,7 @@ async function checkAuth() {
 function doLogout() {
   clearToken()
   wsClient.destroy()
+  clearWorkspace()
   auth.value.username = ''
   userStore.reset()
   router.push('/login')

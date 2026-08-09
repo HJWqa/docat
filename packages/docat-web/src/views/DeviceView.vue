@@ -1317,6 +1317,7 @@ import {
   applyCartesianDelta,
 } from '../services/offlineKin'
 import { deviceStore } from '../stores/deviceStore'
+import { clearWorkspace } from '../stores/workspaceState'
 import Toast from '../components/Toast.vue'
 import type { DeviceConfig } from 'docat-shared/types'
 import {
@@ -3863,7 +3864,7 @@ async function doEstop() {
   }
 }
 
-function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); router.push('/login') }
+function doLogout() { clearToken(); wsClient.destroy(); deviceStore.reset(); clearWorkspace(); router.push('/login') }
 
 // ─── Load Parameters (Device Settings) ──────────
 

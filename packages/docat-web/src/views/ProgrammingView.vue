@@ -178,12 +178,16 @@
         <div v-if="activeProject" class="side-section">
           <span class="hud-label">控制</span>
           <div class="run-actions">
-          <button class="btn btn-success" :disabled="running || !selectedDeviceId" @click="runProject">
-            {{ running ? '启动中...' : '运行' }}
-          </button>
-          <button class="btn btn-danger" :disabled="stopping || !selectedDeviceId" @click="stopDebugger">
-            {{ stopping ? '停止中...' : '停止' }}
-          </button>
+          <span class="btn-wrap" title="运行脚本 (F9)">
+            <button class="btn btn-success" :disabled="starting || running || !selectedDeviceId" @click="runProject">
+              {{ starting ? '启动中...' : running ? '运行中' : '运行' }}
+            </button>
+          </span>
+          <span class="btn-wrap" title="停止运行 (F6)">
+            <button class="btn btn-danger" :disabled="stopping || !selectedDeviceId" @click="stopDebugger">
+              {{ stopping ? '停止中...' : '停止' }}
+            </button>
+          </span>
             <button class="btn btn-secondary" :disabled="pausing || !selectedDeviceId" @click="pauseDebugger">
               {{ pausing ? '暂停中...' : '暂停' }}
             </button>
@@ -196,7 +200,7 @@
         <div v-if="activeProject" class="runtime-panel side-section">
           <div class="panel-title-row">
             <span class="hud-label" style="margin-bottom:0">运行日志</span>
-            <button class="btn btn-secondary btn-sm" @click="runtimeLogs = []">清空</button>
+            <button class="btn btn-secondary btn-sm" @click="clearRuntimeLogs">清空</button>
           </div>
           <div class="runtime-cursor">
             <span>光标</span>
@@ -319,27 +323,15 @@ import * as api from '../services/api'
 import { wsClient } from '../services/ws'
 import { DOBOT_API_CATALOG } from '../services/dobotApiCatalog'
 import { deviceStore } from '../stores/deviceStore'
+import { runtimeStore } from '../stores/runtimeStore'
+import type { RuntimeLogEntry } from '../stores/runtimeStore'
+import { loadWorkspace, saveWorkspace } from '../stores/workspaceState'
 import Toast from '../components/Toast.vue'
 import type { DeviceConfig, ScriptLanguage } from 'docat-shared/types'
 
 type MonacoLanguage = 'lua' | 'python'
 type OpenMode = 'source' | 'all'
-type RuntimeLevel = 'client' | 'special' | 'popup' | 'error'
 type DialogKind = '' | 'rename-project' | 'delete-project' | 'delete-file'
-
-interface RuntimeLogEntry {
-  id: number
-  time: string
-  level: RuntimeLevel
-  text: string
-}
-
-interface RuntimeMessage {
-  port?: number
-  level?: RuntimeLevel
-  data?: string
-  timestamp?: number
-}
 
 defineOptions({ name: 'ProgrammingView' })
 
@@ -391,10 +383,10 @@ const renameName = ref('')
 const openMode = ref<OpenMode>('source')
 const editorContainer = ref<HTMLElement | null>(null)
 const runtimeLogContainer = ref<HTMLElement | null>(null)
-const runtimeLogs = ref<RuntimeLogEntry[]>([])
-const runtimeCursorText = ref('')
-let unsubRuntimeLog: () => void = () => {}
-let unsubRuntimeCursor: () => void = () => {}
+const runtimeState = computed(() => selectedDeviceId.value ? runtimeStore.getState(selectedDeviceId.value) : null)
+const runtimeLogs = computed<RuntimeLogEntry[]>(() => runtimeState.value?.logs ?? [])
+const runtimeCursorText = computed(() => runtimeState.value?.cursorText ?? '')
+const running = computed(() => runtimeState.value?.running ?? false)
 const loading = ref(false)
 const loadingProjects = ref(false)
 const opening = ref(false)
@@ -407,7 +399,7 @@ const updatingPoint = ref(false)
 const editingPointId = ref('')
 const editingJoints = ref<number[]>([0,0,0,0,0,0])
 const projectPoints = ref<api.PointData[]>([])
-const running = ref(false)
+const starting = ref(false)
 const stopping = ref(false)
 const pausing = ref(false)
 const continuing = ref(false)
@@ -444,9 +436,15 @@ let cursorDecorations: monaco.editor.IEditorDecorationsCollection | null = null
 let breakpointDecorations: monaco.editor.IEditorDecorationsCollection | null = null
 let resizeObserver: ResizeObserver | null = null
 let syncingEditor = false
-let runtimeLogId = 0
 let monacoConfiguredForInstance = false
 let completionDisposables: Array<{ dispose: () => void }> = []
+let savedEditorViewState: monaco.editor.ICodeEditorViewState | null = null
+let pendingViewState: unknown = null
+let workspaceSaveTimer: ReturnType<typeof setTimeout> | null = null
+let editorCursorSub: { dispose(): void } | null = null
+let runtimePollTimer: ReturnType<typeof setInterval> | null = null
+const autoOpenedForDevice = ref('')
+let editorScrollSub: { dispose(): void } | null = null
 const breakpoints = ref<Record<string, number[]>>({})
 
 const LANGUAGE_KEYWORDS: Record<MonacoLanguage, string[]> = {
@@ -743,6 +741,8 @@ function initEditor() {
   })
   cursorDecorations = editor.createDecorationsCollection()
   breakpointDecorations = editor.createDecorationsCollection()
+  editorCursorSub = editor.onDidChangeCursorPosition(scheduleWorkspaceSave)
+  editorScrollSub = editor.onDidScrollChange(scheduleWorkspaceSave)
   editor.onDidChangeModelContent(() => {
     if (!editor || syncingEditor || !activeFile.value) return
     activeFile.value.content = editor.getValue()
@@ -778,7 +778,19 @@ function syncEditor() {
       syncingEditor = false
     }
     updateBreakpointDecorations()
+    // 重新应用当前运行行（如脚本已在运行中打开项目）
+    const runtime = selectedDeviceId.value ? runtimeStore.getState(selectedDeviceId.value) : null
+    if (runtime?.line && runtime.line > 0) setExecutionLine(runtime.line)
     editor.layout()
+    // 刷新恢复：应用保存的光标/滚动位置
+    if (pendingViewState) {
+      try {
+        editor.restoreViewState(pendingViewState as monaco.editor.ICodeEditorViewState)
+      } catch {
+        // 状态已失效则忽略
+      }
+      pendingViewState = null
+    }
   })
 }
 
@@ -807,6 +819,7 @@ function setExecutionLine(line: number) {
   const model = editor?.getModel()
   if (!model || !cursorDecorations) return
   const safeLine = Math.min(Math.max(line, 1), model.getLineCount())
+  if (selectedDeviceId.value) runtimeStore.getState(selectedDeviceId.value).line = safeLine
   cursorDecorations.set([{
     range: new monaco.Range(safeLine, 1, safeLine, model.getLineMaxColumn(safeLine)),
     options: {
@@ -823,7 +836,74 @@ function setExecutionLine(line: number) {
 }
 
 function clearExecutionLine() {
+  if (selectedDeviceId.value) runtimeStore.clearLine(selectedDeviceId.value)
   cursorDecorations?.clear()
+}
+
+function clearRuntimeLogs() {
+  if (selectedDeviceId.value) runtimeStore.getState(selectedDeviceId.value).logs = []
+}
+
+// ─── 工作区持久化（刷新后恢复项目/光标；运行状态直接查设备）──
+
+function persistWorkspace(viewState: unknown = null) {
+  if (!selectedDeviceId.value || !activeProject.value || !activeFileName.value) return
+  saveWorkspace({
+    deviceId: selectedDeviceId.value,
+    projectName: activeProject.value.name,
+    fileName: activeFileName.value,
+    viewState,
+  })
+}
+
+function scheduleWorkspaceSave() {
+  if (workspaceSaveTimer) clearTimeout(workspaceSaveTimer)
+  workspaceSaveTimer = setTimeout(() => {
+    workspaceSaveTimer = null
+    persistWorkspace(editor?.saveViewState() ?? null)
+  }, 500)
+}
+
+async function restoreLastWorkspace() {
+  if (!selectedDeviceId.value) return
+  const last = loadWorkspace(selectedDeviceId.value)
+  if (!last || !last.projectName) return
+  const exists = projects.value.some(p => p.name === last.projectName)
+    || (isMock && Boolean((MOCK_PROJECTS as Record<string, unknown>)[last.projectName]))
+  if (!exists) return
+  pendingViewState = last.viewState ?? null
+  await openProject(last.projectName, last.fileName || undefined)
+}
+
+// ─── 运行状态同步（以设备为准，/debugger/state + TCP）──
+
+const RUNTIME_POLL_INTERVAL = 5000
+
+/** 查询设备运行状态；若设备在运行且未打开任何项目，自动打开运行中的项目 */
+async function syncRuntimeState(deviceId: string) {
+  await runtimeStore.syncFromDevice(deviceId)
+  const s = runtimeStore.getState(deviceId)
+  if (!s.running || !s.runningProject) return
+  if (activeProject.value) return
+  if (autoOpenedForDevice.value === deviceId) return
+  const exists = projects.value.some(p => p.name === s.runningProject)
+  if (!exists || opening.value) return
+  autoOpenedForDevice.value = deviceId
+  await openProject(s.runningProject)
+}
+
+function startRuntimePoll() {
+  stopRuntimePoll()
+  runtimePollTimer = setInterval(() => {
+    if (selectedDeviceId.value) void syncRuntimeState(selectedDeviceId.value)
+  }, RUNTIME_POLL_INTERVAL)
+}
+
+function stopRuntimePoll() {
+  if (runtimePollTimer) {
+    clearInterval(runtimePollTimer)
+    runtimePollTimer = null
+  }
 }
 
 function canToggleBreakpoint(file = activeFile.value): boolean {
@@ -866,10 +946,6 @@ function updateBreakpointDecorations() {
   })))
 }
 
-function isRuntimeFinishText(text: string): boolean {
-  return /(?:\.py:finish|\.lua:finish|:finish\b|script executed|script finished|执行完成|运行完成|程序结束|\bdone\b)/i.test(text)
-}
-
 function parseErrorLines(message: string): number[] {
   const lines = new Set<number>()
   const patterns = [
@@ -885,83 +961,6 @@ function parseErrorLines(message: string): number[] {
     }
   }
   return [...lines]
-}
-
-function parseRuntimeCursor(payload: unknown): { fileName?: string; line?: number; text: string } {
-  const data = typeof payload === 'object' && payload
-    ? String((payload as RuntimeMessage).data ?? '')
-    : String(payload ?? '')
-  const text = data.trim()
-  if (!text) return { text }
-
-  try {
-    const json = JSON.parse(text) as Record<string, unknown>
-    const fileName = typeof json.file === 'string' ? json.file : typeof json.thread === 'string' ? json.thread : undefined
-    const line = Number(json.line ?? json.progress)
-    return { fileName, line: Number.isFinite(line) && line > 0 ? line : undefined, text }
-  } catch {
-    // raw controller message
-  }
-
-  const fileMatch = /(?:^|[/\s])([^/\s:]+\.(?:lua|py)):(\d+)/.exec(text)
-  if (fileMatch) {
-    return { fileName: fileMatch[1], line: Number(fileMatch[2]), text }
-  }
-
-  const numberMatch = /^(\d+)$/.exec(text) || /(?:line|Line|行)\s*[:：]?\s*(\d+)/.exec(text)
-  if (numberMatch) return { line: Number(numberMatch[1]), text }
-
-  return { text }
-}
-
-function appendRuntimeLog(payload: unknown) {
-  const message = (typeof payload === 'object' && payload ? payload as RuntimeMessage : {}) as RuntimeMessage
-  const rawText = String(message.data ?? payload ?? '').trim()
-  if (!rawText) return
-  const isError = /(?:ERROR|ALARM|error|Traceback|Exception)/.test(rawText)
-  const entry: RuntimeLogEntry = {
-    id: ++runtimeLogId,
-    time: new Date(message.timestamp ?? Date.now()).toISOString(),
-    level: isError ? 'error' : message.level ?? 'client',
-    text: rawText,
-  }
-  runtimeLogs.value = [...runtimeLogs.value.slice(-199), entry]
-  nextTick(() => {
-    if (runtimeLogContainer.value) runtimeLogContainer.value.scrollTop = runtimeLogContainer.value.scrollHeight
-  })
-}
-
-function handleRuntimeLog(deviceId: string, payload: unknown) {
-  if (deviceId !== selectedDeviceId.value) return
-  appendRuntimeLog(payload)
-  const text = typeof payload === 'object' && payload ? String((payload as RuntimeMessage).data ?? '') : String(payload ?? '')
-  if (isRuntimeFinishText(text)) {
-    clearExecutionLine()
-    runtimeCursorText.value = '已完成'
-    return
-  }
-  const fileMatch = /([^/\s:]+\.(?:lua|py)):(\d+)/.exec(text)
-  if (fileMatch) {
-    const line = Number(fileMatch[2])
-    const fileName = fileMatch[1]
-    if (activeProject.value?.fileList.some(file => file.name === fileName)) selectFile(fileName)
-    if (Number.isFinite(line) && line > 0) nextTick(() => setExecutionLine(line))
-  }
-}
-
-function handleRuntimeCursor(deviceId: string, payload: unknown) {
-  if (deviceId !== selectedDeviceId.value) return
-  const cursor = parseRuntimeCursor(payload)
-  if (isRuntimeFinishText(cursor.text)) {
-    clearExecutionLine()
-    runtimeCursorText.value = '已完成'
-    return
-  }
-  runtimeCursorText.value = cursor.text || (cursor.line ? `第 ${cursor.line} 行` : '')
-  if (cursor.fileName && activeProject.value?.fileList.some(file => file.name === cursor.fileName)) {
-    selectFile(cursor.fileName)
-  }
-  if (cursor.line) nextTick(() => setExecutionLine(cursor.line!))
 }
 
 async function loadAll() {
@@ -1019,16 +1018,18 @@ function chooseInitialFile(detail: api.ControllerProjectDetail) {
   activeFileName.value = (openMode.value === 'source' ? source : detail.fileList[0])?.name ?? ''
 }
 
-async function openProject(projectName: string) {
+async function openProject(projectName: string, preferredFile?: string) {
   if (!selectedDeviceId.value) return
   if (isMock) {
     const lang = (MOCK_PROJECTS as Record<string, { language: ScriptLanguage }>)[projectName]?.language ?? 'lua'
     activeProject.value = makeMockDetail(projectName, lang)
     renameName.value = projectName
-    runtimeLogs.value = []
-    runtimeCursorText.value = ''
+    runtimeStore.reset(selectedDeviceId.value)
     clearExecutionLine()
     chooseInitialFile(activeProject.value)
+    if (preferredFile && activeProject.value.fileList.some(file => file.name === preferredFile)) {
+      activeFileName.value = preferredFile
+    }
     syncEditor()
     loadPoints()
     toastRef.value?.success(`[Mock] 已打开 ${projectName}`)
@@ -1041,10 +1042,12 @@ async function openProject(projectName: string) {
     if (res.success && res.data) {
       activeProject.value = res.data
       renameName.value = res.data.name
-      runtimeLogs.value = []
-      runtimeCursorText.value = ''
+      runtimeStore.reset(selectedDeviceId.value)
       clearExecutionLine()
       chooseInitialFile(res.data)
+      if (preferredFile && res.data.fileList.some(file => file.name === preferredFile)) {
+        activeFileName.value = preferredFile
+      }
       await loadProjects()
       syncEditor()
       loadPoints()
@@ -1215,50 +1218,61 @@ async function saveDirtyFiles() {
 
 async function runProject() {
   if (!selectedDeviceId.value || !activeProject.value) return
+  if (starting.value || running.value) {
+    toastRef.value?.info('脚本正在运行中，请先停止')
+    return
+  }
+  const deviceId = selectedDeviceId.value
   if (isMock) {
-    running.value = true
-    runtimeLogs.value = []
-    runtimeCursorText.value = ''
-    clearExecutionLine()
-    appendRuntimeLog({ level: 'client', data: '[Mock] 正在运行项目...' })
+    runtimeStore.reset(deviceId)
+    runtimeStore.setRunning(deviceId, true)
+    runtimeStore.addLog(deviceId, 'client', '[Mock] 正在运行项目...')
     toastRef.value?.success('[Mock] 已启动（按 F6 停止）')
     return
   }
-  running.value = true
+  starting.value = true
   try {
     if (!(await saveDirtyFiles())) return
-    runtimeLogs.value = []
-    runtimeCursorText.value = ''
+    runtimeStore.reset(deviceId)
     clearExecutionLine()
     const breakpointLines = buildDebuggerBreakpoints()
-    appendRuntimeLog({ level: 'client', data: `断点 ${JSON.stringify(breakpointLines)}` })
-    const breakpointRes = await api.debuggerBreakPoint(selectedDeviceId.value, breakpointLines)
+    runtimeStore.addLog(deviceId, 'client', `断点 ${JSON.stringify(breakpointLines)}`)
+    const breakpointRes = await api.debuggerBreakPoint(deviceId, breakpointLines)
     if (!breakpointRes.success) {
       toastRef.value?.error(`设置断点失败：${breakpointRes.error?.message}`)
       return
     }
-    const res = await api.runDeviceProject(selectedDeviceId.value, activeProject.value.name)
+    const res = await api.runDeviceProject(deviceId, activeProject.value.name)
     if (res.success) {
       clearEditorMarkers()
+      runtimeStore.setRunning(deviceId, true)
       toastRef.value?.success(`已启动 ${activeProject.value.name}`)
     } else {
       if (res.error?.message) markEditorError(res.error.message)
       toastRef.value?.error(`运行失败：${res.error?.message}`)
     }
   } finally {
-    running.value = false
+    starting.value = false
   }
 }
 
 async function stopDebugger() {
   if (!selectedDeviceId.value) return
-  if (isMock) { running.value = false; clearExecutionLine(); runtimeCursorText.value = '已停止'; toastRef.value?.info('[Mock] 已停止'); return }
+  const deviceId = selectedDeviceId.value
+  if (isMock) {
+    runtimeStore.setRunning(deviceId, false)
+    runtimeStore.clearLine(deviceId)
+    runtimeStore.getState(deviceId).cursorText = '已停止'
+    toastRef.value?.info('[Mock] 已停止')
+    return
+  }
   stopping.value = true
   try {
-    const res = await api.debuggerStop(selectedDeviceId.value)
+    const res = await api.debuggerStop(deviceId)
     if (res.success) {
-      clearExecutionLine()
-      runtimeCursorText.value = '已停止'
+      runtimeStore.setRunning(deviceId, false)
+      runtimeStore.clearLine(deviceId)
+      runtimeStore.getState(deviceId).cursorText = '已停止'
       toastRef.value?.info('调试器已停止')
     }
     else toastRef.value?.error(`停止失败：${res.error?.message}`)
@@ -1397,8 +1411,7 @@ async function deleteProjectConfirmed(projectName: string) {
       if (activeProject.value?.name === name) {
         activeProject.value = null
         activeFileName.value = ''
-        runtimeLogs.value = []
-        runtimeCursorText.value = ''
+        runtimeStore.reset(selectedDeviceId.value)
         clearExecutionLine()
         syncEditor()
       }
@@ -1443,22 +1456,63 @@ watch(selectedDeviceId, async id => {
   wsClient.subscribe(id)
   activeProject.value = null
   activeFileName.value = ''
-  runtimeLogs.value = []
-  runtimeCursorText.value = ''
+  autoOpenedForDevice.value = ''
+  runtimeStore.reset(id)
   clearExecutionLine()
   await loadProjects()
+  await syncRuntimeState(id)
 })
 watch(routeDeviceId, id => {
   if (id) selectedDeviceId.value = id
 }, { immediate: true })
 
-onMounted(() => {
-  if (!isMock) {
-    unsubRuntimeLog = wsClient.onRuntimeLog(handleRuntimeLog)
-    unsubRuntimeCursor = wsClient.onRuntimeCursor(handleRuntimeCursor)
+// 运行状态（store 由 WS 更新）→ 编辑器执行行 + 自动切换文件
+watch(
+  () => {
+    const id = selectedDeviceId.value
+    const s = id ? runtimeStore.states[id] : null
+    return s && s.line > 0 ? `${s.line}:${s.fileName ?? ''}` : ''
+  },
+  key => {
+    if (!key) return
+    const id = selectedDeviceId.value
+    if (!id) return
+    const s = runtimeStore.getState(id)
+    if (s.line > 0) {
+      if (s.fileName && activeProject.value?.fileList.some(f => f.name === s.fileName)) {
+        // 先切换文件（syncEditor 的 setValue 会丢装饰），nextTick 后再画执行行
+        selectFile(s.fileName)
+        nextTick(() => setExecutionLine(s.line))
+      } else {
+        setExecutionLine(s.line)
+      }
+    }
   }
-  loadAll()
+)
+
+// 日志自动滚动到底部
+watch(runtimeLogs, () => {
+  nextTick(() => {
+    if (runtimeLogContainer.value) runtimeLogContainer.value.scrollTop = runtimeLogContainer.value.scrollHeight
+  })
+})
+
+onMounted(async () => {
+  await loadAll()
+  await syncRuntimeState(selectedDeviceId.value)
+  if (!activeProject.value) await restoreLastWorkspace()
+  startRuntimePoll()
+  window.addEventListener('pagehide', handlePageHide)
   ;(document.querySelector('.programming-page') as HTMLElement)?.focus()
+})
+
+function handlePageHide() {
+  persistWorkspace(editor?.saveViewState() ?? null)
+}
+
+// 项目/文件变化时保存工作区（不含光标，避免跨文件错位）
+watch([() => activeProject.value?.name, activeFileName], () => {
+  persistWorkspace()
 })
 
 function onKeyDown(e: KeyboardEvent) {
@@ -1467,18 +1521,41 @@ function onKeyDown(e: KeyboardEvent) {
   if (mod && e.key === 's') { e.preventDefault(); saveActiveFile(); return }
   // Escape: focus editor
   if (e.key === 'Escape') { editor?.focus(); return }
-  if (e.key === 'F5') { e.preventDefault(); runProject(); return }
+  if (e.key === 'F9') { e.preventDefault(); runProject(); return }
   if (e.key === 'F6') { e.preventDefault(); stopDebugger(); return }
   if (e.key === 'F7') { e.preventDefault(); pauseDebugger(); return }
   if (e.key === 'F8') { e.preventDefault(); continueDebugger(); return }
 }
 onActivated(() => {
-  nextTick(() => editor?.layout())
+  // 切回本页：可能被 DeviceView 卸载时 unsubscribe 过，需重新订阅
+  if (selectedDeviceId.value) {
+    wsClient.subscribe(selectedDeviceId.value)
+    void syncRuntimeState(selectedDeviceId.value)
+  }
+  startRuntimePoll()
+  nextTick(() => {
+    if (!editor) return
+    editor.layout()
+    if (savedEditorViewState) {
+      editor.restoreViewState(savedEditorViewState)
+      savedEditorViewState = null
+    }
+    const runtime = selectedDeviceId.value ? runtimeStore.getState(selectedDeviceId.value) : null
+    if (runtime?.line && runtime.line > 0) setExecutionLine(runtime.line)
+    editor.focus()
+  })
 })
-onDeactivated(() => undefined)
+onDeactivated(() => {
+  stopRuntimePoll()
+  savedEditorViewState = editor?.saveViewState() ?? null
+  persistWorkspace(savedEditorViewState)
+})
 onBeforeUnmount(() => {
-  unsubRuntimeLog()
-  unsubRuntimeCursor()
+  stopRuntimePoll()
+  window.removeEventListener('pagehide', handlePageHide)
+  if (workspaceSaveTimer) clearTimeout(workspaceSaveTimer)
+  editorCursorSub?.dispose()
+  editorScrollSub?.dispose()
   resizeObserver?.disconnect()
   cursorDecorations?.clear()
   breakpointDecorations?.clear()
@@ -1618,6 +1695,8 @@ onBeforeUnmount(() => {
 .select-input:disabled { opacity: 0.78; cursor: not-allowed; }
 .input:focus, .select-input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .run-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-wrap { display: inline-block; }
+.btn-wrap > .btn { width: 100%; }
 .deploy-info { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--void-surface); }
 .info-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .info-row span { font-family: var(--font-display); font-size: 0.5rem; color: var(--text-muted); letter-spacing: 0.08em; }
