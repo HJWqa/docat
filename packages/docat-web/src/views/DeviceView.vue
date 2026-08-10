@@ -36,7 +36,10 @@
           <span class="toggle-track">
             <span class="toggle-thumb" />
           </span>
-          <span class="toggle-label">{{ enabling ? '使能中...' : enabled ? '已使能' : '未使能' }}</span>
+          <span class="toggle-label">
+            <span class="toggle-label-main" :class="{ 'is-on': enabled && !enabling }">{{ enabling ? '使能中...' : enabled ? '已使能' : '未使能' }}</span>
+            <span class="toggle-label-load" :class="{ 'is-inactive': !(enabled && !enabling) }" :title="loadBadgeTitle">{{ loadBadgeText }}</span>
+          </span>
         </label>
         <button v-if="!isConnected" class="btn btn-success btn-sm" @click="doConnect" :disabled="connecting">
           {{ connecting ? '连接中...' : '连接' }}
@@ -774,11 +777,11 @@
                   <div class="load-fields">
                     <div class="load-field">
                       <label>名称</label>
-                      <input :value="loadParamsForm.name" class="input-sm" readonly placeholder="（选择一个预设）" />
+                      <input v-model.trim="loadParamsForm.name" class="input-sm" placeholder="自定义（留空 = 自定义挡位）" />
                     </div>
                     <div class="load-field">
-                      <label>重量 (kg)</label>
-                      <input v-model.number="loadParamsForm.loadValue" type="number" class="input-sm" step="0.001" min="0" />
+                      <label>重量 (g)</label>
+                      <input v-model.number="loadParamsForm.loadValue" type="number" class="input-sm" step="1" min="0" />
                     </div>
                     <div class="load-field">
                       <label>质心 X (mm)</label>
@@ -819,7 +822,7 @@
                       <tr v-for="(item, i) in loadConfigs" :key="i" :class="{ 'row--editing': editingPresetIdx === i }">
                         <template v-if="editingPresetIdx === i">
                           <td><input v-model.trim="editPresetForm.name" class="input-xs" style="width:80px" /></td>
-                          <td><input v-model.number="editPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="0.001" /></td>
+                          <td><input v-model.number="editPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="1" /></td>
                           <td><input v-model.number="editPresetForm.centerX" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editPresetForm.centerZ" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
@@ -843,7 +846,7 @@
                       </tr>
                       <tr v-if="addingPreset" class="row--editing">
                         <td><input v-model.trim="addPresetForm.name" class="input-xs" style="width:80px" placeholder="名称" /></td>
-                        <td><input v-model.number="addPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="0.001" placeholder="0" /></td>
+                        <td><input v-model.number="addPresetForm.loadValue" type="number" class="input-xs" style="width:60px" step="1" placeholder="0" /></td>
                         <td><input v-model.number="addPresetForm.centerX" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
                         <td><input v-model.number="addPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
                         <td><input v-model.number="addPresetForm.centerZ" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
@@ -3285,7 +3288,6 @@ async function toggleEnable() {
 }
 
 function checkEnabled(): boolean {
-  if (isMock) return true
   if (!enabled.value) {
     toastRef.value?.error('请先使能设备')
     return false
@@ -3296,6 +3298,13 @@ function checkEnabled(): boolean {
 async function doEnable() {
   enabling.value = true
   try {
+    if (isMock) {
+      enabled.value = true
+      deviceStore.setEnabled(deviceId, true)
+      if (state.value) state.value = { ...state.value, status: { connected: true, mode: 'auto' } }
+      toastRef.value?.success('机器人已使能（Mock）')
+      return
+    }
     toastRef.value?.info('使能中...（可能需要切换示教器开关）')
     const res = await api.enableDevice(deviceId)
     if (res.success) {
@@ -3314,6 +3323,13 @@ async function doEnable() {
 
 async function doDisable() {
   try {
+    if (isMock) {
+      enabled.value = false
+      deviceStore.setEnabled(deviceId, false)
+      if (state.value) state.value = { ...state.value, status: { connected: true, mode: 'manual' } }
+      toastRef.value?.info('机器人已去使能（Mock）')
+      return
+    }
     const res = await api.disableDevice(deviceId)
     if (res.success) {
       enabled.value = false
@@ -3893,16 +3909,35 @@ const editPresetForm = reactive<LoadConfigItem>({ name: '', centerX: 0, centerY:
 const loadingLoadData = ref(false)
 const loadParamsEditable = computed(() => isConnected.value && !loadingLoadData.value)
 
+// 当前负载名称：仅当与设备上的预设匹配时才视为预设挡位（自定义挡位不显示名称）
+const loadBadgeName = computed(() => {
+  const name = loadParamsForm.name.trim()
+  if (!name) return ''
+  return loadConfigs.value.some(c => c.name === name) ? name : ''
+})
+const loadBadgeValue = computed(() => Math.round(loadParamsForm.loadValue))
+const loadBadgeText = computed(() => {
+  const name = loadBadgeName.value
+  return `${loadBadgeValue.value}g${name ? `(${name})` : ''}`
+})
+const loadBadgeTitle = computed(() => {
+  const name = loadBadgeName.value
+  return [
+    `当前负载：${loadBadgeValue.value}g${name ? ` · ${name}` : ''}`,
+    `质心 X/Y/Z：${loadParamsForm.centerX} / ${loadParamsForm.centerY} / ${loadParamsForm.centerZ} mm`,
+  ].join('\n')
+})
+
 async function loadLoadData() {
   if (!isConnected.value && !isMock) return
   loadingLoadData.value = true
   try {
     if (isMock) {
       loadConfigs.value = [
-        { name: 'load1', centerX: 0, centerY: 0, centerZ: 30, loadValue: 0.5 },
-        { name: 'load2', centerX: 20, centerY: 0, centerZ: 50, loadValue: 1.0 },
+        { name: 'load1', centerX: 0, centerY: 0, centerZ: 30, loadValue: 500 },
+        { name: 'load2', centerX: 20, centerY: 0, centerZ: 50, loadValue: 1000 },
       ]
-      Object.assign(loadParamsForm, { name: 'load1', centerX: 0, centerY: 0, centerZ: 30, loadValue: 0.5 })
+      Object.assign(loadParamsForm, { name: 'load1', centerX: 0, centerY: 0, centerZ: 30, loadValue: 500 })
       return
     }
     const [configRes, paramsRes] = await Promise.all([
@@ -3924,6 +3959,10 @@ async function loadLoadData() {
 
 async function saveCurrentLoad() {
   try {
+    if (isMock) {
+      toastRef.value?.success('负载参数已应用（Mock）')
+      return
+    }
     const res = await api.setLoadParams(deviceId, { ...loadParamsForm })
     if (res.success) {
       toastRef.value?.success('负载参数已应用')
@@ -5359,6 +5398,7 @@ onMounted(async () => {
     loadSpeed()
     ensureJogReadyBackground()
   }
+  loadLoadData()
   api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
   api.getRemoteControl(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = r.data.mode === 'online' })
 
@@ -5422,6 +5462,7 @@ onMounted(async () => {
   wsClient.onOnline((id) => {
     if (id === deviceId) {
       deviceStore.setConnected(deviceId, true)
+      loadLoadData()
       api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
       api.getRemoteControl(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = r.data.mode === 'online' })
     }
@@ -5546,10 +5587,25 @@ onUnmounted(() => {
   left: 18px; background: var(--cyan-300);
 }
 .toggle-label {
+  display: flex; flex-direction: column; align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-width: 72px; /* 预留负载行宽度（约 300g(load1)），切换使能时右侧按钮不位移 */
   font-family: var(--font-body); font-size: 0.72rem; font-weight: 500;
   color: var(--text-muted);
-  min-width: 56px;
+  line-height: 1.2;
 }
+.toggle-label-main { font-size: 0.72rem; font-weight: 500; }
+.toggle-label-main.is-on { font-size: 0.6rem; font-weight: 600; }
+.toggle-label-load {
+  font-family: var(--font-mono); font-size: 0.66rem; font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  max-width: 72px; /* 与 .toggle-label 的 min-width 一致，超长预设名省略号截断 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toggle-label-load.is-inactive { display: none; }
 .toggle-switch input:checked ~ .toggle-label { color: var(--cyan-300); }
 
 .status-grid { display: grid; grid-template-columns: minmax(240px, 0.85fr) minmax(300px, 1fr) minmax(420px, 1.45fr); gap: 16px; align-items: stretch; }

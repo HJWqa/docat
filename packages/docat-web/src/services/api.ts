@@ -528,20 +528,39 @@ export interface LoadParams {
   loadValue: number
 }
 
+// 设备协议为 kg，前端统一使用 g — 在 API 边界换算
+const LOAD_G_PER_KG = 1000
+
+function loadToG(value: number): number {
+  return Math.round(value * LOAD_G_PER_KG)
+}
+
 export async function getLoadParams(id: string): Promise<ApiResponse<LoadParams>> {
-  return request('GET', `/api/devices/${id}/loadParams`)
+  const res = await request<LoadParams>('GET', `/api/devices/${id}/loadParams`)
+  if (res.success && res.data) {
+    res.data.loadValue = loadToG(res.data.loadValue)
+  }
+  return res
 }
 
 export async function setLoadParams(id: string, params: LoadParams): Promise<ApiResponse<null>> {
-  return request('POST', `/api/devices/${id}/loadParams`, params)
+  return request('POST', `/api/devices/${id}/loadParams`, {
+    ...params,
+    loadValue: params.loadValue / LOAD_G_PER_KG,
+  })
 }
 
 export async function getLoadConfig(id: string): Promise<ApiResponse<LoadParams[]>> {
-  return request('GET', `/api/devices/${id}/loadConfig`)
+  const res = await request<LoadParams[]>('GET', `/api/devices/${id}/loadConfig`)
+  if (res.success && res.data) {
+    res.data.forEach(item => { item.loadValue = loadToG(item.loadValue) })
+  }
+  return res
 }
 
 export async function setLoadConfig(id: string, config: LoadParams[]): Promise<ApiResponse<null>> {
-  return request('POST', `/api/devices/${id}/loadConfig`, config)
+  return request('POST', `/api/devices/${id}/loadConfig`,
+    config.map(item => ({ ...item, loadValue: item.loadValue / LOAD_G_PER_KG })))
 }
 
 // ─── Custom Postures ──────────────────────────
