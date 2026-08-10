@@ -97,6 +97,8 @@ export class TcpManager extends EventEmitter {
   constructor(host: string) {
     super()
     this.host = host
+    // 默认消费 error 事件，避免无监听时 EventEmitter 抛 ERR_UNHANDLED_ERROR 导致进程崩溃
+    this.on('error', () => {})
   }
 
   /** 已连接的 TCP 端口数 */

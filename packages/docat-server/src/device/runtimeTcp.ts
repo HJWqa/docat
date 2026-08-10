@@ -33,14 +33,21 @@ export async function ensureRuntimeTcp(deviceId: string, ip: string): Promise<vo
   try {
     // 先 claim 设备成为当前客户端（否则 65501 日志不推送）
     const http = new HttpTransport(ip, 22000, 3000)
-    await http.send({
+    const reply = await http.send({
       method: 'post',
       url: '/connection/state',
       portName: ip,
       params: { currentClient: 1, clientName: 'docat-server' },
     })
+
+    // claim 失败（设备不可达/被其他客户端占用）：不连 TCP，避免无意义连接与重连风暴
+    if (!reply.status) {
+      claiming.delete(deviceId)
+      return
+    }
   } catch {
-    // claim 失败（设备被其他客户端占用）：仍监听，光标广播仍可收到
+    claiming.delete(deviceId)
+    return
   }
 
   const tcp = new TcpManager(ip)
