@@ -7,6 +7,10 @@
         <p class="header-subtitle">系统状态 · 设备管理</p>
       </div>
       <div class="header-actions">
+        <a href="#/orchestration" target="_blank" rel="noopener" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="2.5" width="4.5" height="3.2" rx="0.6" stroke="currentColor" stroke-width="1.1"/><rect x="10.5" y="2.5" width="4.5" height="3.2" rx="0.6" stroke="currentColor" stroke-width="1.1"/><rect x="5.75" y="10.3" width="4.5" height="3.2" rx="0.6" stroke="currentColor" stroke-width="1.1"/><path d="M3.2 5.7v1.6a1 1 0 001 1h1.5M12.8 5.7v1.6a1 1 0 01-1 1h-1.5M6.5 9a2.2 2.2 0 003 0M8 9.3v1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          编排
+        </a>
         <router-link to="/programming" class="btn btn-secondary">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4M10 4l4 4-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 2L7 14" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
           编程
@@ -353,7 +357,27 @@ async function load() {
   if (res.success && res.data) {
     devices.value = res.data
     deviceStore.setDevices(res.data)
+    // 刷新/导航后 store 为空，主动向服务端同步每台设备的连接状态
+    await syncConnectionStatuses(res.data)
   }
+}
+
+/** 从服务端拉取每台设备的实时连接状态，覆盖刷新后 store 丢失的问题 */
+async function syncConnectionStatuses(list: DeviceConfig[]) {
+  await Promise.all(list.map(async (d) => {
+    try {
+      const s = await api.getDeviceStatus(d.id)
+      if (s.success && s.data) {
+        if (s.data.connected) {
+          deviceStore.setConnected(d.id, true, s.data.mode ?? null)
+        } else {
+          deviceStore.setOffline(d.id)
+        }
+      }
+    } catch {
+      // 单台设备状态拉取失败不影响整体
+    }
+  }))
 }
 
 async function scan() {
@@ -433,7 +457,16 @@ async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive'
   } else {
     const msg = res.error?.message ?? ''
     const code = res.error?.code
-    if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
+    if (code === 40902 || msg.includes('设备已连接')) {
+      // 服务端仍持有连接（如刷新后本地状态丢失），同步而非报错
+      const s = await api.getDeviceStatus(id)
+      if (s.success && s.data?.connected) {
+        deviceStore.setConnected(id, true, s.data.mode ?? mode)
+        toastRef.value?.info('设备已连接')
+        return
+      }
+      toastRef.value?.error(msg)
+    } else if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
       toastRef.value?.error(`${msg}`, { action: { label: '强制释放', handler: () => doForceRelease(id) } })
     } else {
       toastRef.value?.error(`连接失败：${msg}`)
