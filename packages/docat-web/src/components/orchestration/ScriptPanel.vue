@@ -73,6 +73,7 @@
       <span>API：</span>
       <code>devices.send(设备名, 文本)</code>
       <code>devices.onMessage(设备名, cb)</code>
+      <code>devices.waitFor(设备名, 'GP;reached;')</code>
       <code>poses.get(姿态名)</code>
       <code>poses.get(姿态名, ';')</code>
       <code>utils.toArray(文本)</code>
@@ -92,7 +93,10 @@ import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
 import 'monaco-editor/features/register.all'
 import 'monaco-editor/languages/definitions/javascript/register'
 import 'monaco-editor/languages/definitions/python/register'
-import { addLog, isOrchMockMode, onOrchScriptChange, onOrchScriptsDirChange, orchStore } from '../../stores/orchestrationStore'
+// 直接导入 Monarch 定义并主动注册（绕过懒加载器，避免补全/高亮挂起）
+import * as jsMonarch from 'monaco-editor/languages/definitions/javascript/javascript'
+import * as pyMonarch from 'monaco-editor/languages/definitions/python/python'
+import { addLog, isOrchMockMode, onOrchScriptChange, onOrchScriptsDirChange, orchStore, orchTypeLabel } from '../../stores/orchestrationStore'
 import { pickScriptFile, runScript, watchScriptFile, type ScriptRunHandle } from '../../services/orchestration'
 import { orchGetScript, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
 import Toast from '../Toast.vue'
@@ -121,6 +125,38 @@ const fileList = ref<OrchScriptFileInfo[]>([])
 const loadingFiles = ref(false)
 const saving = ref(false)
 const openingEditor = ref(false)
+
+// ─── 记住上次打开的脚本 ──────────────────────────────
+
+const LAST_SCRIPT_KEY = 'docat.orchestration.last-script'
+
+interface LastScriptRecord {
+  name: string
+  language: string
+  /** 真实模式：服务端文件 mtime，用于判断是否仍是最新 */
+  mtime?: number
+  /** mock 模式：本地内容快照 */
+  content?: string
+}
+
+function saveLastScript(record: LastScriptRecord) {
+  try {
+    localStorage.setItem(LAST_SCRIPT_KEY, JSON.stringify(record))
+  } catch {
+    // ignore
+  }
+}
+
+function loadLastScript(): LastScriptRecord | null {
+  try {
+    const raw = localStorage.getItem(LAST_SCRIPT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<LastScriptRecord>
+    return parsed?.name ? (parsed as LastScriptRecord) : null
+  } catch {
+    return null
+  }
+}
 
 const fileHandle = ref<FileSystemFileHandle | null>(null)
 const followEnabled = ref(orchStore.settings.scriptFollow)
@@ -161,6 +197,7 @@ let syncing = false
 
 function initEditor() {
   if (!editorContainer.value || editor) return
+  configureDocatCompletion()
   monaco.editor.defineTheme('orch-dark', {
     base: 'vs-dark',
     inherit: true,
@@ -191,10 +228,14 @@ function initEditor() {
     lineHeight: 21,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
-    tabSize: 4,
+    tabSize: 2,
     insertSpaces: true,
     wordWrap: 'on',
     readOnly: false,
+    quickSuggestions: { other: true, comments: false, strings: false },
+    quickSuggestionsDelay: 60,
+    suggestOnTriggerCharacters: true,
+    wordBasedSuggestions: 'off',
     padding: { top: 12, bottom: 12 },
   })
   editor.onDidChangeModelContent(() => {
@@ -211,6 +252,146 @@ function initEditor() {
   })
   resizeObserver = new ResizeObserver(() => editor?.layout())
   resizeObserver.observe(editorContainer.value)
+}
+
+// ─── 自动补全（docat API + 设备名 + 姿态名）──────────
+
+let completionConfigured = false
+let completionDisposables: Array<{ dispose(): void }> = []
+
+interface DocatCompletionItem {
+  label: string
+  detail: string
+  documentation: string
+  /** 插入文本（支持 snippet 占位符 ${1:...}） */
+  insert: string
+}
+
+const DOCAT_API_JS: DocatCompletionItem[] = [
+  { label: 'devices', detail: '设备收发', documentation: '设备对象：send / onMessage / onConnect / onDisconnect / isConnected', insert: 'devices' },
+  { label: 'devices.send', detail: '按设备名发送消息', documentation: 'devices.send(设备名, 文本)', insert: 'devices.send(\'${1:设备名}\', \'${2:消息}\')' },
+  { label: 'devices.onMessage', detail: '设备收到消息事件', documentation: 'devices.onMessage(设备名, async (msg) => {...})', insert: 'devices.onMessage(\'${1:设备名}\', async (msg) => {\n  $0\n})' },
+  { label: 'devices.onConnect', detail: '设备连接事件', documentation: 'devices.onConnect(设备名, () => {...})', insert: 'devices.onConnect(\'${1:设备名}\', () => {\n  $0\n})' },
+  { label: 'devices.onDisconnect', detail: '设备断开事件', documentation: 'devices.onDisconnect(设备名, () => {...})', insert: 'devices.onDisconnect(\'${1:设备名}\', () => {\n  $0\n})' },
+  { label: 'devices.isConnected', detail: '查询设备连接状态', documentation: 'devices.isConnected(设备名) → boolean', insert: 'devices.isConnected(\'${1:设备名}\')' },
+  { label: 'poses', detail: '姿态', documentation: '姿态对象：get / list', insert: 'poses' },
+  { label: 'poses.get', detail: '按姿态名取坐标', documentation: 'poses.get(姿态名) → 数组；poses.get(姿态名, \';\') → 文本', insert: 'poses.get(\'${1:姿态名}\')' },
+  { label: 'poses.list', detail: '姿态名列表', documentation: 'poses.list() → string[]', insert: 'poses.list()' },
+  { label: 'utils', detail: '工具', documentation: '工具对象：toArray / toString / sleep', insert: 'utils' },
+  { label: 'utils.toArray', detail: '字符串解析为数组', documentation: 'utils.toArray(文本, 分隔符=\';\')', insert: 'utils.toArray(\'${1:文本}\')' },
+  { label: 'utils.toString', detail: '数组拼接为文本', documentation: 'utils.toString(数组, 分隔符=\';\')', insert: 'utils.toString(${1:数组})' },
+  { label: 'utils.sleep', detail: '等待（可被终止打断）', documentation: 'utils.sleep(毫秒)', insert: 'utils.sleep(${1:毫秒})' },
+  { label: 'log', detail: '日志', documentation: '日志对象：info / warn / error（进编排日志面板）', insert: 'log' },
+  { label: 'log.info', detail: '记录 info 日志', documentation: 'log.info(文本)', insert: 'log.info(\'${1:文本}\')' },
+  { label: 'log.warn', detail: '记录 warn 日志', documentation: 'log.warn(文本)', insert: 'log.warn(\'${1:文本}\')' },
+  { label: 'log.error', detail: '记录 error 日志', documentation: 'log.error(文本)', insert: 'log.error(\'${1:文本}\')' },
+]
+
+const DOCAT_API_PY: DocatCompletionItem[] = [
+  { label: 'docat', detail: 'docat 运行时', documentation: 'import docat', insert: 'import docat' },
+  { label: 'docat.devices', detail: '设备收发', documentation: 'docat.devices.send / on_message / on_connect / on_disconnect / is_connected', insert: 'docat.devices' },
+  { label: 'docat.devices.send', detail: '按设备名发送消息', documentation: "docat.devices.send(设备名, 文本)", insert: 'docat.devices.send(\'${1:设备名}\', \'${2:消息}\')' },
+  { label: 'docat.devices.on_message', detail: '设备收到消息事件（装饰器）', documentation: '@docat.devices.on_message(设备名)', insert: '@docat.devices.on_message(\'${1:设备名}\')\ndef ${2:handler}(msg):\n    $0' },
+  { label: 'docat.devices.on_connect', detail: '设备连接事件（装饰器）', documentation: '@docat.devices.on_connect(设备名)', insert: '@docat.devices.on_connect(\'${1:设备名}\')\ndef ${2:handler}():\n    $0' },
+  { label: 'docat.devices.on_disconnect', detail: '设备断开事件（装饰器）', documentation: '@docat.devices.on_disconnect(设备名)', insert: '@docat.devices.on_disconnect(\'${1:设备名}\')\ndef ${2:handler}():\n    $0' },
+  { label: 'docat.devices.is_connected', detail: '查询设备连接状态', documentation: 'docat.devices.is_connected(设备名) → bool', insert: 'docat.devices.is_connected(\'${1:设备名}\')' },
+  { label: 'docat.poses', detail: '姿态', documentation: 'docat.poses.get / list', insert: 'docat.poses' },
+  { label: 'docat.poses.get', detail: '按姿态名取坐标', documentation: "docat.poses.get(姿态名) → 数组；docat.poses.get(姿态名, sep=';') → 文本", insert: 'docat.poses.get(\'${1:姿态名}\')' },
+  { label: 'docat.poses.list', detail: '姿态名列表', documentation: 'docat.poses.list()', insert: 'docat.poses.list()' },
+  { label: 'docat.utils', detail: '工具', documentation: 'docat.utils.to_array / to_string / sleep', insert: 'docat.utils' },
+  { label: 'docat.utils.to_array', detail: '字符串解析为数组', documentation: "docat.utils.to_array(文本, sep=';')", insert: 'docat.utils.to_array(\'${1:文本}\')' },
+  { label: 'docat.utils.to_string', detail: '数组拼接为文本', documentation: "docat.utils.to_string(数组, sep=';')", insert: 'docat.utils.to_string(${1:数组})' },
+  { label: 'docat.utils.sleep', detail: '等待（可被终止打断）', documentation: 'docat.utils.sleep(毫秒)', insert: 'docat.utils.sleep(${1:毫秒})' },
+  { label: 'docat.log', detail: '日志', documentation: 'docat.log.info / warn / error（进编排日志面板）', insert: 'docat.log' },
+  { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本)', insert: 'docat.log.info(\'${1:文本}\')' },
+  { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本)', insert: 'docat.log.warn(\'${1:文本}\')' },
+  { label: 'docat.log.error', detail: '记录 error 日志', documentation: 'docat.log.error(文本)', insert: 'docat.log.error(\'${1:文本}\')' },
+]
+
+const IDENTIFIER_TRIGGERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'.split('')
+
+function configureDocatCompletion() {
+  if (completionConfigured) return
+  completionConfigured = true
+
+  // 主动注册 Monarch tokenizer 与语言配置（不受懒加载影响，保证高亮与补全即时可用）
+  monaco.languages.setMonarchTokensProvider('javascript', jsMonarch.language)
+  monaco.languages.setLanguageConfiguration('javascript', jsMonarch.conf)
+  monaco.languages.setMonarchTokensProvider('python', pyMonarch.language)
+  monaco.languages.setLanguageConfiguration('python', pyMonarch.conf)
+
+  for (const language of ['javascript', 'python'] as const) {
+    const catalog = language === 'javascript' ? DOCAT_API_JS : DOCAT_API_PY
+    const disposable = monaco.languages.registerCompletionItemProvider(language, {
+      triggerCharacters: ['.', '(', ',', ...IDENTIFIER_TRIGGERS],
+      provideCompletionItems(model, position) {
+        const word = model.getWordUntilPosition(position)
+        const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
+        const suggestions: monaco.languages.CompletionItem[] = []
+
+        // docat API 目录
+        for (const item of catalog) {
+          suggestions.push({
+            label: item.label,
+            kind: monaco.languages.CompletionItemKind.Function,
+            detail: item.detail,
+            documentation: item.documentation,
+            insertText: item.insert,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            sortText: `0000_${item.label}`,
+            range,
+          })
+        }
+
+        // 编排设备名（脚本按名称寻址）
+        for (const d of orchStore.devices) {
+          suggestions.push({
+            label: d.name,
+            kind: monaco.languages.CompletionItemKind.Variable,
+            detail: `编排设备 · ${orchTypeLabel(d.type)}`,
+            insertText: d.name,
+            sortText: `1000_${d.name}`,
+            range,
+          })
+        }
+
+        // 姿态名（脚本 poses.get 寻址）
+        for (const p of orchStore.poses) {
+          suggestions.push({
+            label: p.name,
+            kind: monaco.languages.CompletionItemKind.Value,
+            detail: `姿态 · ${p.type === 'cartesian' ? '位姿' : '关节角'}`,
+            insertText: p.name,
+            sortText: `2000_${p.name}`,
+            range,
+          })
+        }
+
+        // 兜底去重：HMR 或重复注册时避免同 label 出现多次
+        const seen = new Set<string>()
+        const deduped = suggestions.filter(s => {
+          const key = typeof s.label === 'string' ? s.label : s.label.label
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+
+        return { suggestions: deduped }
+      },
+    })
+    completionDisposables.push(disposable)
+  }
+}
+
+// 开发模式 HMR 时释放已注册的 provider，避免旧实例残留导致补全重复
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    for (const d of completionDisposables) {
+      try { d.dispose() } catch { /* ignore */ }
+    }
+    completionDisposables = []
+    completionConfigured = false
+  })
 }
 
 function syncEditor() {
@@ -288,6 +469,7 @@ async function loadServerFile(name: string) {
   serverMtime.value = mtime
   externalUpdate.value = false
   fileChangedWhileRunning.value = false
+  saveLastScript({ name, language: fileLanguage.value, mtime })
   addLog('脚本', 'system', `已从服务端加载 ${name}`)
 }
 
@@ -369,6 +551,7 @@ async function onFileInput(e: Event) {
   lastModified.value = file.lastModified
   fileHandle.value = null
   stopFollow()
+  saveLastScript({ name: file.name, language: fileLanguage.value, content: fileContent.value })
   addLog('脚本', 'system', `已读取文件 ${file.name}（无文件句柄，不支持自动跟随）`)
 }
 
@@ -434,6 +617,11 @@ async function runScriptAction() {
     toastRef.value?.info('Python 脚本需在真实模式运行（后端 python3 子进程）')
     return
   }
+  // 真实模式：先保存未保存的修改，再运行
+  if (!isMock && dirty.value) {
+    await saveFile()
+    if (dirty.value) return // 保存失败则中止
+  }
   const code = fileContent.value
   if (!code.trim()) { toastRef.value?.info('脚本内容为空'); return }
   fileChangedWhileRunning.value = false
@@ -458,7 +646,8 @@ function stopScript() {
   runHandle = null
   running.value = false
   stopRunTimer()
-  addLog('脚本', 'system', '脚本已终止')
+  // 真实模式由服务端记“脚本已终止”，避免重复日志
+  if (isMock) addLog('脚本', 'system', '脚本已终止')
 }
 
 function startRunTimer() {
@@ -553,12 +742,40 @@ setInterval(() => {
   fileHandle.value = null
   stopFollow()
   externalUpdate.value = false
+  saveLastScript({ name: '示例脚本.js', language: 'javascript', content: example })
   addLog('脚本', 'system', '已载入示例脚本（按「运行」体验）')
+}
+
+/** 恢复上次打开的脚本（真实模式从服务端按名加载；mock 模式恢复内容快照） */
+async function restoreLastScript() {
+  const last = loadLastScript()
+  if (!last) return
+  if (isMock) {
+    if (!last.content) return
+    fileName.value = last.name
+    fileLanguage.value = (last.language as ScriptLanguage) || detectLanguage(last.name)
+    fileContent.value = last.content
+    lastSynced.value = last.content
+    fileSize.value = last.content.length
+    lastModified.value = Date.now()
+    externalUpdate.value = false
+    addLog('脚本', 'system', `已恢复上次打开的脚本 ${last.name}`)
+    return
+  }
+  // 真实模式：文件列表已就绪，按名加载（若仍在目录中）
+  if (fileList.value.some(f => f.name === last.name)) {
+    fileName.value = last.name
+    await loadServerFile(last.name)
+  }
 }
 
 onMounted(() => {
   initEditor()
-  if (!isMock) void refreshFileList()
+  if (isMock) {
+    void restoreLastScript()
+  } else {
+    void refreshFileList().then(() => restoreLastScript())
+  }
 })
 
 onBeforeUnmount(() => {

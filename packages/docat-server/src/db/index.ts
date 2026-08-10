@@ -217,6 +217,46 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 007_app_settings applied')
   }
 
+  // ─── 008: 编排设备 ───────────────────────────────
+  if (!applied.has('008_orch_devices')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS orch_devices (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        type TEXT NOT NULL,
+        ip TEXT NOT NULL DEFAULT '',
+        port INTEGER NOT NULL DEFAULT 0,
+        serialPort TEXT NOT NULL DEFAULT '',
+        baudRate INTEGER NOT NULL DEFAULT 115200,
+        targetDeviceId TEXT NOT NULL DEFAULT '',
+        autoReconnect INTEGER NOT NULL DEFAULT 1,
+        heartbeat INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_orch_devices_name ON orch_devices(name);
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('008_orch_devices')").run()
+    console.log('[DB] Migration 008_orch_devices applied')
+  }
+
+  // ─── 009: 编排姿态（独立于设备页姿态）──────────────
+  if (!applied.has('009_orch_poses')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS orch_poses (
+        name TEXT PRIMARY KEY,
+        type TEXT NOT NULL DEFAULT 'cartesian',
+        joint TEXT NOT NULL DEFAULT '[]',
+        pose TEXT NOT NULL DEFAULT '{}',
+        updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('009_orch_poses')").run()
+    console.log('[DB] Migration 009_orch_poses applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 

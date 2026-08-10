@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
 allowBuilds:
+  '@serialport/bindings-cpp': true
   bcrypt: true
   better-sqlite3: true
   cpu-features: true
@@ -17,6 +18,7 @@ minimumReleaseAgeExclude:
   - tsx@4.23.11
   - turbo@2.10.9
 onlyBuiltDependencies:
+  - '@serialport/bindings-cpp'
   - bcrypt
   - better-sqlite3
   - esbuild

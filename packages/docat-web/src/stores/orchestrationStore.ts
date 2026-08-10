@@ -49,6 +49,16 @@ export interface OrchSettings {
   logLimit: number
   autoConnectOnLoad: boolean
   scriptFollow: boolean
+  /** 心跳周期（ms，发送 ping 间隔） */
+  heartbeatInterval: number
+  /** 心跳超时（ms，超过无应答判定失活） */
+  heartbeatTimeout: number
+  /** 心跳连续失活判定阈值（周期数） */
+  heartbeatMissThreshold: number
+  /** 心跳发送内容（支持 \n 换行） */
+  heartbeatPing: string
+  /** 心跳应答内容（支持 \n 换行） */
+  heartbeatPong: string
   /** 服务端脚本文件目录（真实模式，通用设置可修改） */
   scriptsDir: string
 }
@@ -141,6 +151,11 @@ export const orchStore = reactive({
     logLimit: 500,
     autoConnectOnLoad: false,
     scriptFollow: true,
+    heartbeatInterval: 5000,
+    heartbeatTimeout: 15000,
+    heartbeatMissThreshold: 3,
+    heartbeatPing: 'ping;',
+    heartbeatPong: 'pong;',
     scriptsDir: '',
   } as OrchSettings,
   logs: [] as OrchLogEntry[],
@@ -189,6 +204,27 @@ export function recordIp(ip: string): void {
   } catch {
     // ignore
   }
+}
+
+/**
+ * 解析手动输入的坐标文本（6 个数值）：
+ * 支持空格 / 逗号 / 分号 / 回车 / Tab 分隔，首尾可带 [ ] 或 ( )。
+ * 解析成功返回 6 个 float，否则返回 null。
+ */
+export function parsePoseText(text: string): number[] | null {
+  const raw = String(text ?? '').trim()
+  if (!raw) return null
+  const cleaned = raw.replace(/^[[(]/, '').replace(/[\])]$/, '').trim()
+  if (!cleaned) return null
+  const parts = cleaned.split(/[;,\s]+/).filter(Boolean)
+  if (parts.length !== 6) return null
+  const out: number[] = []
+  for (const part of parts) {
+    const v = Number(part)
+    if (!Number.isFinite(v)) return null
+    out.push(v)
+  }
+  return out
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -928,7 +964,28 @@ export async function saveOrchSettings(): Promise<void> {
 
 // ─── 脚本桥接（浏览器内 JS 模拟运行用）─────────────────
 
+type WaitMatcher = string | ((text: string) => boolean)
+
 export function buildScriptContext() {
+  const normalizeMatcher = (matcher: WaitMatcher) =>
+    typeof matcher === 'function' ? matcher : (t: string) => t.startsWith(String(matcher))
+
+  const waitFor = (name: string, matcher: WaitMatcher, timeoutMs = 10000): Promise<string> => {
+    const match = normalizeMatcher(matcher)
+    return new Promise((resolve, reject) => {
+      const unsub = onDeviceMessage(name, (text) => {
+        if (match(text)) {
+          unsub()
+          resolve(text)
+        }
+      })
+      setTimeout(() => {
+        unsub()
+        reject(new Error(`等待 ${name} 应答超时（${timeoutMs}ms）`))
+      }, Math.max(0, Number(timeoutMs) || 10000))
+    })
+  }
+
   return {
     devices: {
       send: (name: string, text: string) => sendMessage(name, String(text)),
@@ -936,6 +993,13 @@ export function buildScriptContext() {
       onConnect: (name: string, cb: () => void) => onDeviceConnect(name, cb),
       onDisconnect: (name: string, cb: () => void) => onDeviceDisconnect(name, cb),
       isConnected: (name: string) => isDeviceConnected(name),
+      /** 等待设备下一条匹配消息（字符串按前缀匹配 / 函数），超时 reject */
+      waitFor: (name: string, matcher: WaitMatcher, timeoutMs?: number) => waitFor(name, matcher, timeoutMs),
+      /** 发送并等待匹配应答 */
+      sendAndWait: (name: string, text: string, matcher: WaitMatcher, timeoutMs?: number) => {
+        sendMessage(name, String(text))
+        return waitFor(name, matcher, timeoutMs)
+      },
     },
     poses: {
       get: (name: string, separator?: string) =>

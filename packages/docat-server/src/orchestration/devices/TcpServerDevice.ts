@@ -1,0 +1,98 @@
+/**
+ * TCP Server 编排设备 — 监听 ip:port，接受一个客户端
+ * 入站数据按行解析并交给 manager；manager.send 写入当前客户端
+ */
+import { createServer, type Server, type Socket } from 'node:net'
+import type { OrchDeviceBackend } from './DeviceBackend.js'
+
+export interface TcpServerEvents {
+  onIncoming: (text: string) => void
+  onError: (message: string) => void
+  onClientChange: (connected: boolean) => void
+}
+
+export class TcpServerDevice implements OrchDeviceBackend {
+  readonly id: string
+  private host: string
+  private port: number
+  private events: TcpServerEvents
+  private server: Server | null = null
+  private client: Socket | null = null
+  private listening = false
+
+  constructor(id: string, host: string, port: number, events: TcpServerEvents) {
+    this.id = id
+    this.host = host
+    this.port = port
+    this.events = events
+  }
+
+  connect(): Promise<{ ok: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      if (this.listening) return resolve({ ok: true })
+      const server = createServer((socket) => {
+        if (this.client) {
+          socket.destroy()
+          return
+        }
+        this.client = socket
+        this.events.onClientChange(true)
+        socket.setEncoding('utf-8')
+        let buffer = ''
+        socket.on('data', (chunk: Buffer | string) => {
+          buffer += String(chunk)
+          let idx: number
+          while ((idx = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, idx).replace(/\r$/, '')
+            buffer = buffer.slice(idx + 1)
+            if (line.trim() !== '') this.events.onIncoming(line)
+          }
+        })
+        socket.on('close', () => {
+          if (this.client === socket) {
+            this.client = null
+            this.events.onClientChange(false)
+          }
+        })
+        socket.on('error', (err) => this.events.onError(err.message))
+      })
+      server.on('error', (err) => {
+        this.listening = false
+        resolve({ ok: false, error: err.message })
+      })
+      server.listen(this.port, this.host, () => {
+        this.listening = true
+        this.server = server
+        resolve({ ok: true })
+      })
+    })
+  }
+
+  async disconnect(): Promise<void> {
+    this.client?.destroy()
+    this.client = null
+    if (this.server) {
+      await new Promise<void>((resolve) => this.server?.close(() => resolve()))
+      this.server = null
+    }
+    this.listening = false
+  }
+
+  async send(text: string): Promise<boolean> {
+    if (!this.client) return false
+    this.client.write(`${text}\n`)
+    return true
+  }
+
+  dispose(): void {
+    this.client?.destroy()
+    this.client = null
+    try {
+      this.server?.close()
+    } catch {
+      // ignore
+    }
+    this.server = null
+    this.listening = false
+  }
+}

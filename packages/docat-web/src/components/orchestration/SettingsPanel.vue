@@ -37,6 +37,36 @@
             <span class="toggle-track"><span class="toggle-thumb" /></span>
           </label>
         </div>
+
+        <div class="heartbeat-settings">
+          <span class="field-label">心跳（ping → pong）</span>
+          <div class="field-row field-row--split">
+            <div class="field-col">
+              <label class="field-label">发送内容</label>
+              <input v-model="orchStore.settings.heartbeatPing" class="field-input" placeholder="ping;" spellcheck="false" />
+            </div>
+            <div class="field-col">
+              <label class="field-label">应答内容</label>
+              <input v-model="orchStore.settings.heartbeatPong" class="field-input" placeholder="pong;" spellcheck="false" />
+            </div>
+          </div>
+          <div class="field-row field-row--split">
+            <div class="field-col">
+              <label class="field-label">周期 (ms)</label>
+              <input v-model.number="orchStore.settings.heartbeatInterval" type="number" min="1000" step="500" class="field-input" />
+            </div>
+            <div class="field-col">
+              <label class="field-label">超时 (ms)</label>
+              <input v-model.number="orchStore.settings.heartbeatTimeout" type="number" min="2000" step="1000" class="field-input" />
+            </div>
+            <div class="field-col">
+              <label class="field-label">失活阈值</label>
+              <input v-model.number="orchStore.settings.heartbeatMissThreshold" type="number" min="1" step="1" class="field-input" />
+            </div>
+          </div>
+          <span class="field-hint">开启心跳的设备按周期发送内容并期待应答，超时连续达阈值判定链路失活（配合自动重连）；输入框为单行，支持 \n 转义换行</span>
+        </div>
+
         <div class="field-row">
           <label class="field-label">脚本目录（服务端）</label>
           <input v-model="orchStore.settings.scriptsDir" class="field-input" placeholder="./data/orch-scripts" spellcheck="false" />
@@ -311,6 +341,11 @@ function removeDevice() {
 .field-input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .field-input--sm { width: 120px; }
 .field-hint { font-size: 0.6rem; color: var(--text-muted); line-height: 1.5; }
+.heartbeat-settings {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--void-surface);
+}
 .field-actions { display: flex; gap: 8px; margin-top: 4px; }
 .field-msg { font-size: 0.64rem; color: var(--status-online); }
 .field-msg--error { color: var(--status-danger); }

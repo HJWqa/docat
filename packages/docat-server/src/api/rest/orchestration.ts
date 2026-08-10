@@ -1,5 +1,5 @@
 /**
- * 编排 REST API — 设置 + 脚本文件（服务端本地目录）
+ * 编排 REST API — 设备 / 姿态 / 设置 / 脚本文件 / 脚本运行
  *
  * 脚本文件目录可通过「通用」设置修改（app_settings 持久化），修改后
  * 服务端热切换 fs.watch 监听目录，并通过 WS orch-event（scripts-dir）
@@ -12,6 +12,9 @@ import { spawn, spawnSync } from 'node:child_process'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import { getSetting, setSetting } from './system.js'
 import { eventBus } from '../../event/EventBus.js'
+import type { OrchDeviceManager } from '../../orchestration/OrchDeviceManager.js'
+import type { RuntimeManager } from '../../runtime/RuntimeManager.js'
+import type { OrchDeviceConfig, OrchPose } from '../../orchestration/types.js'
 import type { ApiResponse } from 'docat-shared/types'
 
 const SCRIPT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(js|mjs|cjs|py)$/
@@ -36,6 +39,16 @@ export interface OrchSettingsPayload {
   logLimit: number
   autoConnectOnLoad: boolean
   scriptFollow: boolean
+  /** 心跳周期（ms，发送 ping; 间隔） */
+  heartbeatInterval: number
+  /** 心跳超时（ms，超过无 pong 判定失活） */
+  heartbeatTimeout: number
+  /** 心跳连续失活判定阈值（周期数） */
+  heartbeatMissThreshold: number
+  /** 心跳发送内容（默认 ping;） */
+  heartbeatPing: string
+  /** 心跳应答内容（默认 pong;） */
+  heartbeatPong: string
   /** 服务端脚本文件目录 */
   scriptsDir: string
 }
@@ -55,6 +68,11 @@ function readOrchSettings(): OrchSettingsPayload {
     logLimit: num(getSetting(`${SETTING_PREFIX}logLimit`), 500),
     autoConnectOnLoad: getSetting(`${SETTING_PREFIX}autoConnectOnLoad`) === 'true',
     scriptFollow: getSetting(`${SETTING_PREFIX}scriptFollow`) !== 'false',
+    heartbeatInterval: num(getSetting(`${SETTING_PREFIX}heartbeatInterval`), 5000),
+    heartbeatTimeout: num(getSetting(`${SETTING_PREFIX}heartbeatTimeout`), 15000),
+    heartbeatMissThreshold: num(getSetting(`${SETTING_PREFIX}heartbeatMissThreshold`), 3),
+    heartbeatPing: getSetting(`${SETTING_PREFIX}heartbeatPing`) || 'ping;',
+    heartbeatPong: getSetting(`${SETTING_PREFIX}heartbeatPong`) || 'pong;',
     scriptsDir: getSetting(SETTING_SCRIPTS_DIR) || currentScriptsDir,
   }
 }
@@ -84,7 +102,7 @@ function ensureWatch(dir: string): void {
   })
 }
 
-export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string): void {
+export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, orchDevices: OrchDeviceManager, runtime: RuntimeManager): void {
   // 启动时恢复用户配置的目录（有则用之），并建立监听
   const persisted = getSetting(SETTING_SCRIPTS_DIR)
   currentScriptsDir = persisted || scriptsDir
@@ -122,6 +140,21 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string): v
         }
         if (body.scriptFollow !== undefined) {
           setSetting(`${SETTING_PREFIX}scriptFollow`, body.scriptFollow ? 'true' : 'false')
+        }
+        if (body.heartbeatInterval !== undefined) {
+          setSetting(`${SETTING_PREFIX}heartbeatInterval`, String(Math.max(1000, Number(body.heartbeatInterval) || 5000)))
+        }
+        if (body.heartbeatTimeout !== undefined) {
+          setSetting(`${SETTING_PREFIX}heartbeatTimeout`, String(Math.max(2000, Number(body.heartbeatTimeout) || 15000)))
+        }
+        if (body.heartbeatMissThreshold !== undefined) {
+          setSetting(`${SETTING_PREFIX}heartbeatMissThreshold`, String(Math.max(1, Number(body.heartbeatMissThreshold) || 3)))
+        }
+        if (body.heartbeatPing !== undefined) {
+          setSetting(`${SETTING_PREFIX}heartbeatPing`, String(body.heartbeatPing || 'ping;'))
+        }
+        if (body.heartbeatPong !== undefined) {
+          setSetting(`${SETTING_PREFIX}heartbeatPong`, String(body.heartbeatPong || 'pong;'))
         }
         if (body.scriptsDir !== undefined) {
           const dir = String(body.scriptsDir || '').trim()
@@ -244,4 +277,194 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string): v
       }
     }
   )
+
+  // ─── 编排设备 CRUD ─────────────────────────────────
+  app.get('/api/orchestration/devices', async (request, reply): Promise<ApiResponse<unknown[]>> => {
+    try {
+      await authMiddleware(request, reply)
+      if (reply.sent) return reply
+      return { success: true, data: orchDevices.list() }
+    } catch (err) {
+      return { success: false, error: { code: 50000, message: (err as Error).message } }
+    }
+  })
+
+  app.post<{ Body: Omit<OrchDeviceConfig, 'id' | 'createdAt'> }>(
+    '/api/orchestration/devices',
+    async (request, reply): Promise<ApiResponse<unknown>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const result = orchDevices.add(request.body)
+        if (!result.ok) return { success: false, error: { code: 42200, message: result.error ?? '添加失败' } }
+        return { success: true, data: result.device }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.put<{ Params: { id: string }; Body: Partial<OrchDeviceConfig> }>(
+    '/api/orchestration/devices/:id',
+    async (request, reply): Promise<ApiResponse<unknown>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const result = orchDevices.update(request.params.id, request.body)
+        if (!result.ok) return { success: false, error: { code: 42200, message: result.error ?? '保存失败' } }
+        return { success: true, data: orchDevices.get(request.params.id) }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/orchestration/devices/:id',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        await orchDevices.remove(request.params.id)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 设备连接 / 断开 / 发送 ────────────────────────
+  app.post<{ Params: { id: string } }>(
+    '/api/orchestration/devices/:id/connect',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const result = await orchDevices.connect(request.params.id)
+        if (!result.ok) return { success: false, error: { code: 50000, message: result.error ?? '连接失败' } }
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/orchestration/devices/:id/disconnect',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        await orchDevices.disconnect(request.params.id)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post<{ Params: { id: string }; Body: { message?: string } }>(
+    '/api/orchestration/devices/:id/send',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const device = orchDevices.get(request.params.id)
+        if (!device) return { success: false, error: { code: 40402, message: '设备不存在' } }
+        const ok = orchDevices.sendByName(device.name, String(request.body.message ?? ''))
+        if (!ok) return { success: false, error: { code: 50000, message: '发送失败（设备未连接或不存在）' } }
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 编排姿态 ──────────────────────────────────────
+  app.get('/api/orchestration/poses', async (request, reply): Promise<ApiResponse<OrchPose[]>> => {
+    try {
+      await authMiddleware(request, reply)
+      if (reply.sent) return reply
+      return { success: true, data: orchDevices.listPoses() }
+    } catch (err) {
+      return { success: false, error: { code: 50000, message: (err as Error).message } }
+    }
+  })
+
+  app.post<{ Body: OrchPose }>(
+    '/api/orchestration/poses',
+    async (request, reply): Promise<ApiResponse<OrchPose>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const result = orchDevices.savePose(request.body)
+        if (!result.ok) return { success: false, error: { code: 42200, message: result.error ?? '保存失败' } }
+        return { success: true, data: request.body }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.delete<{ Params: { name: string } }>(
+    '/api/orchestration/poses/:name',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        orchDevices.deletePose(request.params.name)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 脚本运行 ──────────────────────────────────────
+  app.post<{ Body: { language?: string; content?: string; fileName?: string } }>(
+    '/api/orchestration/script/run',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const language = String(request.body.language ?? 'javascript') === 'python' ? 'python' : 'javascript'
+        const result = await runtime.run({ language, content: String(request.body.content ?? ''), fileName: String(request.body.fileName ?? 'script.js') })
+        if (!result.ok) return { success: false, error: { code: 50000, message: result.error ?? '启动失败' } }
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.post('/api/orchestration/script/stop', async (request, reply): Promise<ApiResponse<null>> => {
+    try {
+      await authMiddleware(request, reply)
+      if (reply.sent) return reply
+      requireOperator(request, reply)
+      if (reply.sent) return reply
+      await runtime.stop()
+      return { success: true, data: null }
+    } catch (err) {
+      return { success: false, error: { code: 50000, message: (err as Error).message } }
+    }
+  })
 }

@@ -28,34 +28,24 @@
         </div>
       </aside>
 
-      <main class="orch-right card">
-        <div class="right-tabs">
-          <button
-            v-for="tab in rightTabs"
-            :key="tab.key"
-            class="right-tab"
-            :class="{ 'right-tab--active': rightTab === tab.key }"
-            @click="rightTab = tab.key"
-          >
-            {{ tab.label }}
-            <span v-if="tab.key === 'log' && orchStore.logs.length" class="tab-count">{{ orchStore.logs.length }}</span>
-          </button>
-        </div>
-        <div class="right-body">
-          <LogPanel v-if="rightTab === 'log'" />
-          <ScriptPanel v-else />
-        </div>
+      <main class="orch-right">
+        <section class="orch-script card">
+          <ScriptPanel />
+        </section>
+        <section class="orch-log card">
+          <LogPanel />
+        </section>
       </main>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import * as api from '../services/api'
 import { deviceStore } from '../stores/deviceStore'
-import { initOrchestration, orchStore, setOrchMockMode } from '../stores/orchestrationStore'
+import { initOrchestration, setOrchMockMode } from '../stores/orchestrationStore'
 import DevicePanel from '../components/orchestration/DevicePanel.vue'
 import SettingsPanel from '../components/orchestration/SettingsPanel.vue'
 import LogPanel from '../components/orchestration/LogPanel.vue'
@@ -63,15 +53,11 @@ import ScriptPanel from '../components/orchestration/ScriptPanel.vue'
 
 const route = useRoute()
 const isMock = computed(() => route.query.mock === '1')
-
-const rightTabs = [
-  { key: 'log' as const, label: '日志' },
-  { key: 'script' as const, label: '脚本' },
-]
-const rightTab = ref<'log' | 'script'>('log')
+// 同步设置模式：子组件 setup 先于父组件 onMounted 执行，
+// 必须在此处立即生效，否则真实模式下子组件会读到 mock 默认值
+setOrchMockMode(isMock.value)
 
 onMounted(async () => {
-  setOrchMockMode(isMock.value)
   // 加载已注册设备（Docat Motion 目标下拉框 / 编程面板数据源）
   if (isMock.value) {
     deviceStore.setDevices([{ id: 'mock-dev', ip: '0.0.0.0', name: 'MOCK DEVICE', type: 'MG6', autoConnect: false, createdAt: '' }])
@@ -106,25 +92,14 @@ onMounted(async () => {
 .orch-layout { display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 16px; align-items: start; }
 .orch-left { display: flex; flex-direction: column; gap: 16px; }
 .orch-card { padding: 16px; }
-.orch-right { padding: 16px; display: flex; flex-direction: column; min-height: 640px; height: calc(100vh - 190px); min-width: 0; }
-
-.right-tabs { display: flex; gap: 2px; margin-bottom: 12px; }
-.right-tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 18px; border: 1px solid var(--border); background: var(--surface-1);
-  color: var(--text-muted); font-family: var(--font-body); font-size: 0.74rem; font-weight: 500;
-  cursor: pointer; transition: all var(--duration-fast);
-}
-.right-tab:first-child { border-radius: var(--radius) 0 0 var(--radius); }
-.right-tab:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
-.right-tab:hover { color: var(--text-primary); border-color: var(--border-bright); }
-.right-tab--active { background: var(--cyan-900); border-color: var(--cyan-500); color: var(--cyan-300); }
-.tab-count { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); }
-.right-body { flex: 1; min-height: 0; display: flex; }
+/* 脚本与日志各自固定高度，互不挤压；视口不够时页面整体滚动 */
+.orch-right { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.orch-script { flex: 0 0 auto; height: 620px; padding: 16px; display: flex; }
+.orch-log { flex: 0 0 auto; height: 240px; padding: 16px; display: flex; }
+.orch-script > *, .orch-log > * { flex: 1; min-height: 0; }
 
 @media (max-width: 1100px) {
   .orch-layout { grid-template-columns: 1fr; }
-  .orch-right { height: auto; min-height: 480px; }
   .workspace-header { grid-template-columns: 1fr; }
 }
 </style>

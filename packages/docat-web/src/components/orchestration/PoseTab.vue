@@ -41,9 +41,18 @@
           <option value="cartesian">位姿</option>
           <option value="joint">关节角</option>
         </select>
-        <button class="btn btn-primary btn-sm" :disabled="!hasRead || !newName" @click="saveCurrent">
-          保存当前
+        <button class="btn btn-primary btn-sm" :disabled="(!hasRead && !manualParsed) || !newName" @click="saveCurrent">
+          保存
         </button>
+      </div>
+
+      <div class="manual-row">
+        <label class="manual-label">或手动输入坐标</label>
+        <input v-model.trim="manualInput" class="manual-input" spellcheck="false"
+          placeholder="6 个数值，空格/逗号/分号分隔均可，首尾可加 [ ] 或 ( )，如 [100, 0, 50, 0, 0, 0]" />
+        <div class="manual-preview" :class="{ 'manual-preview--ok': manualParsed !== null, 'manual-preview--bad': manualInput && manualParsed === null }">
+          {{ manualInput ? (manualParsed ? `已解析: [${manualParsed.map(v => Number(v).toFixed(1)).join(', ')}]` : '需恰好 6 个数值') : '留空则使用读取的当前姿态' }}
+        </div>
       </div>
       <p v-if="nameErr" class="save-error">{{ nameErr }}</p>
       <p class="save-hint">同名再次保存将覆盖，10 秒内可撤销；名称供脚本 poses.get() 调用</p>
@@ -95,6 +104,7 @@ import {
   identifierError,
   manualMoveMotion,
   orchStore,
+  parsePoseText,
   removeOrchPose,
   renameOrchPose,
   saveOrchPoseFromCurrent,
@@ -115,6 +125,9 @@ const newType = ref<'cartesian' | 'joint'>('cartesian')
 const nameErr = ref('')
 const renamingName = ref('')
 const renamingNew = ref('')
+const manualInput = ref('')
+
+const manualParsed = computed(() => parsePoseText(manualInput.value))
 
 const motionDevices = computed(() => orchStore.devices.filter(d => d.type === 'docat-motion'))
 const allRealDevices = computed(() => {
@@ -172,12 +185,30 @@ async function readCurrent() {
 function saveCurrent() {
   const err = identifierError(newName.value, [])
   if (err) { nameErr.value = err; return }
+
+  // 数值来源：手动输入优先；否则用读取的当前姿态
+  let poseValues: number[]
+  let jointValues: number[]
+  const manual = manualParsed.value
+  if (manual) {
+    poseValues = manual
+    jointValues = manual
+  } else if (hasRead.value) {
+    poseValues = [...currentPose.value]
+    jointValues = [...currentJoints.value]
+  } else {
+    toastRef.value?.info('请先读取当前姿态，或手动输入坐标')
+    return
+  }
+
   void (async () => {
     const res = await saveOrchPoseFromCurrent(
       newName.value,
       newType.value,
-      currentJoints.value,
-      { x: currentPose.value[0], y: currentPose.value[1], z: currentPose.value[2], rx: currentPose.value[3], ry: currentPose.value[4], rz: currentPose.value[5] }
+      newType.value === 'joint' ? jointValues : currentJoints.value,
+      newType.value === 'cartesian'
+        ? { x: poseValues[0], y: poseValues[1], z: poseValues[2], rx: poseValues[3], ry: poseValues[4], rz: poseValues[5] }
+        : { x: currentPose.value[0], y: currentPose.value[1], z: currentPose.value[2], rx: currentPose.value[3], ry: currentPose.value[4], rz: currentPose.value[5] }
     )
     if (!res.ok) { nameErr.value = res.error ?? '保存失败'; return }
     if (res.overwritten) {
@@ -189,6 +220,7 @@ function saveCurrent() {
       toastRef.value?.success(`姿态 "${newName.value}" 已保存`)
     }
     newName.value = ''
+    manualInput.value = ''
   })()
 }
 
@@ -299,6 +331,17 @@ function removePose(name: string) {
 .save-name:focus { border-color: var(--accent); }
 .save-name--error { border-color: var(--status-danger); }
 .save-type { padding: 6px 8px; font-size: 0.66rem; background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
+.manual-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.manual-label { font-size: 0.66rem; color: var(--text-muted); }
+.manual-input {
+  width: 100%; padding: 6px 9px; font-family: var(--font-mono); font-size: 0.66rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); outline: none;
+}
+.manual-input:focus { border-color: var(--accent); }
+.manual-preview { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); }
+.manual-preview--ok { color: var(--status-online); }
+.manual-preview--bad { color: var(--status-danger); }
 .save-error { font-size: 0.62rem; color: var(--status-danger); margin-top: 6px; }
 .save-hint { font-size: 0.6rem; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
 

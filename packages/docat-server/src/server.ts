@@ -19,6 +19,8 @@ import { systemRoutes } from './api/rest/system.js'
 import { userRoutes } from './api/rest/users.js'
 import { orchestrationRoutes } from './api/rest/orchestration.js'
 import { websocketRoutes } from './api/websocket/ws.js'
+import { OrchDeviceManager } from './orchestration/OrchDeviceManager.js'
+import { RuntimeManager } from './runtime/RuntimeManager.js'
 
 // ─── CLI 参数 ────────────────────────────────────
 
@@ -65,6 +67,8 @@ async function main(): Promise<void> {
   // 3. 创建核心模块
   const pool = new DevicePool(config.scanIps)
   const scheduler = new AccessScheduler()
+  const orchDevices = new OrchDeviceManager(pool)
+  const orchRuntime = new RuntimeManager(orchDevices)
   setRuntimePoolTcpCheck(deviceId => pool.hasActiveTcp(deviceId))
 
   // 4. 创建 Fastify 服务
@@ -92,7 +96,7 @@ async function main(): Promise<void> {
   scriptRoutes(app, pool)
   systemRoutes(app, pool)
   userRoutes(app)
-  orchestrationRoutes(app, config.orchScriptsDir)
+  orchestrationRoutes(app, config.orchScriptsDir, orchDevices, orchRuntime)
   websocketRoutes(app, pool, scheduler)
 
   // 7. 健康检查
@@ -101,6 +105,8 @@ async function main(): Promise<void> {
   // 8. 优雅关闭
   const gracefulShutdown = async (signal: string) => {
     console.log(`\n[Server] Received ${signal}, shutting down gracefully...`)
+    await orchRuntime.stop()
+    await orchDevices.shutdown()
     await pool.disconnectAll()
     closeDb()
     await app.close()
