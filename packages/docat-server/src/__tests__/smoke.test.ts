@@ -7,6 +7,7 @@ const TEST_CONFIG = {
   port: 0,
   host: '127.0.0.1',
   dbPath: ':memory:',
+  cacheDir: ':memory:',
   scanIps: ['127.0.0.1'],
   pollInterval: 500,
   logLevel: 'error' as const,

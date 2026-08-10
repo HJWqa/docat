@@ -74,7 +74,10 @@
         <div class="project-section">
           <div class="panel-title-row">
             <span class="hud-label" style="margin-bottom:0">项目</span>
-            <span class="script-count">{{ projects.length }}</span>
+            <span class="panel-title-right">
+              <span v-if="loadingProjects && projects.length" class="loading-ring loading-ring--small"></span>
+              <span class="script-count">{{ projects.length }}</span>
+            </span>
           </div>
           <div class="script-list list-loading-anchor">
             <div
@@ -85,7 +88,11 @@
               <button class="project-row-main" @click="openProject(project.name)" :disabled="opening">
                 <span class="script-row-name">{{ project.name }}</span>
                 <span class="script-row-meta">
-                  {{ openingProjectName === project.name ? '打开中...' : `${project.language.toUpperCase()} · ${project.files} 个文件` }}
+                  <template v-if="refreshing && activeProject?.name === project.name">
+                    <span class="loading-ring loading-ring--small"></span> 同步中...
+                  </template>
+                  <template v-else-if="openingProjectName === project.name">打开中...</template>
+                  <template v-else>{{ project.language.toUpperCase() }} · {{ project.files }} 个文件</template>
                 </span>
               </button>
               <div class="project-row-actions">
@@ -94,7 +101,7 @@
               </div>
             </div>
             <div v-if="!projects.length" class="empty-list">暂无控制器项目</div>
-            <div v-if="loadingProjects" class="panel-loading">
+            <div v-if="loadingProjects && !projects.length" class="panel-loading">
               <span class="loading-ring"></span>
               <strong>正在加载项目</strong>
             </div>
@@ -113,7 +120,11 @@
               <button :class="['mode-btn', { 'mode-btn--active': openMode === 'source' }]" @click="openMode = 'source'">源码</button>
               <button :class="['mode-btn', { 'mode-btn--active': openMode === 'all' }]" @click="openMode = 'all'">全部</button>
             </div>
-            <button class="btn btn-primary btn-sm" @click="saveActiveFile" :disabled="!activeFile || !activeFile.editable || saving">
+            <span v-if="refreshing" class="refresh-indicator">
+              <span class="loading-ring loading-ring--small"></span>
+              同步中…
+            </span>
+            <button class="btn btn-primary btn-sm" @click="saveActiveFile" :disabled="!activeFile || !activeFile.editable || saving || refreshing">
               {{ saving ? '保存中...' : '保存' }}
             </button>
           </div>
@@ -391,6 +402,8 @@ const loading = ref(false)
 const loadingProjects = ref(false)
 const opening = ref(false)
 const openingProjectName = ref('')
+/** 缓存命中后的后台同步状态：同步期间 Monaco 只读，禁止编辑/保存 */
+const refreshing = ref(false)
 const creating = ref(false)
 const saving = ref(false)
 const savingPoint = ref(false)
@@ -552,6 +565,28 @@ function setDirty(fileName: string, value: boolean) {
   const key = dirtyKey(fileName)
   if (value && !dirtyFiles.value.includes(key)) dirtyFiles.value = [...dirtyFiles.value, key]
   if (!value) dirtyFiles.value = dirtyFiles.value.filter(item => item !== key)
+}
+
+/** 每个文件的"已保存"内容基线（key 与 dirtyFiles 相同），用于撤销回保存态时自动清除脏标记 */
+const fileBaselines: Record<string, string> = {}
+
+function getBaseline(fileName: string): string | undefined {
+  return fileBaselines[dirtyKey(fileName)]
+}
+
+/** 用项目详情刷新全部文件的保存基线（打开/保存/增删文件后调用） */
+function setFileBaselines(detail: api.ControllerProjectDetail) {
+  for (const file of detail.fileList) {
+    fileBaselines[dirtyKey(file.name)] = file.content
+  }
+}
+
+/** 打开/切换文件时补齐基线（首次进入该文件） */
+function ensureFileBaseline(fileName: string) {
+  const key = dirtyKey(fileName)
+  if (fileBaselines[key] !== undefined) return
+  const file = activeProject.value?.fileList.find(f => f.name === fileName)
+  if (file) fileBaselines[key] = file.content
 }
 
 function breakpointKey(projectName: string, fileName: string): string {
@@ -729,7 +764,7 @@ function initEditor() {
     suggestOnTriggerCharacters: true,
     wordBasedSuggestions: 'off',
     suggestSelection: 'first',
-    readOnly: !activeFile.value?.editable,
+    readOnly: refreshing.value || !activeFile.value?.editable,
     suggest: {
       showFunctions: true,
       showKeywords: true,
@@ -746,7 +781,8 @@ function initEditor() {
   editor.onDidChangeModelContent(() => {
     if (!editor || syncingEditor || !activeFile.value) return
     activeFile.value.content = editor.getValue()
-    setDirty(activeFile.value.name, true)
+    // 撤销回保存态时自动清除脏标记（内容与基线一致）
+    setDirty(activeFile.value.name, editor.getValue() !== getBaseline(activeFile.value.name))
     clearEditorMarkers()
     updateBreakpointDecorations()
   })
@@ -769,9 +805,10 @@ function syncEditor() {
     initEditor()
     if (!editor) return
     const file = activeFile.value
+    ensureFileBaseline(file?.name ?? '')
     const model = editor.getModel()
     if (model) monaco.editor.setModelLanguage(model, fileToMonacoLanguage(file))
-    editor.updateOptions({ readOnly: !file?.editable })
+    editor.updateOptions({ readOnly: refreshing.value || !file?.editable })
     if (editor.getValue() !== (file?.content ?? '')) {
       syncingEditor = true
       editor.setValue(file?.content ?? '')
@@ -991,20 +1028,45 @@ async function loadAll() {
   }
 }
 
-async function loadProjects() {
+/** 项目列表加载序号令牌：并发刷新只允许最新一次落地（与 refreshProjectContent 同模式） */
+let projectsSeq = 0
+async function loadProjects(opts?: { refresh?: boolean }) {
   if (!selectedDeviceId.value) return
   if (isMock) return
+  const deviceId = selectedDeviceId.value
+  // 最近项目（SQLite，快）并行请求并独立先行渲染，不被 SFTP 扫描阻塞
+  void api.listRecentProjects(deviceId)
+    .catch(() => null)
+    .then(res => {
+      if (res && res.success && res.data) recentProjects.value = res.data
+    })
+
+  const seq = ++projectsSeq
   loadingProjects.value = true
   try {
-    const [projectRes, recentRes] = await Promise.all([
-      api.listDeviceProjects(selectedDeviceId.value),
-      api.listRecentProjects(selectedDeviceId.value),
-    ])
-    if (projectRes.success && projectRes.data) projects.value = projectRes.data
-    else toastRef.value?.error(`加载项目失败：${projectRes.error?.message}`)
-    if (recentRes.success && recentRes.data) recentProjects.value = recentRes.data
+    const res = await api.listDeviceProjects(deviceId, opts)
+    if (seq !== projectsSeq || selectedDeviceId.value !== deviceId) return
+    if (res.success && res.data) {
+      projects.value = res.data
+      // 命中缓存：立即显示，后台强制刷新替换为最新
+      if (res.cached) void refreshProjectsInBackground(deviceId, seq)
+    } else {
+      toastRef.value?.error(`加载项目失败：${res.error?.message}`)
+    }
   } finally {
-    loadingProjects.value = false
+    if (seq === projectsSeq) loadingProjects.value = false
+  }
+}
+
+/** 缓存命中后的后台列表刷新：强制扫描控制器并更新缓存/列表 */
+async function refreshProjectsInBackground(deviceId: string, baseSeq: number) {
+  const seq = ++projectsSeq
+  try {
+    const res = await api.listDeviceProjects(deviceId, { refresh: true })
+    if (seq !== projectsSeq || selectedDeviceId.value !== deviceId) return
+    if (res.success && res.data) projects.value = res.data
+  } finally {
+    if (seq === projectsSeq) loadingProjects.value = false
   }
 }
 
@@ -1016,6 +1078,53 @@ function selectFile(fileName: string) {
 function chooseInitialFile(detail: api.ControllerProjectDetail) {
   const source = detail.fileList.find(file => file.name.endsWith('.lua') || file.name.endsWith('.py'))
   activeFileName.value = (openMode.value === 'source' ? source : detail.fileList[0])?.name ?? ''
+}
+
+/** 应用项目详情到界面（打开项目/创建/保存后共用） */
+function applyProjectDetail(detail: api.ControllerProjectDetail, preferredFile?: string) {
+  activeProject.value = detail
+  // 重新打开项目：清掉该项目残留的脏标记，并以本次内容为保存基线
+  dirtyFiles.value = dirtyFiles.value.filter(key => !key.includes(`/${detail.name}/`))
+  setFileBaselines(detail)
+  renameName.value = detail.name
+  runtimeStore.reset(selectedDeviceId.value)
+  clearExecutionLine()
+  chooseInitialFile(detail)
+  if (preferredFile && detail.fileList.some(file => file.name === preferredFile)) {
+    activeFileName.value = preferredFile
+  }
+  syncEditor()
+  loadPoints()
+}
+
+/**
+ * 缓存命中后的后台同步：拉取控制器最新内容。
+ * 同步成功前 Monaco 保持只读，避免与刷新内容冲突。
+ * 用序号令牌处理并发：只允许最新一次刷新落地并恢复编辑状态。
+ */
+let refreshSeq = 0
+async function refreshProjectContent(deviceId: string, projectName: string, preferredFile?: string) {
+  const seq = ++refreshSeq
+  refreshing.value = true
+  editor?.updateOptions({ readOnly: true })
+  try {
+    const res = await api.openDeviceProject(deviceId, projectName, { refresh: true })
+    if (seq !== refreshSeq || activeProject.value?.name !== projectName) return
+    if (res.success && res.data) {
+      // 保留当前文件与运行状态，仅替换内容（syncEditor 内容不变时不会跳光标）
+      updateActiveProject(res.data, preferredFile || activeFileName.value)
+      loadPoints()
+      await loadProjects()
+      toastRef.value?.success('已同步控制器最新内容')
+    } else {
+      toastRef.value?.info(`同步失败：${res.error?.message || '控制器不可达'}，已显示本地缓存内容`)
+    }
+  } finally {
+    if (seq === refreshSeq) {
+      refreshing.value = false
+      editor?.updateOptions({ readOnly: !activeFile.value?.editable })
+    }
+  }
 }
 
 async function openProject(projectName: string, preferredFile?: string) {
@@ -1035,22 +1144,22 @@ async function openProject(projectName: string, preferredFile?: string) {
     toastRef.value?.success(`[Mock] 已打开 ${projectName}`)
     return
   }
+  const deviceId = selectedDeviceId.value
   opening.value = true
   openingProjectName.value = projectName
   try {
-    const res = await api.openDeviceProject(selectedDeviceId.value, projectName)
+    const res = await api.openDeviceProject(deviceId, projectName)
     if (res.success && res.data) {
-      activeProject.value = res.data
-      renameName.value = res.data.name
-      runtimeStore.reset(selectedDeviceId.value)
-      clearExecutionLine()
-      chooseInitialFile(res.data)
-      if (preferredFile && res.data.fileList.some(file => file.name === preferredFile)) {
-        activeFileName.value = preferredFile
+      if (res.cached) {
+        // 缓存命中：秒开渲染（不走全屏 loading），后台刷新最新内容
+        opening.value = false
+        applyProjectDetail(res.data, preferredFile)
+        if (res.stale) toastRef.value?.info('设备未连接，已显示本地缓存内容')
+        void refreshProjectContent(deviceId, projectName, preferredFile)
+      } else {
+        applyProjectDetail(res.data, preferredFile)
+        await loadProjects()
       }
-      await loadProjects()
-      syncEditor()
-      loadPoints()
     } else {
       toastRef.value?.error(`打开失败：${res.error?.message}`)
     }
@@ -1079,10 +1188,11 @@ async function createProject() {
     const res = await api.createDeviceProject(selectedDeviceId.value, newProjectName.value, newProjectLanguage.value)
     if (res.success && res.data) {
       activeProject.value = res.data
+      setFileBaselines(res.data)
       renameName.value = res.data.name
       newProjectName.value = ''
       chooseInitialFile(res.data)
-      await loadProjects()
+      await loadProjects({ refresh: true })
       syncEditor()
       projectPoints.value = []
       toastRef.value?.success('项目已创建')
@@ -1096,6 +1206,8 @@ async function createProject() {
 
 function updateActiveProject(detail: api.ControllerProjectDetail, preferredFile = activeFileName.value) {
   activeProject.value = detail
+  // 以最新内容为保存基线（保存/增删文件/同步刷新后，脏标记由内容比对决定）
+  setFileBaselines(detail)
   activeFileName.value = detail.fileList.find(file => file.name === preferredFile)?.name ?? detail.fileList[0]?.name ?? ''
   syncEditor()
 }
@@ -1179,6 +1291,10 @@ watch(editingPointId, (id) => {
 async function saveActiveFile() {
   if (!selectedDeviceId.value || !activeProject.value || !activeFile.value) return
   if (isMock) { toastRef.value?.info('[Mock] 文件已保存'); return }
+  if (refreshing.value) {
+    toastRef.value?.info('正在同步控制器内容，请稍候')
+    return
+  }
   if (!activeFile.value.editable) {
     toastRef.value?.error('生成的文件为只读')
     return
@@ -1190,7 +1306,7 @@ async function saveActiveFile() {
     if (res.success && res.data) {
       setDirty(fileName, false)
       updateActiveProject(res.data, fileName)
-      await loadProjects()
+      await loadProjects({ refresh: true })
       toastRef.value?.success('文件已保存')
     } else {
       toastRef.value?.error(`保存失败：${res.error?.message}`)
@@ -1212,6 +1328,7 @@ async function saveDirtyFiles() {
     }
     setDirty(file.name, false)
     activeProject.value = res.data
+    setFileBaselines(res.data)
   }
   return true
 }
@@ -1220,6 +1337,10 @@ async function runProject() {
   if (!selectedDeviceId.value || !activeProject.value) return
   if (starting.value || running.value) {
     toastRef.value?.info('脚本正在运行中，请先停止')
+    return
+  }
+  if (refreshing.value) {
+    toastRef.value?.info('正在同步控制器内容，请稍候')
     return
   }
   const deviceId = selectedDeviceId.value
@@ -1332,7 +1453,7 @@ async function renameProjectByName(projectName: string, nextName: string) {
         updateActiveProject(res.data)
         renameName.value = res.data.name
       }
-      await loadProjects()
+      await loadProjects({ refresh: true })
       toastRef.value?.success('项目已重命名')
     } else {
       toastRef.value?.error(`重命名失败：${res.error?.message}`)
@@ -1351,7 +1472,7 @@ async function addFile() {
       const name = newFileName.value
       newFileName.value = ''
       updateActiveProject(res.data, name)
-      await loadProjects()
+      await loadProjects({ refresh: true })
       toastRef.value?.success('文件已添加')
     } else {
       toastRef.value?.error(`添加失败：${res.error?.message}`)
@@ -1378,7 +1499,7 @@ async function deleteFileConfirmed(projectName: string, fileName: string) {
   if (res.success && res.data) {
     setDirty(fileName, false)
     updateActiveProject(res.data)
-    await loadProjects()
+    await loadProjects({ refresh: true })
     toastRef.value?.success('文件已删除')
   } else {
     toastRef.value?.error(`删除失败：${res.error?.message}`)
@@ -1415,7 +1536,7 @@ async function deleteProjectConfirmed(projectName: string) {
         clearExecutionLine()
         syncEditor()
       }
-      await loadProjects()
+      await loadProjects({ refresh: true })
       toastRef.value?.success('项目已删除')
     } else {
       toastRef.value?.error(`删除失败：${res.error?.message}`)
@@ -1596,6 +1717,7 @@ onBeforeUnmount(() => {
 .run-panel { display: flex; flex-direction: column; gap: 14px; }
 .side-section { display: flex; flex-direction: column; gap: 8px; }
 .panel-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+.panel-title-right { display: inline-flex; align-items: center; gap: 6px; }
 .project-section { margin-top: 16px; }
 .project-section > .script-row + .script-row { margin-top: 6px; }
 .script-count { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
@@ -1783,6 +1905,12 @@ onBeforeUnmount(() => {
   border-top-color: var(--cyan-300); border-radius: 50%; animation: spin 0.8s linear infinite;
 }
 .loading-ring--large { width: 24px; height: 24px; }
+.loading-ring--small { width: 12px; height: 12px; flex: 0 0 auto; display: inline-block; }
+.refresh-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-display); font-size: 0.55rem; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--amber-300); white-space: nowrap;
+}
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.58); padding: 24px;

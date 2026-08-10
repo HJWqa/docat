@@ -446,16 +446,25 @@ export interface RecentProject {
   openedAt: string
 }
 
-export async function listDeviceProjects(id: string): Promise<ApiResponse<ControllerProjectSummary[]>> {
-  return request('GET', `/api/devices/${id}/projects`)
+export async function listDeviceProjects(
+  id: string,
+  opts?: { refresh?: boolean },
+): Promise<ApiResponse<ControllerProjectSummary[]>> {
+  const qs = opts?.refresh ? '?refresh=1' : ''
+  return request('GET', `/api/devices/${id}/projects${qs}`)
 }
 
 export async function listRecentProjects(id: string): Promise<ApiResponse<RecentProject[]>> {
   return request('GET', `/api/devices/${id}/projects/recent`)
 }
 
-export async function openDeviceProject(id: string, projectName: string): Promise<ApiResponse<ControllerProjectDetail>> {
-  return request('GET', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}`)
+export async function openDeviceProject(
+  id: string,
+  projectName: string,
+  opts?: { refresh?: boolean },
+): Promise<ApiResponse<ControllerProjectDetail>> {
+  const qs = opts?.refresh ? '?refresh=1' : ''
+  return request('GET', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}${qs}`)
 }
 
 export async function createDeviceProject(id: string, name: string, language: ScriptLanguage): Promise<ApiResponse<ControllerProjectDetail>> {

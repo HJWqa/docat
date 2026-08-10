@@ -27,6 +27,84 @@ type SftpClientWithMode = SftpClient & {
   rename(from: string, to: string): Promise<void>
 }
 
+// ─── 连接池 ──────────────────────────────────────
+// 每次 SFTP 操作都重新建连（SSH 握手+认证）在控制器弱 CPU 上开销很大，
+// 列表扫描等场景会产生 2N+1 次握手。改为每设备小池+常驻复用：
+// 操作成功归还，失败销毁并移除（下次操作自动重连），池满则排队等待空位。
+
+/** 每个设备（host）的连接池大小 */
+const POOL_SIZE = 2
+
+interface PooledConnection {
+  client: SftpClient
+  inUse: boolean
+  dead: boolean
+}
+
+const connectionPools = new Map<string, PooledConnection[]>()
+const poolWaiters = new Map<string, Array<() => void>>()
+
+function poolKey(host: string, port: number, username: string): string {
+  return `${username}@${host}:${port}`
+}
+
+function notifyPoolWaiters(key: string): void {
+  const list = poolWaiters.get(key)
+  if (list && list.length) {
+    const waiter = list.shift()
+    if (waiter) waiter()
+    if (!list.length) poolWaiters.delete(key)
+  }
+}
+
+/** 淘汰连接：标记失效、移出池并关闭，同时唤醒等待者 */
+function evictPooled(key: string, entry: PooledConnection): void {
+  if (entry.dead) return
+  entry.dead = true
+  const pool = connectionPools.get(key)
+  if (pool) {
+    const idx = pool.indexOf(entry)
+    if (idx >= 0) pool.splice(idx, 1)
+  }
+  entry.client.end().catch(() => undefined)
+  notifyPoolWaiters(key)
+}
+
+function releasePooled(key: string, entry: PooledConnection): void {
+  entry.inUse = false
+  notifyPoolWaiters(key)
+}
+
+async function checkoutPooledClient(
+  key: string,
+  create: () => Promise<SftpClient>
+): Promise<PooledConnection> {
+  for (;;) {
+    let pool = connectionPools.get(key)
+    if (!pool) {
+      pool = []
+      connectionPools.set(key, pool)
+    }
+    const free = pool.find(entry => !entry.inUse && !entry.dead)
+    if (free) {
+      free.inUse = true
+      return free
+    }
+    if (pool.length < POOL_SIZE) {
+      const entry: PooledConnection = { client: await create(), inUse: true, dead: false }
+      entry.client.on('close', () => evictPooled(key, entry))
+      entry.client.on('error', () => evictPooled(key, entry))
+      pool.push(entry)
+      return entry
+    }
+    await new Promise<void>(resolve => {
+      const list = poolWaiters.get(key) ?? []
+      list.push(resolve)
+      poolWaiters.set(key, list)
+    })
+  }
+}
+
 export class SftpTransport {
   private host: string
   private username: string
@@ -133,23 +211,36 @@ export class SftpTransport {
   }
 
   private async withClient<T>(fn: (client: SftpClient) => Promise<T>): Promise<T> {
-    const client = new SftpClient('docat-device-sftp', {
-      error: () => undefined,
-      end: () => undefined,
-      close: () => undefined,
+    const key = poolKey(this.host, this.port, this.username)
+    const entry = await checkoutPooledClient(key, async () => {
+      const client = new SftpClient('docat-device-sftp', {
+        error: () => undefined,
+        end: () => undefined,
+        close: () => undefined,
+      })
+      try {
+        await client.connect({
+          host: this.host,
+          port: this.port,
+          username: this.username,
+          password: this.password,
+          readyTimeout: this.readyTimeout,
+        })
+        return client
+      } catch (err) {
+        await client.end().catch(() => undefined)
+        throw err
+      }
     })
 
     try {
-      await client.connect({
-        host: this.host,
-        port: this.port,
-        username: this.username,
-        password: this.password,
-        readyTimeout: this.readyTimeout,
-      })
-      return await fn(client)
+      return await fn(entry.client)
+    } catch (err) {
+      // 操作失败：淘汰该连接，下次操作自动重建
+      evictPooled(key, entry)
+      throw err
     } finally {
-      await client.end().catch(() => undefined)
+      releasePooled(key, entry)
     }
   }
 

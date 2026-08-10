@@ -9,6 +9,15 @@ import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import { HttpTransport } from '../../device/transport/HttpTransport.js'
 import { SftpTransport } from '../../device/transport/SftpTransport.js'
 import { ensureRuntimeTcp } from '../../device/runtimeTcp.js'
+import {
+  readCachedProject,
+  writeCachedProject,
+  deleteCachedProject,
+  renameCachedProject,
+  trimCachedProjects,
+  readCachedProjectList,
+  writeCachedProjectList,
+} from './projectCache.js'
 import type { DevicePool } from '../../device/DevicePool.js'
 import type { ApiResponse, Script, ScriptLanguage } from 'docat-shared/types'
 
@@ -343,10 +352,14 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
     }
   }
 
-  async function summarizeProject(sftp: SftpTransport, projectName: string): Promise<ControllerProjectSummary> {
+  async function summarizeProject(
+    sftp: SftpTransport,
+    projectName: string,
+    prj?: Record<string, unknown> | null
+  ): Promise<ControllerProjectSummary> {
     const entries = await sftp.list(projectPath(projectName))
     const files = entries.filter(entry => entry.type === '-')
-    const prj = await readProjectPrj(sftp, projectName)
+    if (prj === undefined) prj = await readProjectPrj(sftp, projectName)
     const language = inferProjectLanguage(projectName, prj, files.map(file => file.name))
     const modifiedAt = new Date(Math.max(0, ...files.map(file => file.modifyTime || 0))).toISOString()
     return {
@@ -357,6 +370,32 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
       modifiedAt,
       files: files.length,
     }
+  }
+
+  /** 批量读取多个项目的 prj.json（单连接批量往返），失败的项目回退为 null */
+  async function batchReadProjectPrj(
+    sftp: SftpTransport,
+    projectNames: string[]
+  ): Promise<Map<string, Record<string, unknown> | null>> {
+    const map = new Map<string, Record<string, unknown> | null>()
+    if (!projectNames.length) return map
+    try {
+      const contents = await sftp.readTexts(projectNames.map(name => projectFilePath(name, 'prj.json')))
+      for (const name of projectNames) {
+        const content = contents.get(projectFilePath(name, 'prj.json'))
+        try {
+          map.set(name, content ? (JSON.parse(content) as Record<string, unknown>) : null)
+        } catch {
+          map.set(name, null)
+        }
+      }
+    } catch {
+      // 批量读取失败时按项目单独重试
+      for (const name of projectNames) {
+        map.set(name, await readProjectPrj(sftp, name).catch(() => null))
+      }
+    }
+    return map
   }
 
   async function readProjectDetail(sftp: SftpTransport, projectName: string): Promise<ControllerProjectDetail> {
@@ -398,20 +437,56 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
     `).run(userId, deviceId, project.name, project.path, project.language, new Date().toISOString())
   }
 
-  app.get<{ Params: { id: string } }>(
+  /** 每个设备缓存的项目数上限（按 cachedAt 淘汰最旧） */
+  const PROJECT_CACHE_LIMIT = 20
+
+  /** 写入项目缓存（失败不影响主流程，仅告警） */
+  function cacheProjectDetail(deviceId: string, detail: ControllerProjectDetail): void {
+    try {
+      writeCachedProject(deviceId, detail.name, detail)
+      trimCachedProjects(deviceId, PROJECT_CACHE_LIMIT)
+    } catch (err) {
+      console.warn('[ProjectCache] write failed:', (err as Error).message)
+    }
+  }
+
+  app.get<{ Params: { id: string }; Querystring: { refresh?: string } }>(
     '/api/devices/:id/projects',
     async (request, reply): Promise<ApiResponse<ControllerProjectSummary[]>> => {
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
-        const sftp = getProjectSftp(request.params.id)
-        const entries = await sftp.list(PROJECT_ROOT)
-        const projects = await Promise.all(
-          entries
-            .filter(entry => entry.type === 'd')
-            .map(entry => summarizeProject(sftp, entry.name).catch(() => null))
-        )
-        return { success: true, data: projects.filter(Boolean) as ControllerProjectSummary[] }
+        const deviceId = request.params.id
+        const forceRefresh = request.query.refresh === '1'
+
+        // 缓存命中且非强制刷新 → 秒回缓存列表，客户端随后用 ?refresh=1 后台刷新
+        if (!forceRefresh) {
+          const cached = readCachedProjectList<ControllerProjectSummary>(deviceId)
+          if (cached && cached.entries.length) {
+            return { success: true, data: cached.entries, cached: true, cachedAt: cached.cachedAt }
+          }
+        }
+
+        try {
+          const sftp = getProjectSftp(deviceId)
+          const entries = await sftp.list(PROJECT_ROOT)
+          const dirs = entries.filter(entry => entry.type === 'd')
+          // 批量读一次全部 prj.json（单连接批量往返），避免逐项目单独读取
+          const prjMap = await batchReadProjectPrj(sftp, dirs.map(entry => entry.name))
+          const projects = await Promise.all(
+            dirs.map(entry => summarizeProject(sftp, entry.name, prjMap.get(entry.name)).catch(() => null))
+          )
+          const list = projects.filter(Boolean) as ControllerProjectSummary[]
+          writeCachedProjectList(deviceId, list)
+          return { success: true, data: list }
+        } catch (err) {
+          // 控制器不可达 → 回退本地缓存的项目列表
+          const cached = readCachedProjectList<ControllerProjectSummary>(deviceId)
+          if (cached && cached.entries.length) {
+            return { success: true, data: cached.entries, cached: true, stale: true, cachedAt: cached.cachedAt }
+          }
+          return { success: false, error: { code: 50000, message: (err as Error).message } }
+        }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
@@ -459,6 +534,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
           mode: 0o777,
         })))
         const detail = await readProjectDetail(sftp, name)
+        cacheProjectDetail(request.params.id, detail)
         rememberRecentProject(request.auth!.userId, request.params.id, detail)
         return { success: true, data: detail }
       } catch (err) {
@@ -467,16 +543,40 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
     }
   )
 
-  app.get<{ Params: { id: string; projectName: string } }>(
+  app.get<{ Params: { id: string; projectName: string }; Querystring: { refresh?: string } }>(
     '/api/devices/:id/projects/:projectName',
     async (request, reply): Promise<ApiResponse<ControllerProjectDetail>> => {
       try {
         await authMiddleware(request, reply)
         if (reply.sent) return reply
-        const sftp = getProjectSftp(request.params.id)
-        const detail = await readProjectDetail(sftp, request.params.projectName)
-        rememberRecentProject(request.auth!.userId, request.params.id, detail)
-        return { success: true, data: detail }
+        const deviceId = request.params.id
+        const projectName = assertProjectName(request.params.projectName)
+        const forceRefresh = request.query.refresh === '1'
+
+        // 缓存命中且非强制刷新 → 秒回缓存，客户端随后用 ?refresh=1 拉取最新内容
+        if (!forceRefresh) {
+          const cached = readCachedProject<ControllerProjectDetail>(deviceId, projectName)
+          if (cached) {
+            rememberRecentProject(request.auth!.userId, deviceId, cached.detail)
+            return { success: true, data: cached.detail, cached: true, cachedAt: cached.cachedAt }
+          }
+        }
+
+        try {
+          const sftp = getProjectSftp(deviceId)
+          const detail = await readProjectDetail(sftp, projectName)
+          cacheProjectDetail(deviceId, detail)
+          rememberRecentProject(request.auth!.userId, deviceId, detail)
+          return { success: true, data: detail }
+        } catch (err) {
+          // 控制器不可达 → 回退本地缓存
+          const cached = readCachedProject<ControllerProjectDetail>(deviceId, projectName)
+          if (cached) {
+            rememberRecentProject(request.auth!.userId, deviceId, cached.detail)
+            return { success: true, data: cached.detail, cached: true, stale: true, cachedAt: cached.cachedAt }
+          }
+          throw err
+        }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
@@ -493,6 +593,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         if (reply.sent) return reply
         const sftp = getProjectSftp(request.params.id)
         await sftp.deleteDir(projectPath(request.params.projectName))
+        deleteCachedProject(request.params.id, request.params.projectName)
         const db = getDb()
         db.prepare('DELETE FROM recent_projects WHERE deviceId = ? AND projectName = ?')
           .run(request.params.id, request.params.projectName)
@@ -516,6 +617,8 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         const sftp = getProjectSftp(request.params.id)
         await sftp.rename(projectPath(oldName), projectPath(newName))
         const detail = await readProjectDetail(sftp, newName)
+        deleteCachedProject(request.params.id, oldName)
+        cacheProjectDetail(request.params.id, detail)
         rememberRecentProject(request.auth!.userId, request.params.id, detail)
         const db = getDb()
         db.prepare('DELETE FROM recent_projects WHERE deviceId = ? AND projectName = ?')
@@ -560,6 +663,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         const sftp = getProjectSftp(request.params.id)
         await sftp.writeText(projectFilePath(request.params.projectName, request.body.name), request.body.content ?? '', 0o777)
         const detail = await readProjectDetail(sftp, request.params.projectName)
+        cacheProjectDetail(request.params.id, detail)
         rememberRecentProject(request.auth!.userId, request.params.id, detail)
         return { success: true, data: detail }
       } catch (err) {
@@ -581,6 +685,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         const sftp = getProjectSftp(request.params.id)
         await sftp.writeText(projectFilePath(request.params.projectName, fileName), request.body.content ?? '', 0o777)
         const detail = await readProjectDetail(sftp, request.params.projectName)
+        cacheProjectDetail(request.params.id, detail)
         rememberRecentProject(request.auth!.userId, request.params.id, detail)
         return { success: true, data: detail }
       } catch (err) {
@@ -603,6 +708,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         const sftp = getProjectSftp(request.params.id)
         await sftp.deleteFile(projectFilePath(request.params.projectName, fileName))
         const detail = await readProjectDetail(sftp, request.params.projectName)
+        cacheProjectDetail(request.params.id, detail)
         rememberRecentProject(request.auth!.userId, request.params.id, detail)
         return { success: true, data: detail }
       } catch (err) {

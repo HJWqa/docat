@@ -11,6 +11,7 @@ import { initDb, closeDb } from './db/index.js'
 import { DevicePool } from './device/DevicePool.js'
 import { setRuntimePoolTcpCheck } from './device/runtimeTcp.js'
 import { AccessScheduler } from './access/AccessScheduler.js'
+import { initProjectCache } from './api/rest/projectCache.js'
 import { authRoutes } from './auth/routes.js'
 import { deviceRoutes } from './api/rest/devices.js'
 import { scriptRoutes } from './api/rest/scripts.js'
@@ -56,6 +57,9 @@ async function main(): Promise<void> {
 
   // 2. 初始化数据库
   initDb(config)
+
+  // 2.1 初始化项目缓存目录（缓存打开过的项目文件内容/列表，退出不清理）
+  initProjectCache(config.cacheDir)
 
   // 3. 创建核心模块
   const pool = new DevicePool(config.scanIps)

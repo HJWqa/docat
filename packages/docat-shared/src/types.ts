@@ -299,4 +299,10 @@ export interface ApiResponse<T = unknown> {
     pageSize?: number
     total?: number
   }
+  /** 响应命中本地缓存（秒回，内容可能过期，客户端应后台刷新） */
+  cached?: boolean
+  /** 缓存内容为陈旧回退（控制器不可达时的兜底） */
+  stale?: boolean
+  /** 缓存写入时间 */
+  cachedAt?: string
 }

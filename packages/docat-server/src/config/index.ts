@@ -3,6 +3,7 @@
  * 优先级：命令行参数 > 环境变量 > 默认值
  */
 import { DEFAULT_SCAN_IPS, POLL_INTERVAL_REAL } from 'docat-shared/protocol'
+import { dirname, join } from 'node:path'
 
 export interface ServerConfig {
   /** 服务端口 */
@@ -11,6 +12,8 @@ export interface ServerConfig {
   host: string
   /** 数据库文件路径 */
   dbPath: string
+  /** 控制器项目缓存目录（缓存打开过的项目文件内容/列表，退出不清理） */
+  cacheDir: string
   /** 设备扫描 IP 列表 */
   scanIps: string[]
   /** 状态轮询间隔（毫秒） */
@@ -24,10 +27,12 @@ export interface ServerConfig {
 }
 
 export function loadConfig(): ServerConfig {
+  const dbPath = process.env.DOCAT_DB_PATH ?? './data/docat.db'
   return {
     port: parseInt(process.env.DOCAT_PORT ?? '9100', 10),
     host: process.env.DOCAT_HOST ?? '0.0.0.0',
-    dbPath: process.env.DOCAT_DB_PATH ?? './data/docat.db',
+    dbPath,
+    cacheDir: process.env.DOCAT_CACHE_DIR ?? join(dirname(dbPath), 'project-cache'),
     scanIps: process.env.DOCAT_SCAN_IPS?.split(',') ?? [...DEFAULT_SCAN_IPS],
     pollInterval: parseInt(process.env.DOCAT_POLL_INTERVAL ?? `${POLL_INTERVAL_REAL}`, 10),
     logLevel: (process.env.DOCAT_LOG_LEVEL as ServerConfig['logLevel']) ?? 'info',
