@@ -7,6 +7,7 @@ import UserManagementView from '../views/UserManagementView.vue'
 
 const ProgrammingView = () => import('../views/ProgrammingView.vue')
 const TCPView = () => import('../views/TCPView.vue')
+const OrchestrationView = () => import('../views/OrchestrationView.vue')
 
 const routes = [
   {
@@ -49,6 +50,12 @@ const routes = [
     path: '/programming',
     name: 'Programming',
     component: ProgrammingView,
+    meta: { auth: true, workspaceDepth: 1 },
+  },
+  {
+    path: '/orchestration',
+    name: 'Orchestration',
+    component: OrchestrationView,
     meta: { auth: true, workspaceDepth: 1 },
   },
 ]

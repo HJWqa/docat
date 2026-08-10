@@ -13,6 +13,7 @@ type OfflineHandler = (deviceId: string) => void
 type RuntimeLogHandler = (deviceId: string, data: unknown) => void
 type RuntimeCursorHandler = (deviceId: string, data: unknown) => void
 type DeviceErrorHandler = (deviceId: string, data: unknown) => void
+type OrchEventHandler = (data: unknown) => void
 type Unsubscribe = () => void
 
 type HandlerMap = {
@@ -23,6 +24,7 @@ type HandlerMap = {
   'runtime-log': RuntimeLogHandler[]
   'runtime-cursor': RuntimeCursorHandler[]
   'device-error': DeviceErrorHandler[]
+  'orch-event': OrchEventHandler[]
 }
 
 class WsClient {
@@ -41,6 +43,7 @@ class WsClient {
     'runtime-log': [],
     'runtime-cursor': [],
     'device-error': [],
+    'orch-event': [],
   }
   private _isConnected = false
 
@@ -119,6 +122,9 @@ class WsClient {
         break
       case 'device-error':
         for (const h of this.handlers['device-error']) h(msg.deviceId!, msg.data)
+        break
+      case 'orch-event':
+        for (const h of this.handlers['orch-event']) h(msg.data)
         break
       case 'peer-action':
         // 协同操作通知，后续处理
@@ -203,6 +209,10 @@ class WsClient {
     this.handlers['device-error'].push(h)
     return () => { this.handlers['device-error'] = this.handlers['device-error'].filter(x => x !== h) }
   }
+  onOrchEvent(h: OrchEventHandler): Unsubscribe {
+    this.handlers['orch-event'].push(h)
+    return () => { this.handlers['orch-event'] = this.handlers['orch-event'].filter(x => x !== h) }
+  }
 
   // ─── 心跳 ───────────────────────────────────────
 
@@ -260,6 +270,7 @@ class WsClient {
       'runtime-log': [],
       'runtime-cursor': [],
       'device-error': [],
+      'orch-event': [],
     }
   }
 }

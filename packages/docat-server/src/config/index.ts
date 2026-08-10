@@ -14,6 +14,8 @@ export interface ServerConfig {
   dbPath: string
   /** 控制器项目缓存目录（缓存打开过的项目文件内容/列表，退出不清理） */
   cacheDir: string
+  /** 编排脚本目录（服务端本地，脚本文件从该目录加载并监听变更） */
+  orchScriptsDir: string
   /** 设备扫描 IP 列表 */
   scanIps: string[]
   /** 状态轮询间隔（毫秒） */
@@ -33,6 +35,7 @@ export function loadConfig(): ServerConfig {
     host: process.env.DOCAT_HOST ?? '0.0.0.0',
     dbPath,
     cacheDir: process.env.DOCAT_CACHE_DIR ?? join(dirname(dbPath), 'project-cache'),
+    orchScriptsDir: process.env.DOCAT_ORCH_SCRIPTS_DIR ?? join(dirname(dbPath), 'orch-scripts'),
     scanIps: process.env.DOCAT_SCAN_IPS?.split(',') ?? [...DEFAULT_SCAN_IPS],
     pollInterval: parseInt(process.env.DOCAT_POLL_INTERVAL ?? `${POLL_INTERVAL_REAL}`, 10),
     logLevel: (process.env.DOCAT_LOG_LEVEL as ServerConfig['logLevel']) ?? 'info',

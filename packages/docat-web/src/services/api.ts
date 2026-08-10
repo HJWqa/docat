@@ -16,13 +16,12 @@ import { getApiBaseUrl } from './runtime'
 
 const BASE = getApiBaseUrl()
 
-async function request<T>(
+export async function request<T>(
   method: string,
   path: string,
   body?: unknown,
   opts?: { timeoutMs?: number; rawBody?: BodyInit; contentType?: string },
-): Promise<ApiResponse<T>> {
-  const headers: Record<string, string> = {}
+): Promise<ApiResponse<T>> {  const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
   const rawBody = opts?.rawBody
@@ -128,6 +127,7 @@ export async function connectDevice(id: string, mode?: 'exclusive' | 'virtual'):
 
 export async function getDeviceStatus(id: string): Promise<ApiResponse<{
   connected: boolean
+  mode?: 'exclusive' | 'virtual'
   status: Record<string, unknown> | null
   state: Record<string, unknown> | null
 }>> {

@@ -267,4 +267,9 @@ export function websocketRoutes(
     const payload = data as { deviceId: string; [key: string]: unknown }
     sendToSubscribers(payload.deviceId, { type: 'device-error', deviceId: payload.deviceId, data: payload })
   })
+
+  // 编排事件（脚本文件变更等）→ 广播
+  eventBus.on('orch:event', (data: unknown) => {
+    broadcast({ type: 'orch-event', data })
+  })
 }

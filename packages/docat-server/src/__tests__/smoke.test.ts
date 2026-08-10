@@ -8,6 +8,7 @@ const TEST_CONFIG = {
   host: '127.0.0.1',
   dbPath: ':memory:',
   cacheDir: ':memory:',
+  orchScriptsDir: ':memory:',
   scanIps: ['127.0.0.1'],
   pollInterval: 500,
   logLevel: 'error' as const,

@@ -47,7 +47,7 @@ function remove(id: number) {
 
 defineExpose({
   success: (m: string) => add('success', m),
-  error: (m: string, opts?: { action?: ToastAction }) => add('error', m, 8000, opts?.action),
+  error: (m: string, opts?: { action?: ToastAction; duration?: number }) => add('error', m, opts?.duration ?? 8000, opts?.action),
   info: (m: string) => add('info', m),
 })
 </script>

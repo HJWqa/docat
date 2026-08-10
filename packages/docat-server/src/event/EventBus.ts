@@ -19,6 +19,7 @@ export type EventName =
   | 'shared:client-joined'
   | 'shared:client-left'
   | 'shared:command'
+  | 'orch:event'
 
 class EventBus extends EventEmitter {
   private static instance: EventBus
