@@ -70,11 +70,6 @@
         <div class="stat-label">在线</div>
         <div class="stat-bar"><div class="stat-bar-fill" :style="{ width: pct(deviceStore.connectedCount) }" /></div>
       </div>
-      <div class="stat-tile stat-tile--locked">
-        <div class="stat-value">{{ deviceStore.lockedCount }}</div>
-        <div class="stat-label">已锁定</div>
-        <div class="stat-bar"><div class="stat-bar-fill" :style="{ width: pct(deviceStore.lockedCount) }" /></div>
-      </div>
       <div class="stat-tile stat-tile--offline">
         <div class="stat-value">{{ offlineCount }}</div>
         <div class="stat-label">离线</div>
@@ -124,7 +119,7 @@
               <div class="device-card-top">
                 <div class="device-model-badge">{{ d.type || '---' }}</div>
                 <span class="badge" :class="`badge-${getStatusClass(d.id)}`">
-                  <span class="status-dot" :class="`status-dot--${getStatusClass(d.id) === 'online' ? 'connected' : getStatusClass(d.id) === 'virtual' ? 'virtual' : getStatusClass(d.id) === 'locked' ? 'locked' : 'disconnected'}`" />
+                  <span class="status-dot" :class="`status-dot--${getStatusClass(d.id) === 'online' ? 'connected' : getStatusClass(d.id) === 'virtual' ? 'virtual' : 'disconnected'}`" />
                   {{ getStatusLabel(d.id) }}
                 </span>
               </div>
@@ -335,10 +330,9 @@ async function onUserSwitched() {
 const offlineCount = computed(() => devices.value.length - deviceStore.connectedCount)
 const pct = (v: number) => devices.value.length ? `${(v / devices.value.length) * 100}%` : '0%'
 
-type StatusClass = 'online' | 'offline' | 'locked' | 'virtual'
+type StatusClass = 'online' | 'offline' | 'virtual'
 
 function getStatusClass(deviceId: string): StatusClass {
-  if (deviceStore.isLocked(deviceId)) return 'locked'
   if (deviceStore.isConnected(deviceId)) {
     return deviceStore.isVirtual(deviceId) ? 'virtual' : 'online'
   }
@@ -348,7 +342,6 @@ function getStatusLabel(deviceId: string): string {
   const cls = getStatusClass(deviceId)
   if (cls === 'virtual') return '虚拟连接'
   if (cls === 'online') return '在线'
-  if (cls === 'locked') return '已锁定'
   return '离线'
 }
 
@@ -547,8 +540,6 @@ onMounted(() => {
 .stat-bar-fill { height: 100%; border-radius: 1px; transition: width 0.5s var(--ease-out); }
 .stat-tile--online .stat-value { color: var(--status-online); }
 .stat-tile--online .stat-bar-fill { background: var(--status-online); }
-.stat-tile--locked .stat-value { color: var(--status-locked); }
-.stat-tile--locked .stat-bar-fill { background: var(--status-locked); }
 .stat-tile--offline .stat-value { color: var(--text-muted); }
 .stat-tile--offline .stat-bar-fill { background: var(--text-muted); }
 .card-section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
@@ -569,7 +560,6 @@ onMounted(() => {
 .device-accent { height: 2px; width: 100%; transition: height var(--duration-fast); }
 .device-card:hover .device-accent { height: 3px; }
 .device-accent--online { background: var(--status-online); }
-.device-accent--locked { background: var(--status-locked); }
 .device-accent--virtual { background: var(--status-virtual); }
 .device-accent--offline { background: var(--status-offline); }
 .device-card-body { padding: 20px; }

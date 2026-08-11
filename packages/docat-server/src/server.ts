@@ -10,7 +10,6 @@ import { loadConfig } from './config/index.js'
 import { initDb, closeDb } from './db/index.js'
 import { DevicePool } from './device/DevicePool.js'
 import { setRuntimePoolTcpCheck } from './device/runtimeTcp.js'
-import { AccessScheduler } from './access/AccessScheduler.js'
 import { initProjectCache } from './api/rest/projectCache.js'
 import { authRoutes } from './auth/routes.js'
 import { deviceRoutes } from './api/rest/devices.js'
@@ -66,7 +65,6 @@ async function main(): Promise<void> {
 
   // 3. 创建核心模块
   const pool = new DevicePool(config.scanIps)
-  const scheduler = new AccessScheduler()
   const orchDevices = new OrchDeviceManager(pool)
   const orchRuntime = new RuntimeManager(orchDevices)
   orchRuntime.setRequireBase(config.orchScriptsDir)
@@ -93,12 +91,12 @@ async function main(): Promise<void> {
 
   // 6. 注册路由
   await authRoutes(app)
-  deviceRoutes(app, pool, scheduler)
+  deviceRoutes(app, pool)
   scriptRoutes(app, pool)
   systemRoutes(app, pool)
   userRoutes(app)
   orchestrationRoutes(app, config.orchScriptsDir, orchDevices, orchRuntime)
-  websocketRoutes(app, pool, scheduler)
+  websocketRoutes(app, pool)
 
   // 7. 健康检查
   app.get('/api/health', async () => ({ status: 'ok', timestamp: Date.now() }))

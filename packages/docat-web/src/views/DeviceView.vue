@@ -26,9 +26,9 @@
         </div>
       </div>
       <div class="workspace-header-actions">
-        <span :class="['connection-badge', isLocked ? 'connection-badge--locked' : isVirtualMode ? 'connection-badge--virtual' : isConnected ? (tcpDown ? 'connection-badge--warning' : 'connection-badge--online') : 'connection-badge--offline']">
-          <span class="status-dot" :class="`status-dot--${isLocked ? 'locked' : isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
-          {{ isLocked ? '🔒 已锁定' : isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
+        <span :class="['connection-badge', isVirtualMode ? 'connection-badge--virtual' : isConnected ? (tcpDown ? 'connection-badge--warning' : 'connection-badge--online') : 'connection-badge--offline']">
+          <span class="status-dot" :class="`status-dot--${isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
+          {{ isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
         </span>
         <!-- Enable Toggle Switch -->
         <label v-if="isConnected" class="toggle-switch" title="使能开关 (Ctrl+E)">
@@ -44,12 +44,6 @@
         <button v-if="!isConnected" class="btn btn-success btn-sm" @click="doConnect()" :disabled="connecting">
           {{ connecting ? '连接中...' : '连接' }}
         </button>
-        <template v-if="isConnected">
-          <button v-if="!isLocked" class="btn btn-primary btn-sm" @click="doLock">锁定</button>
-          <button v-if="isLocked" class="btn btn-danger btn-sm" @click="doRelease">释放</button>
-        </template>
-        <button v-if="!isSubscribed" class="btn btn-secondary btn-sm" @click="doSubscribe">订阅</button>
-        <button v-else class="btn btn-secondary btn-sm" @click="doUnsubscribe">取消订阅</button>
         <button :class="['btn btn-sm', showLogs ? 'btn-primary' : 'btn-secondary']" @click="toggleLogs">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1"/><line x1="5" y1="9" x2="10" y2="9" stroke="currentColor" stroke-width="1"/><line x1="5" y1="12" x2="8" y2="12" stroke="currentColor" stroke-width="1"/></svg>
           日志{{ deviceLogs.length > 0 ? ` (${deviceLogs.length})` : '' }}
@@ -535,6 +529,8 @@
     <div class="action-bar mt-2">
       <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ 上电</button>
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ 下电</button>
+      <!-- 回零：Magician 机型预留动作，默认隐藏；接入 Magician 时置 supportsHome = true 启用 -->
+      <button v-if="supportsHome" class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
       <span class="action-sep" />
       <!-- Speed Slider -->
       <div class="speed-control" :class="{ 'speed-control--disabled': !isConnected }">
@@ -547,7 +543,6 @@
         <span class="speed-value">{{ speedRatio }}%</span>
       </div>
       <span class="action-sep" />
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop" title="停止运动 (Alt+Enter)">⏹ 停止</button>
       <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
       <button :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="toggleTrajectory" :disabled="!isConnected">
@@ -1706,7 +1701,6 @@ function mockAnimateToJoints(target: number[], baseDurationMs = 200): Promise<bo
   })
 }
 const connecting = ref(false)
-const isLocked = ref(false)
 const enabled = ref(deviceStore.isEnabled(deviceId))
 const enabling = ref(false)
 const isAutoMode = ref(false)
@@ -2309,7 +2303,8 @@ watch(robotModelType, () => {
 
 const isConnected = computed(() => deviceStore.isConnected(deviceId))
 const isVirtualMode = computed(() => deviceStore.isVirtual(deviceId))
-const isSubscribed = ref(false)
+/** 回零：Magician 机型预留动作，默认 false（按钮隐藏）；接入 Magician 时置 true */
+const supportsHome = ref(false)
 const tcpDown = ref(false)
 
 // ─── Speed Ratio ─────────────────────────────────
@@ -2863,8 +2858,11 @@ async function moveToPose() {
       joint: joints,
     })
     if (res.success) {
-      if ((res.data as Record<string, unknown> | undefined)?.isAlarms) {
+      const data = res.data as Record<string, unknown> | undefined
+      if (data?.isAlarms) {
         toastRef.value?.error('因告警停止运动')
+      } else if (data?.stopped) {
+        toastRef.value?.info('运动已停止')
       } else {
         toastRef.value?.success(`已到达位姿目标（${movePath.value}）`)
       }
@@ -3718,31 +3716,6 @@ async function doResetCollision() {
   }
 }
 
-async function doLock() {
-  const res = await api.lockDevice(deviceId, 300000)
-  if (res.success) { isLocked.value = true; toastRef.value?.success('设备已锁定') }
-  else { toastRef.value?.error(`锁定失败：${res.error?.message}`) }
-}
-
-async function doRelease() {
-  await api.releaseDevice(deviceId)
-  isLocked.value = false
-  toastRef.value?.info('锁定已释放')
-}
-
-async function doSubscribe() {
-  await api.subscribeDevice(deviceId)
-  isSubscribed.value = true
-  wsClient.subscribe(deviceId)
-  toastRef.value?.info('已订阅设备状态')
-}
-
-function doUnsubscribe() {
-  isSubscribed.value = false
-  wsClient.unsubscribe(deviceId)
-  toastRef.value?.info('已取消订阅')
-}
-
 // ─── Jog Control ────────────────────────────────
 
 async function changeJogMode(mode: 'continuous' | 'step') {
@@ -4116,8 +4089,11 @@ async function doMove() {
       joint: joints,
     })
     if (res.success) {
-      if ((res.data as Record<string, unknown> | undefined)?.isAlarms) {
+      const data = res.data as Record<string, unknown> | undefined
+      if (data?.isAlarms) {
         toastRef.value?.error('因告警停止运动')
+      } else if (data?.stopped) {
+        toastRef.value?.info('运动已停止')
       } else {
         toastRef.value?.success(`已到达 J[${joints.map(v => v.toFixed(1)).join(', ')}]（${movePath.value}）`)
       }
@@ -6510,7 +6486,6 @@ onUnmounted(() => {
 .workspace-switch-btn--active { border-color: var(--cyan-500); background: var(--cyan-900); color: var(--cyan-300); }
 .connection-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: var(--radius); font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; border: 1px solid; }
 .connection-badge--online { border-color: var(--status-online); color: var(--status-online); background: var(--status-online-dim); }
-.connection-badge--locked { border-color: var(--status-locked); color: var(--status-locked); background: var(--status-locked-dim); }
 .connection-badge--virtual { border-color: var(--status-virtual); color: var(--status-virtual); background: var(--status-virtual-dim); }
 .connection-badge--warning { border-color: var(--status-warning); color: var(--status-warning); background: var(--status-warning-dim); }
 .connection-badge--offline { border-color: var(--status-offline); color: var(--status-offline); background: var(--status-offline-dim); }

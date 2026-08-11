@@ -10,7 +10,6 @@ import { validateToken } from '../../auth/auth.js'
 import { getDb } from '../../db/index.js'
 import { ensureRuntimeTcp } from '../../device/runtimeTcp.js'
 import type { DevicePool } from '../../device/DevicePool.js'
-import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { eventBus } from '../../event/EventBus.js'
 import type { WSMessage } from 'docat-shared/types'
 
@@ -25,8 +24,7 @@ interface WsClient {
 
 export function websocketRoutes(
   app: FastifyInstance,
-  pool: DevicePool,
-  scheduler: AccessScheduler
+  pool: DevicePool
 ): void {
   const clients: Map<WebSocket, WsClient> = new Map()
 
@@ -93,41 +91,12 @@ export function websocketRoutes(
             } catch {
               // 设备未注册时忽略
             }
-
-            const joined = scheduler.joinSharedSession(deviceId, {
-              id: client.userId,
-              username: client.username,
-              send: (m) => {
-                if (ws.readyState === 1) ws.send(JSON.stringify(m))
-              },
-            })
-
-            if (!joined) {
-              const currentClient = client
-              scheduler.requestAccess({
-                clientId: currentClient!.userId,
-                deviceId,
-                mode: 'shared',
-              }).then(() => {
-                if (!currentClient) return
-                scheduler.joinSharedSession(deviceId, {
-                  id: currentClient.userId,
-                  username: currentClient.username,
-                  send: (m) => {
-                    if (ws.readyState === 1) ws.send(JSON.stringify(m))
-                  },
-                })
-              }).catch(() => {
-                ws.send(JSON.stringify({ type: 'error', data: { message: '无法订阅该设备' } }))
-              })
-            }
             break
           }
 
           case 'unsubscribe': {
             if (msg.deviceId) {
               client.subscriptions.delete(msg.deviceId)
-              scheduler.leaveSharedSession(msg.deviceId, client.userId)
             }
             break
           }
@@ -193,10 +162,6 @@ export function websocketRoutes(
     ws.on('close', () => {
       if (client) {
         clients.delete(ws)
-        // 清理所有订阅
-        for (const deviceId of client.subscriptions) {
-          scheduler.leaveSharedSession(deviceId, client.userId)
-        }
         console.log(`[WS] Client disconnected: ${client.username}`)
       }
     })

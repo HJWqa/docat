@@ -49,7 +49,7 @@ export const DEVICE_API = {
   JOG: '/motion/jog',
   /** 移动到目标位姿 */
   MOVE: '/motion/move',
-  /** 回零 */
+  /** 回零（Magician 机型预留） */
   HOME: '/motion/home',
   /** 停止运动 */
   STOP: '/motion/stop',

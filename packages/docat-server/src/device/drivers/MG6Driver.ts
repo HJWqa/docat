@@ -128,6 +128,15 @@ export class MG6Driver extends DeviceDriver {
    */
   private jogQueue: Promise<void> = Promise.resolve()
   private jogSeq = 0
+  /**
+   * 在途运动取消机制：
+   * - moveAbortSeq：每次 stop() 自增；运动轮询循环在启动时捕获当前值，
+   *   每轮对比，不一致即被中止（返回 { stopped: true }，不发错误）。
+   * - activeMove：当前活动的 runto URL + body（不含 value），stop() 借此
+   *   立即向同一 URL 补发 value:false，物理上停住机器人。
+   */
+  private moveAbortSeq = 0
+  private activeMove: { url: string; body: Record<string, unknown> } | null = null
 
   constructor(id: string, ip: string, modelName: string = 'MG6') {
     super()
@@ -353,10 +362,13 @@ export class MG6Driver extends DeviceDriver {
     }
     if (pose) bodyBase.pose = pose
 
+    const seq = this.moveAbortSeq
+    this.activeMove = { url, body: { ...bodyBase } }
     const start = Date.now()
     let last: Record<string, unknown> = {}
     try {
       while (Date.now() - start < 30000) {
+        if (seq !== this.moveAbortSeq) return { stopped: true }
         const reply = await this.http.send({
           method: 'post',
           url,
@@ -379,6 +391,7 @@ export class MG6Driver extends DeviceDriver {
       }
       return last
     } finally {
+      if (this.activeMove?.url === url) this.activeMove = null
       await this.http.send({
         method: 'post',
         url,
@@ -454,9 +467,13 @@ export class MG6Driver extends DeviceDriver {
    */
   async moveJoints(joints: number[]): Promise<void> {
     const targetJoints = joints.map(j => Number(Number(j).toFixed(6)))
+    const seq = this.moveAbortSeq
+    const body: Record<string, unknown> = { joint: targetJoints }
+    this.activeMove = { url: '/interface/jointMovJ', body }
     const start = Date.now()
     try {
       while (Date.now() - start < 30000) {
+        if (seq !== this.moveAbortSeq) return
         const result = await this.moveJointsCommand(targetJoints, true)
         if (result.isAlarms === true) throw new Error('因告警停止运动')
         if (result.value === true) return
@@ -464,6 +481,7 @@ export class MG6Driver extends DeviceDriver {
       }
       throw new Error('Move joints timed out')
     } finally {
+      if (this.activeMove?.url === '/interface/jointMovJ') this.activeMove = null
       await this.moveJointsCommand(targetJoints, false).catch(() => {})
     }
   }
@@ -487,6 +505,7 @@ export class MG6Driver extends DeviceDriver {
   }
 
   async home(): Promise<void> {
+    // 回零 — 为 Magician 机型预留的动作
     await this.http.send({
       method: 'post',
       url: '/motion/home',
@@ -497,7 +516,20 @@ export class MG6Driver extends DeviceDriver {
   }
 
   async stop(): Promise<void> {
-    // 通用停止：至少清掉点动按钮
+    // 1) 中止在途 runto 轮询（movJ/movL/jointMovJ），并立即向同 URL 发 value:false 物理停住
+    this.moveAbortSeq++
+    const move = this.activeMove
+    this.activeMove = null
+    if (move) {
+      await this.http.send({
+        method: 'post',
+        url: move.url,
+        portName: this.ip,
+        params: { ...move.body, value: false },
+        timeout: 3000,
+      }).catch(() => {})
+    }
+    // 2) 通用停止：清掉点动按钮
     await this.stopJog().catch(() => {})
   }
 

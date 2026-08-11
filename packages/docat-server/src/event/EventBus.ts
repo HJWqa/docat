@@ -13,12 +13,6 @@ export type EventName =
   | 'device:runtime-log'
   | 'device:runtime-cursor'
   | 'device:error'
-  | 'access:granted'
-  | 'access:released'
-  | 'access:requested'
-  | 'shared:client-joined'
-  | 'shared:client-left'
-  | 'shared:command'
   | 'orch:event'
 
 class EventBus extends EventEmitter {

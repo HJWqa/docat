@@ -1,6 +1,6 @@
 /**
  * 设备管理 REST API
- * /api/devices — CRUD + 连接/断开/锁定/订阅
+ * /api/devices — CRUD + 连接/断开
  */
 import type { FastifyInstance } from 'fastify'
 import { v4 as uuidv4 } from 'uuid'
@@ -10,7 +10,6 @@ import * as path from 'node:path'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import type { DevicePool, ConnectionMode, DeviceEntry } from '../../device/DevicePool.js'
-import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
 import { createStoredZip, type ZipEntryInput } from '../../utils/zip.js'
@@ -295,7 +294,7 @@ function detectControlLogLevel(line: string): ControlLogLevel | null {
   return null
 }
 
-export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: AccessScheduler): void {
+export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
   function getDeviceIp(deviceId: string): string | null {
     const online = pool.getDevice(deviceId)
     if (online) return online.driver.ip
@@ -617,66 +616,6 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
           return { success: true, data: { ratio } }
         }
         return { success: false, error: { code: 50000, message: `设置速度失败: ${res.message ?? ''}` } }
-      } catch (err) {
-        return { success: false, error: { code: 50000, message: (err as Error).message } }
-      }
-    }
-  )
-
-  /** 锁定设备（独占访问） */
-  app.post<{ Params: { id: string }; Body: { timeout?: number } }>(
-    '/api/devices/:id/lock',
-    async (request, reply): Promise<ApiResponse<unknown>> => {
-      try {
-        await authMiddleware(request, reply)
-        if (reply.sent) return reply
-        requireOperator(request, reply)
-
-        const grant = await scheduler.requestAccess({
-          clientId: request.auth!.userId,
-          deviceId: request.params.id,
-          mode: 'exclusive',
-          timeout: request.body?.timeout,
-        })
-
-        return { success: true, data: grant }
-      } catch (err) {
-        return { success: false, error: { code: 40901, message: (err as Error).message } }
-      }
-    }
-  )
-
-  /** 释放设备锁定 */
-  app.post<{ Params: { id: string } }>(
-    '/api/devices/:id/release',
-    async (request, reply): Promise<ApiResponse<null>> => {
-      try {
-        await authMiddleware(request, reply)
-        if (reply.sent) return reply
-
-        scheduler.releaseAccess(request.auth!.userId, request.params.id)
-        return { success: true, data: null }
-      } catch (err) {
-        return { success: false, error: { code: 50000, message: (err as Error).message } }
-      }
-    }
-  )
-
-  /** 订阅设备状态 */
-  app.post<{ Params: { id: string } }>(
-    '/api/devices/:id/subscribe',
-    async (request, reply): Promise<ApiResponse<unknown>> => {
-      try {
-        await authMiddleware(request, reply)
-        if (reply.sent) return reply
-
-        const grant = await scheduler.requestAccess({
-          clientId: request.auth!.userId,
-          deviceId: request.params.id,
-          mode: 'subscribe',
-        })
-
-        return { success: true, data: grant }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }

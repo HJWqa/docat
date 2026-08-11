@@ -60,18 +60,6 @@ export class DocatSdk {
     return this.post(`/api/devices/${id}/disconnect`)
   }
 
-  async lockDevice(id: string, timeout?: number): Promise<ApiResponse<unknown>> {
-    return this.post(`/api/devices/${id}/lock`, { timeout })
-  }
-
-  async releaseDevice(id: string): Promise<ApiResponse<null>> {
-    return this.post(`/api/devices/${id}/release`)
-  }
-
-  async subscribeDevice(id: string): Promise<ApiResponse<unknown>> {
-    return this.post(`/api/devices/${id}/subscribe`)
-  }
-
   // ─── Scripts ───────────────────────────────────
 
   async listScripts(): Promise<ApiResponse<Script[]>> {

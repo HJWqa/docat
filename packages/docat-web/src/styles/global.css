@@ -44,7 +44,6 @@
   --status-warning:  #f59e0b;  --status-warning-dim: #f59e0b1a;
   --status-danger:   #ef4444;  --status-danger-dim:  #ef44441a;
   --status-offline:  #6b7280;  --status-offline-dim: #6b72801a;
-  --status-locked:   #7aa2ff;  --status-locked-dim:  #7aa2ff1a;
   --status-info:     #3b82f6;  --status-info-dim:    #3b82f61a;
   --status-virtual:  #a78bfa;  --status-virtual-dim: #a78bfa1a;
 
@@ -265,7 +264,6 @@ a:hover { color: var(--cyan-200); }
 .badge-offline  { color: var(--status-offline);  border-color: var(--status-offline-dim);  background: var(--status-offline-dim); }
 .badge-busy     { color: var(--status-warning);  border-color: var(--status-warning-dim);  background: var(--status-warning-dim); }
 .badge-error    { color: var(--status-danger);   border-color: var(--status-danger-dim);   background: var(--status-danger-dim); }
-.badge-locked   { color: var(--status-locked);   border-color: var(--status-locked-dim);   background: var(--status-locked-dim); }
 
 /* ─── Status Dot ─────────────────────────────────── */
 .status-dot {
@@ -276,7 +274,6 @@ a:hover { color: var(--cyan-200); }
 }
 .status-dot--connected    { background: var(--status-online); }
 .status-dot--disconnected { background: var(--status-offline); }
-.status-dot--locked       { background: var(--status-locked); }
 
 /* ─── Labels (replaces scattered letter-spaced micro-labels) ─ */
 .label {

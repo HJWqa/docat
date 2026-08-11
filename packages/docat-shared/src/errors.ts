@@ -89,8 +89,6 @@ export enum ServerErrorCode {
   SCRIPT_NOT_FOUND = 40402,
   /** 用户未找到 */
   USER_NOT_FOUND = 40403,
-  /** 设备锁定冲突 */
-  DEVICE_LOCK_CONFLICT = 40901,
   /** 设备已被占用 */
   DEVICE_OCCUPIED = 40902,
   /** 参数验证失败 */

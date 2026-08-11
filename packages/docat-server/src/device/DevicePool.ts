@@ -45,16 +45,6 @@ export class DevicePool {
     return count
   }
 
-  /** 获取所有设备的状态摘要 */
-  getDeviceStatuses(): Array<{ id: string; ip: string; connected: boolean; locked: boolean }> {
-    return [...this.devices.entries()].map(([id, entry]) => ({
-      id,
-      ip: entry.driver.ip,
-      connected: entry.driver.status.connected,
-      locked: false, // TODO: query AccessScheduler
-    }))
-  }
-
   getDevice(driverId: string): DeviceEntry | undefined {
     return this.devices.get(driverId)
   }

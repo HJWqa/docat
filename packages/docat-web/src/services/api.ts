@@ -170,18 +170,6 @@ export async function disconnectDevice(id: string): Promise<ApiResponse<null>> {
   return request('POST', `/api/devices/${id}/disconnect`)
 }
 
-export async function lockDevice(id: string, timeout?: number): Promise<ApiResponse<unknown>> {
-  return request('POST', `/api/devices/${id}/lock`, { timeout })
-}
-
-export async function releaseDevice(id: string): Promise<ApiResponse<null>> {
-  return request('POST', `/api/devices/${id}/release`)
-}
-
-export async function subscribeDevice(id: string): Promise<ApiResponse<unknown>> {
-  return request('POST', `/api/devices/${id}/subscribe`)
-}
-
 export async function getDeviceSpeed(id: string): Promise<ApiResponse<{ ratio: number }>> {
   return request('GET', `/api/devices/${id}/speed`)
 }

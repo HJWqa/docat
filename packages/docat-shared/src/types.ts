@@ -222,24 +222,6 @@ export interface AuditLogEntry {
   createdAt: string
 }
 
-// ─── 设备访问 ────────────────────────────────
-
-export type AccessMode = 'exclusive' | 'shared' | 'subscribe'
-
-export interface AccessRequest {
-  clientId: string
-  deviceId: string
-  mode: AccessMode
-  timeout?: number
-}
-
-export interface AccessGrant {
-  token: string
-  deviceId: string
-  mode: AccessMode
-  expiresAt: number
-}
-
 // ─── 项目（设备端文件） ──────────────────────
 
 export interface DeviceProject {
