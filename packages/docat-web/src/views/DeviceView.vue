@@ -876,7 +876,10 @@
                     <div class="load-field"><label>时间</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" /></div>
                     <div class="load-field"><label>时区</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="UTC+8" /></div>
                   </div>
-                  <button class="btn btn-primary btn-sm mt-2" @click="saveSystemTime">应用</button>
+                  <div style="display:flex;gap:8px" class="mt-2">
+                    <button class="btn btn-primary btn-sm" @click="saveSystemTime">应用</button>
+                    <button class="btn btn-secondary btn-sm" @click="syncLocalTime">同步当前时间</button>
+                  </div>
                 </div>
               </div>
 
@@ -1289,6 +1292,17 @@
                   </div>
                   <div class="text-muted" style="margin-top:8px;font-size:0.68rem;line-height:1.6">
                     标定辅助「导出」按钮：左键将标定数据写入该目录下的 txt/xml 文件（服务端）；右键由浏览器直接下载文件。
+                  </div>
+                </div>
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>时间提醒</h4></div>
+                  <label class="toggle-switch" style="justify-content:space-between">
+                    <span class="toggle-label" style="min-width:0">检查设备时间</span>
+                    <input type="checkbox" v-model="checkDeviceTime" @change="persistCheckDeviceTime" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                  <div class="text-muted" style="margin-top:8px;font-size:0.68rem;line-height:1.6">
+                    进入设备页面时自动检查设备时间，与当前时间偏差过大时提示同步。
                   </div>
                 </div>
               </div>
@@ -4073,6 +4087,74 @@ async function saveSystemTime() {
   else toastRef.value?.error(`保存时间失败：${res.error?.message}`)
 }
 
+function syncLocalTime() {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const offsetMin = -now.getTimezoneOffset()
+  const sign = offsetMin >= 0 ? '+' : '-'
+  const absMin = Math.abs(offsetMin)
+  const tz = `UTC${sign}${Math.floor(absMin / 60)}${absMin % 60 ? `:${pad(absMin % 60)}` : ''}`
+  sysTimeForm.date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  sysTimeForm.time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  sysTimeForm.timeZone = tz
+  saveSystemTime()
+}
+
+// ─── 进页面时间偏差检查 ─────────────────────────
+
+const CHECK_TIME_KEY = `docat:checkTime:${deviceId}`
+const TIME_DRIFT_THRESHOLD_MS = 5 * 60 * 1000
+const checkDeviceTime = ref(localStorage.getItem(CHECK_TIME_KEY) !== '0')
+function persistCheckDeviceTime() {
+  localStorage.setItem(CHECK_TIME_KEY, checkDeviceTime.value ? '1' : '0')
+}
+
+/** 解析设备时间（含 UTC 偏移时区）为毫秒时间戳；无法解析返回 null */
+function parseDeviceTime(t: { date?: string; time?: string; timeZone?: string }): number | null {
+  if (!t.date || !t.time) return null
+  const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(t.date)
+  const tm = /^(\d{2}):(\d{2}):(\d{2})/.exec(t.time)
+  if (!dm || !tm) return null
+  let utc = Date.UTC(+dm[1], +dm[2] - 1, +dm[3], +tm[1], +tm[2], +tm[3])
+  const tzm = /UTC([+-])(\d{1,2})(?::?(\d{2}))?/i.exec(t.timeZone ?? '')
+  if (tzm) {
+    const offsetMin = (+tzm[2] * 60 + (+tzm[3] || 0)) * (tzm[1] === '-' ? -1 : 1)
+    utc -= offsetMin * 60000
+  }
+  return utc
+}
+
+function formatDrift(ms: number): string {
+  const min = Math.round(ms / 60000)
+  if (min < 60) return `${min} 分钟`
+  return `${(min / 60).toFixed(1)} 小时`
+}
+
+function openTimeSettings() {
+  showSettings.value = true
+  settingsTab.value = 'docat'
+}
+
+async function checkDeviceTimeOnEntry() {
+  if (!checkDeviceTime.value || isMock) return
+  const res = await api.getSystemTime(deviceId)
+  if (!res.success || !res.data) return
+  const devMs = parseDeviceTime(res.data)
+  if (devMs == null) return
+  const diff = Math.abs(Date.now() - devMs)
+  if (diff < TIME_DRIFT_THRESHOLD_MS) return
+  toastRef.value?.error(
+    `设备时间与当前时间偏差约 ${formatDrift(diff)}，建议同步`,
+    {
+      duration: 0,
+      actions: [
+        { label: '同步', handler: () => syncLocalTime() },
+        { label: '提醒设置', handler: openTimeSettings },
+      ],
+    },
+  )
+}
+
 // ─── User Management ───────────────────────────
 
 const ctrlUserList = ref<api.ControllerUserList>({ defaultLevel: 1, list: [] })
@@ -5401,6 +5483,7 @@ onMounted(async () => {
   loadLoadData()
   api.getAutoManualSwitch(deviceId).then(r => { if (r.success && r.data) autoModeEnabled.value = r.data.value })
   api.getRemoteControl(deviceId).then(r => { if (r.success && r.data) isOnlineMode.value = r.data.mode === 'online' })
+  void checkDeviceTimeOnEntry()
 
   // Mock 模式跳过 WS 订阅和 REST 兜底轮询，避免覆盖 mock 状态
   if (isMock) {

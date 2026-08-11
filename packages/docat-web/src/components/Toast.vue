@@ -8,9 +8,11 @@
       >
         <span class="toast-icon">{{ iconMap[t.type] }}</span>
         <span class="toast-msg">{{ t.message }}</span>
-        <button v-if="t.action" class="toast-action" @click="t.action.handler(); remove(t.id)">
-          {{ t.action.label }}
-        </button>
+        <div v-if="t.actions && t.actions.length" class="toast-actions">
+          <button v-for="(a, i) in t.actions" :key="i" class="toast-action" @click="a.handler(); remove(t.id)">
+            {{ a.label }}
+          </button>
+        </div>
         <button class="toast-close" @click="remove(t.id)">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
         </button>
@@ -29,16 +31,25 @@ interface ToastAction {
   handler: () => void
 }
 
-interface ToastItem { id: number; type: ToastType; message: string; action?: ToastAction }
+interface ToastItem { id: number; type: ToastType; message: string; actions?: ToastAction[] }
 
 const toasts = ref<ToastItem[]>([])
 let nextId = 0
 const iconMap: Record<ToastType, string> = { success: '✓', error: '✗', info: 'ℹ' }
 
-function add(type: ToastType, message: string, duration = 3000, action?: ToastAction) {
+interface ToastOptions { actions?: ToastAction[]; duration?: number }
+
+function normalizeOpts(opts?: { action?: ToastAction; actions?: ToastAction[]; duration?: number }): ToastOptions {
+  const actions = opts?.action ? [opts.action, ...(opts?.actions ?? [])] : opts?.actions
+  return { actions, duration: opts?.duration }
+}
+
+function add(type: ToastType, message: string, opts?: ToastOptions) {
   const id = nextId++
-  toasts.value.push({ id, type, message, action })
-  setTimeout(() => remove(id), duration)
+  toasts.value.push({ id, type, message, actions: opts?.actions })
+  if (opts?.duration && opts.duration > 0) {
+    setTimeout(() => remove(id), opts.duration)
+  }
 }
 
 function remove(id: number) {
@@ -47,7 +58,7 @@ function remove(id: number) {
 
 defineExpose({
   success: (m: string) => add('success', m),
-  error: (m: string, opts?: { action?: ToastAction; duration?: number }) => add('error', m, opts?.duration ?? 8000, opts?.action),
+  error: (m: string, opts?: { action?: ToastAction; actions?: ToastAction[]; duration?: number }) => add('error', m, normalizeOpts(opts)),
   info: (m: string) => add('info', m),
 })
 </script>
@@ -72,6 +83,7 @@ defineExpose({
 .toast--error   .toast-icon { color: var(--status-danger); }
 .toast--info    .toast-icon { color: var(--cyan-300); }
 .toast-msg { flex: 1; font-size: 13px; color: var(--text-primary); }
+.toast-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .toast-action {
   flex-shrink: 0;
   font-family: var(--font-body); font-size: 0.78rem; font-weight: 600;
