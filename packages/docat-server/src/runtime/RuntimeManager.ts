@@ -71,8 +71,11 @@ export class RuntimeManager {
     }
   }
 
-  private broadcastLog(level: string, text: string) {
-    eventBus.emit('orch:event', { event: 'log', deviceName: '脚本', direction: level === 'error' ? 'error' : 'script', text, timestamp: Date.now() })
+  private broadcastLog(level: string, text: string, line?: number, column?: number) {
+    const payload: Record<string, unknown> = { event: 'log', deviceName: '脚本', direction: level === 'error' ? 'error' : 'script', text, timestamp: Date.now() }
+    if (line !== undefined) payload.line = line
+    if (column !== undefined) payload.column = column
+    eventBus.emit('orch:event', payload)
   }
 
   async run(req: RunRequest): Promise<{ ok: boolean; error?: string }> {
@@ -172,7 +175,9 @@ export class RuntimeManager {
       }
       case 'log': {
         const level = String(msg.level ?? 'info')
-        this.broadcastLog(level, String(msg.text ?? ''))
+        const line = typeof msg.line === 'number' ? msg.line : undefined
+        const column = typeof msg.column === 'number' ? msg.column : undefined
+        this.broadcastLog(level, String(msg.text ?? ''), line, column)
         break
       }
     }

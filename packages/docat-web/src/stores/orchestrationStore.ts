@@ -75,6 +75,10 @@ export interface OrchLogEntry {
   deviceName: string
   direction: LogDirection
   text: string
+  /** 脚本编译错误行号（编辑器红色波浪线用） */
+  line?: number
+  /** 脚本编译错误列 */
+  column?: number
 }
 
 export const ORCH_DEVICE_TYPES: Array<{ value: OrchDeviceType; label: string }> = [
@@ -174,8 +178,8 @@ export const orchStore = reactive({
 
 let logSeq = 0
 
-export function addLog(deviceName: string, direction: LogDirection, text: string) {
-  orchStore.logs.push({ id: ++logSeq, time: Date.now(), deviceName, direction, text })
+export function addLog(deviceName: string, direction: LogDirection, text: string, line?: number, column?: number) {
+  orchStore.logs.push({ id: ++logSeq, time: Date.now(), deviceName, direction, text, line, column })
   const limit = orchStore.settings.logLimit || 500
   if (orchStore.logs.length > limit) {
     orchStore.logs = orchStore.logs.slice(orchStore.logs.length - limit)
@@ -282,6 +286,8 @@ interface OrchWsEvent {
   name?: string
   mtime?: number
   dir?: string
+  line?: number
+  column?: number
   [key: string]: unknown
 }
 
@@ -319,7 +325,15 @@ function handleOrchEvent(payload: unknown) {
       }
       break
     case 'log':
-      if (ev.text) addLog(ev.deviceName || ev.deviceId || '编排', ev.direction || 'recv', String(ev.text))
+      if (ev.text) {
+        addLog(
+          ev.deviceName || ev.deviceId || '编排',
+          ev.direction || 'recv',
+          String(ev.text),
+          typeof ev.line === 'number' ? ev.line : undefined,
+          typeof ev.column === 'number' ? ev.column : undefined,
+        )
+      }
       break
     case 'pose':
       void refreshPosesFromServer()
@@ -1086,6 +1100,18 @@ export function buildScriptContext() {
       toString: (arr: Array<number | string>, separator = orchStore.settings.defaultSeparator || ';') =>
         (Array.isArray(arr) ? arr : []).join(String(separator)),
       sleep: (ms: number) => sleep(Math.max(0, Number(ms) || 0)),
+      // WSL 路径转换（/mnt/d/... ⇄ D:\...）
+      wslToWin: (path: string) => wslToWinPath(String(path)),
+      winToWsl: (path: string) => winToWslPath(String(path)),
+      // 标定转换（真实模式读取服务端文件；mock 不支持文件读取）
+      calib: {
+        parseIwcaf: (path: string) => calibUnavailable(`parseIwcaf('${path}')`),
+        parseXml: (path: string) => calibUnavailable(`parseXml('${path}')`),
+        imageToWorld: (m: CalibMatrixLike, x: number, y: number, sep?: string) =>
+          calibImageToWorld(m, Number(x), Number(y), sep),
+        worldToImage: (m: CalibMatrixLike, wx: number, wy: number, sep?: string) =>
+          calibWorldToImage(m, Number(wx), Number(wy), sep),
+      },
     },
     log: {
       info: (text: string) => addLog('脚本', 'script', String(text)),
@@ -1093,6 +1119,51 @@ export function buildScriptContext() {
       error: (text: string) => addLog('脚本', 'error', String(text)),
     },
   }
+}
+
+// ─── 标定/路径工具实现（mock 与真实模式共享的纯逻辑）──
+
+/** WSL → Windows：/mnt/d/foo → D:\foo */
+export function wslToWinPath(path: string): string {
+  const m = /^\/mnt\/([a-zA-Z])(\/.*)?$/.exec(path)
+  if (!m) return path
+  const rest = (m[2] || '').replace(/\//g, '\\')
+  return `${m[1].toUpperCase()}:${rest || '\\'}`
+}
+
+/** Windows → WSL：D:\foo → /mnt/d/foo */
+export function winToWslPath(path: string): string {
+  const m = /^([a-zA-Z]):[\\/](.*)$/.exec(path)
+  if (!m) return path
+  const rest = (m[2] || '').replace(/[\\/]/g, '/')
+  return `/mnt/${m[1].toLowerCase()}/${rest}`
+}
+
+export interface CalibMatrixLike {
+  m00: number
+  m01: number
+  m02: number
+  m10: number
+  m11: number
+  m12: number
+}
+
+function calibUnavailable(call: string): never {
+  throw new Error(`${call} 需在真实模式运行（读取服务端标定文件）；mock 模式仅支持转换函数`)
+}
+
+function calibImageToWorld(m: CalibMatrixLike, x: number, y: number, sep?: string): number[] | string {
+  const wx = m.m00 * x + m.m01 * y + m.m02
+  const wy = m.m10 * x + m.m11 * y + m.m12
+  return sep !== undefined && sep !== null ? `${wx}${sep}${wy}` : [wx, wy]
+}
+
+function calibWorldToImage(m: CalibMatrixLike, wx: number, wy: number, sep?: string): number[] | string {
+  const det = m.m00 * m.m11 - m.m01 * m.m10
+  if (Math.abs(det) < 1e-12) throw new Error('标定矩阵不可逆（行列式接近 0）')
+  const ix = (m.m11 * (wx - m.m02) - m.m01 * (wy - m.m12)) / det
+  const iy = (-m.m10 * (wx - m.m02) + m.m00 * (wy - m.m12)) / det
+  return sep !== undefined && sep !== null ? `${ix}${sep}${iy}` : [ix, iy]
 }
 
 export type ScriptContext = ReturnType<typeof buildScriptContext>

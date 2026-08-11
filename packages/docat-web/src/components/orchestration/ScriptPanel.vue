@@ -79,6 +79,8 @@
       <code>utils.toArray(文本)</code>
       <code>utils.toString(数组)</code>
       <code>utils.sleep(ms)</code>
+      <code>utils.calib.imageToWorld(m, x, y)</code>
+      <code>utils.wslToWin(路径)</code>
       <code>log.info / warn / error</code>
     </div>
 
@@ -242,6 +244,7 @@ function initEditor() {
   editor.onDidChangeModelContent(() => {
     if (syncing || !editor) return
     fileContent.value = editor.getValue()
+    clearScriptMarkers()
   })
   // Ctrl+S / Cmd+S：保存（真实模式写回服务端）
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -301,6 +304,13 @@ const DOCAT_API_JS: DocatCompletionItem[] = [
   { label: 'utils.toArray', detail: '字符串解析为数组', documentation: 'utils.toArray(文本, 分隔符=\';\')', insert: 'utils.toArray(\'${1:文本}\')' },
   { label: 'utils.toString', detail: '数组拼接为文本', documentation: 'utils.toString(数组, 分隔符=\';\')', insert: 'utils.toString(${1:数组})' },
   { label: 'utils.sleep', detail: '等待（可被终止打断）', documentation: 'utils.sleep(毫秒)', insert: 'utils.sleep(${1:毫秒})' },
+  { label: 'utils.wslToWin', detail: 'WSL 路径转 Windows', documentation: 'utils.wslToWin(\'/mnt/d/foo\') → \'D:\\\\foo\'（不匹配原样返回）', insert: 'utils.wslToWin(\'${1:路径}\')' },
+  { label: 'utils.winToWsl', detail: 'Windows 路径转 WSL', documentation: 'utils.winToWsl(\'D:\\\\foo\') → \'/mnt/d/foo\'（不匹配原样返回）', insert: 'utils.winToWsl(\'${1:路径}\')' },
+  { label: 'utils.calib', detail: '标定转换（图像 ⇄ 物理坐标）', documentation: '解析 .iwcal/.xml 标定文件并做坐标互转', insert: 'utils.calib' },
+  { label: 'utils.calib.parseIwcaf', detail: '解析 .iwcal 标定文件', documentation: 'utils.calib.parseIwcaf(路径) → 矩阵对象；路径错误自动 WSL⇄Windows 转换重试', insert: 'utils.calib.parseIwcaf(\'${1:路径}\')' },
+  { label: 'utils.calib.parseXml', detail: '解析 .xml 标定文件', documentation: 'utils.calib.parseXml(路径) → 矩阵对象（附 precision）；路径错误自动转换重试', insert: 'utils.calib.parseXml(\'${1:路径}\')' },
+  { label: 'utils.calib.imageToWorld', detail: '图像坐标 → 物理坐标', documentation: 'utils.calib.imageToWorld(m, x, y[, 分隔符]) → [wx, wy] 或文本', insert: 'utils.calib.imageToWorld(${1:m}, ${2:x}, ${3:y})' },
+  { label: 'utils.calib.worldToImage', detail: '物理坐标 → 图像坐标', documentation: 'utils.calib.worldToImage(m, wx, wy[, 分隔符]) → [ix, iy]（矩阵求逆）', insert: 'utils.calib.worldToImage(${1:m}, ${2:wx}, ${3:wy})' },
   { label: 'log', detail: '日志', documentation: '日志对象：info / warn / error（进编排日志面板）', insert: 'log' },
   { label: 'log.info', detail: '记录 info 日志', documentation: 'log.info(文本)', insert: 'log.info(\'${1:文本}\')' },
   { label: 'log.warn', detail: '记录 warn 日志', documentation: 'log.warn(文本)', insert: 'log.warn(\'${1:文本}\')' },
@@ -336,6 +346,13 @@ const DOCAT_API_PY: DocatCompletionItem[] = [
   { label: 'docat.utils.to_array', detail: '字符串解析为数组', documentation: "docat.utils.to_array(文本, sep=';')", insert: 'docat.utils.to_array(\'${1:文本}\')' },
   { label: 'docat.utils.to_string', detail: '数组拼接为文本', documentation: "docat.utils.to_string(数组, sep=';')", insert: 'docat.utils.to_string(${1:数组})' },
   { label: 'docat.utils.sleep', detail: '等待（可被终止打断）', documentation: 'docat.utils.sleep(毫秒)', insert: 'docat.utils.sleep(${1:毫秒})' },
+  { label: 'docat.utils.wsl_to_win', detail: 'WSL 路径转 Windows', documentation: "docat.utils.wsl_to_win('/mnt/d/foo') → 'D:\\\\foo'", insert: 'docat.utils.wsl_to_win(\'${1:路径}\')' },
+  { label: 'docat.utils.win_to_wsl', detail: 'Windows 路径转 WSL', documentation: "docat.utils.win_to_wsl('D:\\\\foo') → '/mnt/d/foo'", insert: 'docat.utils.win_to_wsl(\'${1:路径}\')' },
+  { label: 'docat.utils.calib', detail: '标定转换（图像 ⇄ 物理坐标）', documentation: '解析 .iwcal/.xml 标定文件并做坐标互转', insert: 'docat.utils.calib' },
+  { label: 'docat.utils.calib.parse_iwcaf', detail: '解析 .iwcal 标定文件', documentation: 'docat.utils.calib.parse_iwcaf(路径) → 矩阵字典；路径错误自动转换重试', insert: 'docat.utils.calib.parse_iwcaf(\'${1:路径}\')' },
+  { label: 'docat.utils.calib.parse_xml', detail: '解析 .xml 标定文件', documentation: 'docat.utils.calib.parse_xml(路径) → 矩阵字典（附 precision）', insert: 'docat.utils.calib.parse_xml(\'${1:路径}\')' },
+  { label: 'docat.utils.calib.image_to_world', detail: '图像坐标 → 物理坐标', documentation: 'docat.utils.calib.image_to_world(m, x, y, sep=None) → [wx, wy] 或文本', insert: 'docat.utils.calib.image_to_world(${1:m}, ${2:x}, ${3:y})' },
+  { label: 'docat.utils.calib.world_to_image', detail: '物理坐标 → 图像坐标', documentation: 'docat.utils.calib.world_to_image(m, wx, wy, sep=None) → [ix, iy]', insert: 'docat.utils.calib.world_to_image(${1:m}, ${2:wx}, ${3:wy})' },
   { label: 'docat.log', detail: '日志', documentation: 'docat.log.info / warn / error（进编排日志面板）', insert: 'docat.log' },
   { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本)', insert: 'docat.log.info(\'${1:文本}\')' },
   { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本)', insert: 'docat.log.warn(\'${1:文本}\')' },
@@ -492,6 +509,42 @@ if (import.meta.hot) {
     completionConfigured = false
   })
 }
+
+// ─── 编译错误红色波浪线 ──────────────────────────────
+
+const MARKER_OWNER = 'docat-script-error'
+
+/** 清除脚本错误标记（加载文件/编辑内容/成功运行时调用） */
+function clearScriptMarkers() {
+  const model = editor?.getModel()
+  if (!model) return
+  monaco.editor.setModelMarkers(model, MARKER_OWNER, [])
+}
+
+/** 在指定行打红色波浪线并滚动到该行 */
+function markScriptError(line: number, column: number | undefined, message: string) {
+  const model = editor?.getModel()
+  if (!model) return
+  const safeLine = Math.min(Math.max(line, 1), model.getLineCount())
+  const col = Math.min(Math.max(column ?? 1, 1), model.getLineMaxColumn(safeLine))
+  monaco.editor.setModelMarkers(model, MARKER_OWNER, [{
+    severity: monaco.MarkerSeverity.Error,
+    message,
+    startLineNumber: safeLine,
+    startColumn: col,
+    endLineNumber: safeLine,
+    endColumn: model.getLineMaxColumn(safeLine),
+  }])
+  editor?.revealLineInCenterIfOutsideViewport(safeLine)
+}
+
+/** 监听日志里的脚本编译错误（带行号）→ 波浪线 */
+watch(() => orchStore.logs[orchStore.logs.length - 1], (last) => {
+  if (!last || last.direction !== 'error' || last.deviceName !== '脚本') return
+  if (!last.line) return
+  // 仅当错误属于当前编辑的脚本（最近一次运行）
+  markScriptError(last.line, last.column, last.text)
+})
 
 function syncEditor() {
   nextTick(() => {
@@ -712,6 +765,7 @@ async function runScriptAction() {
     toastRef.value?.info('请先选择脚本文件')
     return
   }
+  clearScriptMarkers()
   if (fileLanguage.value === 'python' && isMock) {
     toastRef.value?.info('Python 脚本需在真实模式运行（后端 python3 子进程）')
     return

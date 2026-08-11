@@ -58,6 +58,37 @@ Python 同语义：`docat.devices.wait_for('am', 'GP;reached;')`。
 | `utils.toArray(文本, sep=';')` | `docat.utils.to_array(文本, sep=';')` | 按分隔符解析字符串为数组（去空白/空字段，默认 `;`） |
 | `utils.toString(数组, sep=';')` | `docat.utils.to_string(数组, sep=';')` | 数组拼接为文本 |
 | `utils.sleep(ms)` | `docat.utils.sleep(ms)` | 等待（可被终止打断） |
+| `utils.wslToWin(路径)` | `docat.utils.wsl_to_win(路径)` | WSL 路径转 Windows：`/mnt/d/foo` → `D:\foo`（不匹配原样返回） |
+| `utils.winToWsl(路径)` | `docat.utils.win_to_wsl(路径)` | Windows 路径转 WSL：`D:\foo` → `/mnt/d/foo`（不匹配原样返回） |
+
+## 标定转换（`utils.calib`）
+
+解析 Dobot 标定文件（`.iwcal` / `.xml`，结构为 3×3 仿射矩阵）并在**图像坐标 ⇄ 物理坐标**间互转（与「标定辅助」方向一致：矩阵为图像→物理）。
+
+| JS | Python | 说明 |
+|---|---|---|
+| `utils.calib.parseIwcaf(路径)` | `docat.utils.calib.parse_iwcaf(路径)` | 解析 .iwcal（9×float32 LE）→ 矩阵对象 |
+| `utils.calib.parseXml(路径)` | `docat.utils.calib.parse_xml(路径)` | 解析 .xml 的 CalibMatrix → 矩阵对象（附 `precision` 像素精度） |
+| `utils.calib.imageToWorld(m, x, y[, sep])` | `docat.utils.calib.image_to_world(m, x, y, sep=None)` | 图像→物理；给 sep 返回文本 |
+| `utils.calib.worldToImage(m, wx, wy[, sep])` | `docat.utils.calib.world_to_image(m, wx, wy, sep=None)` | 物理→图像（矩阵求逆，不可逆时报错） |
+
+矩阵对象：`{ m00, m01, m02, m10, m11, m12 }`。文件路径支持绝对路径（含 WSL `/mnt/d/...` 与 Windows `D:\...`）；相对路径按服务端脚本目录解析。**路径自动转换**：按原路径读取失败时，自动做 WSL⇄Windows 路径转换后再试一次（正常路径零额外开销），仍失败时报错并同时列出原路径与转换路径。
+
+> ⚠️ **路径写法**：JS/Python 字符串里的 `\` 是转义符，Windows 路径请用**双反斜杠**（`"D:\\Users\\..."`）或**正斜杠**（`"D:/Users/..."`，推荐，Windows 兼容且自动转换同样识别）；单反斜杠会被吞掉甚至触发语法错误（如 `"D:\0..."` 是八进制转义，严格模式直接报错）。
+
+示例（视觉给图像坐标 → 转物理坐标 → 驱动 Docat Motion）：
+
+```js
+const calib = utils.calib.parseXml('/mnt/d/标定/calib.xml')
+devices.onMessage('vision_cam', async (msg) => {
+  const [ix, iy] = utils.toArray(msg).map(Number)
+  const [wx, wy] = utils.calib.imageToWorld(calib, ix, iy)
+  devices.send('motion_arm',
+    'MovL;' + utils.toString([wx, wy, 60, 0, 0, 0], ';'))
+})
+```
+
+Python 同语义：`docat.utils.calib.parse_xml(...)` / `image_to_world(...)`。
 
 ### log — 日志（进编排日志面板）
 

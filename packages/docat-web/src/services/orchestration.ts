@@ -56,6 +56,29 @@ export async function runScript(
  * 运行 JS 脚本（沙箱上下文：docat）。
  * 脚本内可使用 async/await；调用 utils.sleep 时终止会立即生效。
  */
+
+/**
+ * 从浏览器错误对象解析用户代码行号（包装偏移 2：第 1 行包裹、第 2 行 "use strict"）
+ */
+function extractScriptErrorLine(err: unknown): { line?: number; column?: number } {
+  const e = err as { lineNumber?: number; columnNumber?: number; stack?: string }
+  if (Number.isInteger(e.lineNumber)) {
+    return {
+      line: Math.max(1, (e.lineNumber as number) - 2),
+      column: Number.isInteger(e.columnNumber) ? (e.columnNumber as number) : undefined,
+    }
+  }
+  // 兜底：从 stack 解析 "<anonymous>:N" 或 "at <anonymous> (…:N:M)"
+  const sm = /(?:<anonymous>|eval(?:machine)?)[^:\n]*:(\d+)(?::(\d+))?/.exec(e.stack || '')
+  if (sm) {
+    return {
+      line: Math.max(1, Number(sm[1]) - 2),
+      column: sm[2] ? Number(sm[2]) : undefined,
+    }
+  }
+  return {}
+}
+
 export function runJsScript(code: string, onDone?: (ok: boolean, message: string) => void): ScriptRunHandle {
   let stopped = false
   const ctx: ScriptContext & { __stopped?: boolean } = buildScriptContext()
@@ -89,7 +112,9 @@ export function runJsScript(code: string, onDone?: (ok: boolean, message: string
   try {
     fn = new Function('docat', `return ${body}`) as (c: ScriptContext) => Promise<unknown>
   } catch (err) {
-    addLog('脚本', 'error', `脚本编译失败：${(err as Error).message}`)
+    const { line, column } = extractScriptErrorLine(err)
+    const lineText = line !== undefined ? `（第 ${line} 行${column !== undefined ? `，第 ${column} 列` : ''}）` : ''
+    addLog('脚本', 'error', `脚本编译失败：${(err as Error).message}${lineText}`, line, column)
     onDone?.(false, (err as Error).message)
     return { stop }
   }
@@ -107,7 +132,9 @@ export function runJsScript(code: string, onDone?: (ok: boolean, message: string
           onDone?.(false, '已终止')
           return
         }
-        addLog('脚本', 'error', `脚本异常：${err instanceof Error ? err.message : String(err)}`)
+        const { line, column } = extractScriptErrorLine(err)
+        const lineText = line !== undefined ? `（第 ${line} 行${column !== undefined ? `，第 ${column} 列` : ''}）` : ''
+        addLog('脚本', 'error', `脚本异常：${err instanceof Error ? err.message : String(err)}${lineText}`, line, column)
         onDone?.(false, err instanceof Error ? err.message : String(err))
       }
     )

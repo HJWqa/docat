@@ -20,6 +20,7 @@ import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import vm from 'node:vm'
+import { imageToWorld, parseIwcaf, parseXml, worldToImage } from './calib.mjs'
 
 const state = {
   poses: [],
@@ -29,8 +30,9 @@ const state = {
   exited: false,
 }
 
-/** 脚本 require 的解析基准（服务端脚本目录），init 时下发 */
+/** 脚本 require/文件解析的基准目录（服务端脚本目录），init 时下发 */
 let requireFromScriptDir = null
+let scriptBaseDir = null
 /** 回退基准：服务端包目录（docat-server 的 dependencies，如 mathjs） */
 const requireFromServer = createRequire(import.meta.url)
 
@@ -122,8 +124,39 @@ const docat = {
           if (state.exited || left <= 0) return resolve()
           setTimeout(() => wait(left - 50), Math.min(50, left))
         }
-        wait(Math.max(0, Number(ms) || 0))
-      })
+        wait(Math.max(0, Number(ms) || 0))      })
+    },
+    // ─── WSL 路径转换（/mnt/d/... ⇄ D:\...）──────────
+    wslToWin(path) {
+      const p = String(path ?? '')
+      const m = /^\/mnt\/([a-zA-Z])(\/.*)?$/.exec(p)
+      if (!m) return p
+      const drive = m[1].toUpperCase()
+      const rest = (m[2] || '').replace(/\//g, '\\')
+      return `${drive}:${rest || '\\'}`
+    },
+    winToWsl(path) {
+      const p = String(path ?? '')
+      const m = /^([a-zA-Z]):[\\/](.*)$/.exec(p)
+      if (!m) return p
+      const drive = m[1].toLowerCase()
+      const rest = (m[2] || '').replace(/[\\/]/g, '/')
+      return `/mnt/${drive}/${rest}`
+    },
+    // ─── 标定转换（图像坐标 ⇄ 物理坐标）──────────────
+    calib: {
+      parseIwcaf(path) {
+        return parseIwcaf(String(path ?? ''), scriptBaseDir || undefined)
+      },
+      parseXml(path) {
+        return parseXml(String(path ?? ''), scriptBaseDir || undefined)
+      },
+      imageToWorld(m, x, y, sep) {
+        return imageToWorld(m, Number(x), Number(y), sep)
+      },
+      worldToImage(m, wx, wy, sep) {
+        return worldToImage(m, Number(wx), Number(wy), sep)
+      },
     },
   },
   log: {
@@ -219,8 +252,9 @@ rl.on('line', (line) => {
       state.devices = msg.devices || []
       // require 基准目录（服务端脚本目录，可解析其 node_modules 及上层依赖）
       if (msg.requireBase) {
+        scriptBaseDir = String(msg.requireBase)
         try {
-          requireFromScriptDir = createRequire(join(String(msg.requireBase), '__docat_require__.js'))
+          requireFromScriptDir = createRequire(join(scriptBaseDir, '__docat_require__.js'))
         } catch {
           requireFromScriptDir = null
         }
@@ -286,7 +320,32 @@ async function runUserScript(code) {
     }
     send({ type: 'log', level: 'info', text: '顶层代码执行完毕（脚本保持监听）' })
   } catch (err) {
-    send({ type: 'log', level: 'error', text: `脚本异常：${err instanceof Error ? err.message : String(err)}` })
+    const msg = err instanceof Error ? err.message : String(err)
+    let hint = ''
+    // 常见坑提示：Windows 路径在 JS 字符串里被当成转义
+    if (/Octal escape|Invalid(?: hexadecimal)? escape|Unexpected token|Invalid character/.test(msg)
+      && /[A-Za-z]:[\\/]|\/\w+\\/.test(code)) {
+      hint = '（提示：Windows 路径字符串请用双反斜杠 "D:\\\\..." 或正斜杠 "D:/..."，推荐正斜杠）'
+    }
+    // 编译/运行时错误行号：从 stack 解析用户代码位置（如 "user-script.js:4" 或 "at user-script.js:5:12"），
+    // 减去包装行偏移（第 1 行包裹、第 2 行 "use strict"，用户代码从第 3 行起）
+    let line, column
+    {
+      const stackLines = (err.stack || '').split('\n')
+      for (let i = 0; i < Math.min(8, stackLines.length); i++) {
+        const sm = /^\s*(?:at\s+)?(?:user-script\.js|<anonymous>|evalmachine\.<anonymous>):(\d+)(?::(\d+))?$/
+          .exec(stackLines[i].trim())
+        if (sm) {
+          line = Math.max(1, Number(sm[1]) - 2)
+          column = sm[2] ? Number(sm[2]) : undefined
+          break
+        }
+      }
+    }
+    const lineText = line !== undefined
+      ? `（第 ${line} 行${column !== undefined ? `，第 ${column} 列` : ''}）`
+      : ''
+    send({ type: 'log', level: 'error', text: `脚本异常：${msg}${hint}${lineText}`, line, column })
     process.exit(1)
   }
 }

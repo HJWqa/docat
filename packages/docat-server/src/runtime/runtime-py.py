@@ -24,12 +24,16 @@
 sleep 只阻塞 worker；stdin 由独立线程持续读取，不丢消息。
 """
 import json
+import os
+import re
+import struct
 import sys
 import threading
 import queue
 import time
+import xml.etree.ElementTree as ET
 
-state = {"poses": [], "devices": [], "exited": False}
+state = {"poses": [], "devices": [], "exited": False, "base_dir": None}
 listeners = {"message": {}, "connect": {}, "disconnect": {}}
 # wait_for 轮询 inbox 时未匹配的消息暂存，稍后由 worker 顺序处理
 carryover = []
@@ -110,6 +114,116 @@ class _Poses:
         return [p.get("name") for p in state["poses"]]
 
 
+# ─── 标定转换（图像坐标 ⇄ 物理坐标）──────────────────
+
+def _resolve(path):
+    p = str(path)
+    base = state.get("base_dir")
+    if not base or p.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", p):
+        return p
+    return os.path.join(base, p)
+
+
+def _convert_path(path):
+    """WSL ⇄ Windows 路径互转（不匹配返回 None）。"""
+    m = re.match(r"^/mnt/([a-zA-Z])(/.*)?$", path)
+    if m:
+        rest = (m.group(2) or "").replace("/", "\\")
+        return "%s:%s" % (m.group(1).upper(), rest or "\\")
+    m = re.match(r"^([a-zA-Z]):[\\/](.*)$", path)
+    if m:
+        return "/mnt/%s/%s" % (m.group(1).lower(), (m.group(2) or "").replace("\\", "/"))
+    return None
+
+
+def _read_file(path):
+    """读取文件：原路径失败（不存在）时自动做 WSL⇄Windows 路径转换后再试一次。"""
+    p = _resolve(path)
+    try:
+        return open(p, "rb").read()
+    except FileNotFoundError:
+        converted = _convert_path(p)
+        if not converted or converted == p:
+            hint = ""
+            # Windows 路径常见坑：字符串里反斜杠被转义吞掉（如 "D:\Users" → "D:Users"）
+            if "\\" in p and not re.search(r":[\\/]", p):
+                hint = "（提示：Windows 路径字符串请用双反斜杠 \"D:\\\\...\" 或正斜杠 \"D:/...\"，推荐正斜杠）"
+            raise FileNotFoundError("标定文件不存在：%s%s" % (p, hint))
+        try:
+            return open(converted, "rb").read()
+        except FileNotFoundError:
+            raise FileNotFoundError("标定文件不存在：%s（已尝试转换路径：%s）" % (p, converted))
+
+
+class _Calib:
+    """utils.calib：解析 .iwcal/.xml 标定文件并做坐标互转（图像→物理）。"""
+
+    def parse_iwcaf(self, path):
+        data = _read_file(path)
+        if len(data) < 36:
+            raise ValueError("iwcal 文件过小（应为 36B）")
+        v = struct.unpack("<9f", data[:36])
+        return {"m00": v[0], "m01": v[1], "m02": v[2], "m10": v[3], "m11": v[4], "m12": v[5]}
+
+    def parse_xml(self, path):
+        return self.parse_xml_text(_read_file(path).decode("utf-8"))
+
+    def parse_xml_text(self, text):
+        root = ET.fromstring(text)
+        out = {}
+        for item in root.iter("CalibFloatListParam"):
+            if item.get("ParamName") == "CalibMatrix":
+                values = [float(pv.text.strip()) for pv in item.iter("ParamValue")]
+                if len(values) >= 9:
+                    out = {"m00": values[0], "m01": values[1], "m02": values[2],
+                           "m10": values[3], "m11": values[4], "m12": values[5]}
+                break
+        if not out:
+            raise ValueError("xml 中未找到有效的 CalibMatrix")
+        for item in root.iter("CalibParam"):
+            if item.get("ParamName") == "PixelPrecision":
+                try:
+                    p = float(next(iter(item.iter("ParamValue"))).text.strip())
+                    if p > 0:
+                        out["precision"] = p
+                except Exception:
+                    pass
+        return out
+
+    def image_to_world(self, m, x, y, sep=None):
+        wx = m["m00"] * x + m["m01"] * y + m["m02"]
+        wy = m["m10"] * x + m["m11"] * y + m["m12"]
+        return "%s%s%s" % (wx, sep, wy) if sep is not None else [wx, wy]
+
+    def world_to_image(self, m, wx, wy, sep=None):
+        det = m["m00"] * m["m11"] - m["m01"] * m["m10"]
+        if abs(det) < 1e-12:
+            raise ValueError("标定矩阵不可逆（行列式接近 0）")
+        ix = (m["m11"] * (wx - m["m02"]) - m["m01"] * (wy - m["m12"])) / det
+        iy = (-m["m10"] * (wx - m["m02"]) + m["m00"] * (wy - m["m12"])) / det
+        return "%s%s%s" % (ix, sep, iy) if sep is not None else [ix, iy]
+
+
+# ─── WSL 路径转换（/mnt/d/... ⇄ D:\...）─────────────
+
+def _wsl_to_win(path):
+    p = str(path)
+    m = re.match(r"^/mnt/([a-zA-Z])(/.*)?$", p)
+    if not m:
+        return p
+    rest = (m.group(2) or "").replace("/", "\\")
+    return "%s:%s" % (m.group(1).upper(), rest or "\\")
+
+
+def _win_to_wsl(path):
+    p = str(path)
+    m = re.match(r"^([a-zA-Z]):[\\/](.*)$", p)
+    if not m:
+        return p
+    rest = (m.group(2) or "").replace("\\", "/")
+    return "/mnt/%s/%s" % (m.group(1).lower(), rest)
+
+
 class _Utils:
     def to_array(self, text, sep=";"):
         return _split_fields(text, sep)
@@ -125,6 +239,14 @@ class _Utils:
             left -= step
         if state["exited"]:
             raise SystemExit
+
+    def wsl_to_win(self, path):
+        return _wsl_to_win(path)
+
+    def win_to_wsl(self, path):
+        return _win_to_wsl(path)
+
+    calib = _Calib()
 
 
 class _Log:
@@ -222,7 +344,15 @@ def run_user_script(code):
     except SystemExit:
         pass
     except Exception as exc:
-        _send({"type": "log", "level": "error", "text": "脚本异常: %s" % exc})
+        line = getattr(exc, "lineno", None) if isinstance(exc, SyntaxError) else None
+        column = getattr(exc, "offset", None) if isinstance(exc, SyntaxError) else None
+        line_text = "（第 %s 行%s）" % (line, "，第 %s 列" % column if column else "") if line else ""
+        payload = {"type": "log", "level": "error", "text": "脚本异常: %s%s" % (exc, line_text)}
+        if line:
+            payload["line"] = int(line)
+        if column:
+            payload["column"] = int(column)
+        _send(payload)
         state["exited"] = True
         sys.exit(1)
 

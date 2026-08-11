@@ -6,7 +6,7 @@
   "main": "./src/server.ts",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && node -e \"const fs=require('fs');const{join}=require('path');const s=join('src','runtime');const d=join('dist','runtime');fs.mkdirSync(d,{recursive:true});for(const f of ['runtime-js.mjs','runtime-py.py']){fs.copyFileSync(join(s,f),join(d,f))}\"",
+    "build": "tsc && node -e \"const fs=require('fs');const{join}=require('path');const s=join('src','runtime');const d=join('dist','runtime');fs.mkdirSync(d,{recursive:true});for(const f of ['runtime-js.mjs','runtime-py.py','calib.mjs']){fs.copyFileSync(join(s,f),join(d,f))}\"",
     "start": "node --experimental-transform-types dist/server.js",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
