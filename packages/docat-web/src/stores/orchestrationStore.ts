@@ -59,6 +59,10 @@ export interface OrchSettings {
   heartbeatPing: string
   /** 心跳应答内容（支持 \n 换行） */
   heartbeatPong: string
+  /** 自动重连最大尝试次数（超过停止） */
+  reconnectMaxAttempts: number
+  /** 自动重连最长持续时间（秒，超过停止） */
+  reconnectMaxSeconds: number
   /** 服务端脚本文件目录（真实模式，通用设置可修改） */
   scriptsDir: string
 }
@@ -156,6 +160,8 @@ export const orchStore = reactive({
     heartbeatMissThreshold: 3,
     heartbeatPing: 'ping;',
     heartbeatPong: 'pong;',
+    reconnectMaxAttempts: 8,
+    reconnectMaxSeconds: 600,
     scriptsDir: '',
   } as OrchSettings,
   logs: [] as OrchLogEntry[],
@@ -347,6 +353,49 @@ export function initOrchWs() {
   unsubOrchEvent = wsClient.onOrchEvent(handleOrchEvent)
 }
 
+// ─── 设备连接意图开关（desired，持久化）───────────────
+// 开关 = 用户"想要连接"的意图（不随连接状态回弹）；绿点指示实际连接状态。
+// 自动重连前提：开关打开（desired）且设备配置 autoReconnect。
+
+const DESIRED_KEY = 'docat.orchestration.device-desired'
+
+function loadDesired(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(DESIRED_KEY)
+    const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const desiredMap: Record<string, boolean> = loadDesired()
+
+function persistDesired() {
+  try {
+    localStorage.setItem(DESIRED_KEY, JSON.stringify(desiredMap))
+  } catch {
+    // ignore
+  }
+}
+
+export function isDeviceDesired(id: string): boolean {
+  return desiredMap[id] === true
+}
+
+export function setDeviceDesired(id: string, desired: boolean) {
+  if (desired) desiredMap[id] = true
+  else delete desiredMap[id]
+  persistDesired()
+}
+
+/** 恢复连接意图开关打开的设备（等同用户手动打开，允许自动重连） */
+function restoreDesiredConnections() {
+  for (const d of orchStore.devices) {
+    if (isDeviceDesired(d.id) && !d.connected) void connectDevice(d.id)
+  }
+}
+
 // ─── 初始化 / 持久化 ─────────────────────────────────
 
 export async function initOrchestration() {
@@ -363,6 +412,7 @@ export async function initOrchestration() {
     if (poseRes.success && poseRes.data) orchStore.poses = poseRes.data
     if (settingsRes.success && settingsRes.data) orchStore.settings = { ...orchStore.settings, ...settingsRes.data }
     initOrchWs()
+    restoreDesiredConnections()
     return
   }
 
@@ -373,8 +423,10 @@ export async function initOrchestration() {
     orchStore.settings = { ...orchStore.settings, ...persisted.settings }
   }
   if (orchStore.settings.autoConnectOnLoad) {
-    for (const d of orchStore.devices) void connectDevice(d.id)
+    // 自动连接：等同开关未打开，失败不进入自动重连
+    for (const d of orchStore.devices) void connectDevice(d.id, false, true)
   }
+  restoreDesiredConnections()
 }
 
 // ─── 编排设备 CRUD ───────────────────────────────────
@@ -465,6 +517,8 @@ export function removeOrchDevice(id: string) {
   }
   orchStore.devices = orchStore.devices.filter(item => item.id !== id)
   if (orchStore.selectedDeviceId === id) orchStore.selectedDeviceId = ''
+  delete desiredMap[id]
+  persistDesired()
   if (!orchMock) {
     void orchApi.orchDeleteDevice(id)
     return
@@ -501,9 +555,24 @@ function stopRetry(id: string) {
   }
 }
 
+/** mock 重连计数（次数/时长上限与真实模式一致，通用设置可配） */
+const retryCounts: Record<string, number> = {}
+const retryStartedAt: Record<string, number> = {}
+
 function scheduleReconnect(d: OrchDevice) {
-  if (!d.autoReconnect || d.connected) return
+  // 仅当连接意图开关打开才自动重连
+  if (!d.autoReconnect || !isDeviceDesired(d.id) || d.connected) return
   stopRetry(d.id)
+  if (!retryStartedAt[d.id]) retryStartedAt[d.id] = Date.now()
+  const maxAttempts = Math.max(1, Number(orchStore.settings.reconnectMaxAttempts) || 8)
+  const maxSeconds = Math.max(10, Number(orchStore.settings.reconnectMaxSeconds) || 600)
+  if ((retryCounts[d.id] ?? 0) >= maxAttempts || Date.now() - retryStartedAt[d.id] >= maxSeconds * 1000) {
+    addLog(d.name, 'system', `已停止自动重连（达到上限：${retryCounts[d.id] ?? 0} 次 / ${maxSeconds}s）`)
+    retryCounts[d.id] = 0
+    retryStartedAt[d.id] = 0
+    return
+  }
+  retryCounts[d.id] = (retryCounts[d.id] ?? 0) + 1
   retryTimers[d.id] = setTimeout(() => {
     delete retryTimers[d.id]
     void connectDevice(d.id, true)
@@ -533,15 +602,15 @@ function markDisconnected(d: OrchDevice, reason: string) {
   emitDisconnect(d.name)
 }
 
-export async function connectDevice(id: string, isRetry = false): Promise<void> {
+export async function connectDevice(id: string, isRetry = false, auto = false): Promise<void> {
   const d = orchStore.devices.find(item => item.id === id)
   if (!d || d.connected) return
   stopRetry(id)
 
   if (!orchMock) {
-    const res = await orchApi.orchConnect(id)
+    const res = await orchApi.orchConnect(id, auto)
     if (!res.success) {
-      addLog(d.name, 'error', `连接失败：${res.error?.message ?? '未知错误'}`)
+      if (!isRetry) addLog(d.name, 'error', `连接失败：${res.error?.message ?? '未知错误'}`)
       return
     }
     return
@@ -550,14 +619,16 @@ export async function connectDevice(id: string, isRetry = false): Promise<void> 
   if (d.type === 'tcp-client') {
     const server = findConnectedServer(d)
     if (!server) {
-      addLog(d.name, 'error', isRetry
-        ? `重连失败：未找到 TCP Server (${d.ip}:${d.port})，稍后重试`
-        : `连接失败：未找到 TCP Server (${d.ip}:${d.port})${d.autoReconnect ? '，将自动重连' : ''}`)
-      if (d.autoReconnect) scheduleReconnect(d)
+      if (!isRetry) {
+        addLog(d.name, 'error', `连接失败：未找到 TCP Server (${d.ip}:${d.port})${d.autoReconnect && !auto ? '，将自动重连' : ''}`)
+      }
+      if (d.autoReconnect && !auto) scheduleReconnect(d)
       return
     }
     await sleep(150)
     markConnected(d)
+    retryCounts[d.id] = 0
+    retryStartedAt[d.id] = 0
     addLog(server.name, 'system', `客户端 ${d.name} 已接入`)
     return
   }
@@ -568,6 +639,8 @@ export async function connectDevice(id: string, isRetry = false): Promise<void> 
       motionState[d.id] = { pose: [0, 0, 0, 0, 0, 0], suction: false, busy: false }
     }
     markConnected(d)
+    retryCounts[d.id] = 0
+    retryStartedAt[d.id] = 0
     // TCP Server 连接后，等待中的客户端立即接入
     if (d.type === 'tcp-server') {
       for (const client of orchStore.devices) {

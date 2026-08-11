@@ -53,6 +53,10 @@ export interface OrchSettingsPayload {
   heartbeatPing: string
   /** 心跳应答内容（默认 pong;） */
   heartbeatPong: string
+  /** 自动重连最大尝试次数（超过停止） */
+  reconnectMaxAttempts: number
+  /** 自动重连最长持续时间（秒，超过停止） */
+  reconnectMaxSeconds: number
   /** 服务端脚本文件目录 */
   scriptsDir: string
 }
@@ -77,6 +81,8 @@ function readOrchSettings(): OrchSettingsPayload {
     heartbeatMissThreshold: num(getSetting(`${SETTING_PREFIX}heartbeatMissThreshold`), 3),
     heartbeatPing: getSetting(`${SETTING_PREFIX}heartbeatPing`) || 'ping;',
     heartbeatPong: getSetting(`${SETTING_PREFIX}heartbeatPong`) || 'pong;',
+    reconnectMaxAttempts: num(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
+    reconnectMaxSeconds: num(getSetting(`${SETTING_PREFIX}reconnectMaxSeconds`), 600),
     scriptsDir: getSetting(SETTING_SCRIPTS_DIR) || currentScriptsDir,
   }
 }
@@ -159,6 +165,12 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         }
         if (body.heartbeatPong !== undefined) {
           setSetting(`${SETTING_PREFIX}heartbeatPong`, String(body.heartbeatPong || 'pong;'))
+        }
+        if (body.reconnectMaxAttempts !== undefined) {
+          setSetting(`${SETTING_PREFIX}reconnectMaxAttempts`, String(Math.max(1, Math.min(100, Number(body.reconnectMaxAttempts) || 8))))
+        }
+        if (body.reconnectMaxSeconds !== undefined) {
+          setSetting(`${SETTING_PREFIX}reconnectMaxSeconds`, String(Math.max(10, Math.min(86400, Number(body.reconnectMaxSeconds) || 600))))
         }
         if (body.scriptsDir !== undefined) {
           const dir = String(body.scriptsDir || '').trim()
@@ -406,7 +418,7 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
   )
 
   // ─── 设备连接 / 断开 / 发送 ────────────────────────
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { auto?: boolean } }>(
     '/api/orchestration/devices/:id/connect',
     async (request, reply): Promise<ApiResponse<null>> => {
       try {
@@ -414,7 +426,7 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         if (reply.sent) return reply
         requireOperator(request, reply)
         if (reply.sent) return reply
-        const result = await orchDevices.connect(request.params.id)
+        const result = await orchDevices.connect(request.params.id, request.body?.auto === true)
         if (!result.ok) return { success: false, error: { code: 50000, message: result.error ?? '连接失败' } }
         return { success: true, data: null }
       } catch (err) {

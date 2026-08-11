@@ -39,6 +39,21 @@
         </div>
 
         <div class="heartbeat-settings">
+          <span class="field-label">自动重连上限</span>
+          <div class="field-row field-row--split">
+            <div class="field-col">
+              <label class="field-label">最大次数</label>
+              <input v-model.number="orchStore.settings.reconnectMaxAttempts" type="number" min="1" max="100" step="1" class="field-input" />
+            </div>
+            <div class="field-col">
+              <label class="field-label">最长时长 (s)</label>
+              <input v-model.number="orchStore.settings.reconnectMaxSeconds" type="number" min="10" max="86400" step="10" class="field-input" />
+            </div>
+          </div>
+          <span class="field-hint">仅在设备列表连接开关打开时自动重连；达到次数或时长上限后停止</span>
+        </div>
+
+        <div class="heartbeat-settings">
           <span class="field-label">心跳（ping → pong）</span>
           <div class="field-row field-row--split">
             <div class="field-col">

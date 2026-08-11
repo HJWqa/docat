@@ -36,6 +36,8 @@ interface DeviceEntry {
   heartbeatTimer: ReturnType<typeof setInterval> | null
   retryTimer: ReturnType<typeof setTimeout> | null
   retryCount: number
+  /** 本次重连循环的起始时间（用于时长上限） */
+  reconnectStartedAt: number
   /** 心跳：最近一次收到 pong 的时间戳 */
   lastPongAt: number
   /** 心跳：连续未应答周期数 */
@@ -79,6 +81,7 @@ export class OrchDeviceManager {
         heartbeatTimer: null,
         retryTimer: null,
         retryCount: 0,
+        reconnectStartedAt: 0,
         lastPongAt: 0,
         missedPongs: 0,
       })
@@ -153,6 +156,7 @@ export class OrchDeviceManager {
     this.entries.set(config.id, {
       config, backend: null, connected: false, manualDisconnect: true,
       heartbeatTimer: null, retryTimer: null, retryCount: 0,
+      reconnectStartedAt: 0,
       lastPongAt: 0, missedPongs: 0,
     })
     return { ok: true, device: { ...config, connected: false } }
@@ -205,7 +209,11 @@ export class OrchDeviceManager {
 
   // ─── 连接生命周期 ─────────────────────────────────
 
-  async connect(id: string): Promise<{ ok: boolean; error?: string }> {
+  /**
+   * 连接设备。
+   * auto = true（如"启动时自动连接"）：失败不进入自动重连，等同开关未打开。
+   */
+  async connect(id: string, auto = false): Promise<{ ok: boolean; error?: string }> {
     const entry = this.entries.get(id)
     if (!entry) return { ok: false, error: '设备不存在' }
     if (entry.connected) return { ok: true }
@@ -216,6 +224,8 @@ export class OrchDeviceManager {
     let backend: OrchDeviceBackend
     const onIncoming = (text: string) => this.handleIncoming(cfg, text)
     const onError = (message: string) => {
+      // 连接尝试期间（backend 尚未就绪）由 connect 失败分支统一记录，避免成对刷屏
+      if (!entry.backend) return
       this.log(cfg.name, 'error', message)
       this.broadcast({ event: 'device-error', deviceId: cfg.id, name: cfg.name, message })
     }
@@ -260,14 +270,18 @@ export class OrchDeviceManager {
     const result = await backend.connect()
     if (!result.ok) {
       backend.dispose()
-      this.log(cfg.name, 'error', `连接失败：${result.error}`)
-      this.scheduleReconnect(entry)
+      // 首次失败记录；重试轮次静默（降噪）。auto 连接失败不进入重连。
+      if (entry.retryCount === 0) {
+        this.log(cfg.name, 'error', `连接失败：${result.error}`)
+      }
+      if (!auto) this.scheduleReconnect(entry)
       return result
     }
 
     entry.backend = backend
     entry.connected = true
     entry.retryCount = 0
+    entry.reconnectStartedAt = 0
     entry.lastPongAt = Date.now()
     entry.missedPongs = 0
     this.log(cfg.name, 'system', '已连接')
@@ -325,12 +339,37 @@ export class OrchDeviceManager {
   private scheduleReconnect(entry: DeviceEntry) {
     if (!entry.config.autoReconnect || entry.manualDisconnect || entry.connected) return
     if (entry.retryTimer) return
+
+    // 首次失败：记录重连循环起始
+    if (entry.reconnectStartedAt === 0) entry.reconnectStartedAt = Date.now()
+
+    // 上限：次数 / 时长（通用设置可配）
+    const rc = this.reconnectSettings()
+    if (entry.retryCount >= rc.maxAttempts || Date.now() - entry.reconnectStartedAt >= rc.maxSeconds * 1000) {
+      this.log(entry.config.name, 'system', `已停止自动重连（达到上限：${entry.retryCount} 次 / ${rc.maxSeconds}s）`)
+      entry.retryCount = 0
+      entry.reconnectStartedAt = 0
+      return
+    }
+
     const delay = Math.min(1000 * 2 ** entry.retryCount, 30000)
     entry.retryCount++
     entry.retryTimer = setTimeout(() => {
       entry.retryTimer = null
       void this.connect(entry.config.id)
     }, delay)
+  }
+
+  /** 从「通用」设置读取重连上限 */
+  private reconnectSettings(): { maxAttempts: number; maxSeconds: number } {
+    const num = (v: string, fallback: number) => {
+      const n = Number(v)
+      return Number.isFinite(n) && n > 0 ? n : fallback
+    }
+    return {
+      maxAttempts: num(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
+      maxSeconds: num(getSetting(`${SETTING_PREFIX}reconnectMaxSeconds`), 600),
+    }
   }
 
   private startHeartbeat(entry: DeviceEntry) {

@@ -36,8 +36,8 @@ export function orchDeleteDevice(id: string): Promise<ApiResponse<null>> {
   return request('DELETE', `/api/orchestration/devices/${id}`)
 }
 
-export function orchConnect(id: string): Promise<ApiResponse<null>> {
-  return request('POST', `/api/orchestration/devices/${id}/connect`)
+export function orchConnect(id: string, auto = false): Promise<ApiResponse<null>> {
+  return request('POST', `/api/orchestration/devices/${id}/connect`, { auto })
 }
 
 export function orchDisconnect(id: string): Promise<ApiResponse<null>> {

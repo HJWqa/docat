@@ -115,8 +115,8 @@
           <div class="device-meta">{{ deviceMeta(d) }}</div>
         </div>
         <span class="device-type-badge" :class="`device-type-badge--${d.type}`">{{ orchTypeLabel(d.type) }}</span>
-        <label class="toggle-label" title="连接/断开" @click.stop>
-          <input :checked="d.connected" type="checkbox" class="toggle-input" @change="onToggle(d)" />
+        <label class="toggle-label" title="连接意图开关（打开 = 想要连接并自动重连；实际状态看左侧圆点）" @click.stop>
+          <input :checked="isDeviceDesired(d.id)" type="checkbox" class="toggle-input" @change="onToggle(d)" />
           <span class="toggle-track"><span class="toggle-thumb" /></span>
         </label>
       </div>
@@ -135,10 +135,12 @@ import {
   getIpHistory,
   identifierError,
   isOrchMockMode,
+  isDeviceDesired,
   orchStore,
   ORCH_DEVICE_TYPES,
   orchTypeLabel,
   recordIp,
+  setDeviceDesired,
   type OrchDevice,
   type OrchDeviceType,
 } from '../../stores/orchestrationStore'
@@ -225,8 +227,12 @@ function selectDevice(id: string) {
 }
 
 function onToggle(d: OrchDevice) {
-  if (d.connected) void disconnectDevice(d.id)
-  else void connectDevice(d.id)
+  // 意图开关：打开 = 想连接（可自动重连）；关闭 = 断开并停止重连。
+  // 开关不随连接状态回弹，实际连接看左侧圆点。
+  const desired = !isDeviceDesired(d.id)
+  setDeviceDesired(d.id, desired)
+  if (desired) void connectDevice(d.id)
+  else void disconnectDevice(d.id)
 }
 
 onMounted(() => {
