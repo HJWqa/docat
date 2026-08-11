@@ -448,7 +448,17 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
 
         // 传递 mode 让 pool 用这个模式连接
         const result = await pool.connect(device.ip, id, mode)
-        return { success: result.status, data: result.data, error: result.status ? undefined : { code: result.code, message: result.message ?? '' } }
+        return {
+          success: result.status,
+          data: result.data,
+          error: result.status
+            ? undefined
+            : {
+                code: result.code,
+                message: result.message ?? '',
+                status: (result.data as { state?: string | null } | undefined)?.state ?? null,
+              },
+        }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }

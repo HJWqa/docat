@@ -41,7 +41,7 @@
             <span class="toggle-label-load" :class="{ 'is-inactive': !(enabled && !enabling) }" :title="loadBadgeTitle">{{ loadBadgeText }}</span>
           </span>
         </label>
-        <button v-if="!isConnected" class="btn btn-success btn-sm" @click="doConnect" :disabled="connecting">
+        <button v-if="!isConnected" class="btn btn-success btn-sm" @click="doConnect()" :disabled="connecting">
           {{ connecting ? '连接中...' : '连接' }}
         </button>
         <template v-if="isConnected">
@@ -3141,7 +3141,7 @@ async function load() {
   loadDobotPlusList()
 }
 
-async function doConnect() {
+async function doConnect(mode: 'exclusive' | 'virtual' = 'exclusive') {
   if (isMock) {
     deviceStore.setConnected(deviceId, true, 'exclusive')
     enabled.value = true
@@ -3150,31 +3150,28 @@ async function doConnect() {
   }
   connecting.value = true
   try {
-    const res = await api.connectDevice(deviceId)
+    const res = await api.connectDevice(deviceId, mode)
     if (res.success) {
-      deviceStore.setConnected(deviceId, true)
-      toastRef.value?.success('设备已连接 — 请上电后使能')
+      deviceStore.setConnected(deviceId, true, mode)
+      toastRef.value?.success(mode === 'virtual' ? '虚拟连接成功（未占用设备）' : '设备已连接 — 请上电后使能')
       // 预热点动坐标系/模式，减少首按延迟
       ensureJogReadyBackground()
     } else {
       const msg = res.error?.message ?? ''
       const code = res.error?.code
       if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
-        toastRef.value?.error(msg, { action: { label: '强制释放', handler: () => doForceRelease() } })
+        if (res.error?.status === 'occupied') {
+          toastRef.value?.error(msg, {
+            action: { label: 'vConnect', variant: 'virtual', handler: () => doConnect('virtual') },
+          })
+        } else {
+          toastRef.value?.error(msg)
+        }
       } else {
         toastRef.value?.error(`连接失败：${msg}`)
       }
     }
   } finally { connecting.value = false }
-}
-
-async function doForceRelease() {
-  const res = await api.forceReleaseDevice(deviceId)
-  if (res.success) {
-    toastRef.value?.success('已释放占用 — 请重新尝试连接')
-  } else {
-    toastRef.value?.error(`强制释放失败：${res.error?.message ?? '未知错误'}`)
-  }
 }
 
 // ─── Auto/Manual Mode ─────────────────────────────

@@ -159,6 +159,7 @@ export class DevicePool {
             status: false,
             code: 1001,
             message: `设备 ${ip} 状态为 "${stateData?.value ?? 'unknown'}"，无法连接`,
+            data: { state: stateData?.value ?? null },
           }
         }
 

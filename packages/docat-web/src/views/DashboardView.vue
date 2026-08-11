@@ -467,19 +467,16 @@ async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive'
       }
       toastRef.value?.error(msg)
     } else if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
-      toastRef.value?.error(`${msg}`, { action: { label: '强制释放', handler: () => doForceRelease(id) } })
+      if (res.error?.status === 'occupied') {
+        toastRef.value?.error(msg, {
+          action: { label: 'vConnect', variant: 'virtual', handler: () => doConnect(id, 'virtual') },
+        })
+      } else {
+        toastRef.value?.error(msg)
+      }
     } else {
       toastRef.value?.error(`连接失败：${msg}`)
     }
-  }
-}
-
-async function doForceRelease(id: string) {
-  const res = await api.forceReleaseDevice(id)
-  if (res.success) {
-    toastRef.value?.success('残留占用已释放 — 请重新尝试连接')
-  } else {
-    toastRef.value?.error(`强制释放失败：${res.error?.message ?? '未知错误'}`)
   }
 }
 

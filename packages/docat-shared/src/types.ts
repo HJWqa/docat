@@ -295,6 +295,8 @@ export interface ApiResponse<T = unknown> {
   error?: {
     code: number
     message: string
+    /** 设备连接状态（occupied / unconnected / null） */
+    status?: string | null
   }
   meta?: {
     page?: number

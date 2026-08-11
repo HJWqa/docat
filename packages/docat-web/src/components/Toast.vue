@@ -9,7 +9,7 @@
         <span class="toast-icon">{{ iconMap[t.type] }}</span>
         <span class="toast-msg">{{ t.message }}</span>
         <div v-if="t.actions && t.actions.length" class="toast-actions">
-          <button v-for="(a, i) in t.actions" :key="i" class="toast-action" @click="a.handler(); remove(t.id)">
+          <button v-for="(a, i) in t.actions" :key="i" class="toast-action" :class="a.variant ? `toast-action--${a.variant}` : ''" @click="a.handler(); remove(t.id)">
             {{ a.label }}
           </button>
         </div>
@@ -29,6 +29,7 @@ type ToastType = 'success' | 'error' | 'info'
 interface ToastAction {
   label: string
   handler: () => void
+  variant?: 'danger' | 'virtual'
 }
 
 interface ToastItem { id: number; type: ToastType; message: string; actions?: ToastAction[] }
@@ -93,6 +94,11 @@ defineExpose({
   transition: all var(--duration-fast);
 }
 .toast-action:hover { background: var(--status-danger); color: #fff; }
+.toast-action--virtual {
+  color: var(--status-virtual);
+  border-color: var(--status-virtual);
+}
+.toast-action--virtual:hover { background: var(--status-virtual); color: #fff; }
 .toast-close {
   background: none; border: none; cursor: pointer; color: var(--text-muted);
   padding: 2px; flex-shrink: 0; transition: color var(--duration-fast);
