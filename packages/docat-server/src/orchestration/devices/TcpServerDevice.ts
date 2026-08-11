@@ -19,6 +19,8 @@ export class TcpServerDevice implements OrchDeviceBackend {
   private server: Server | null = null
   private client: Socket | null = null
   private listening = false
+  /** 半行 flush：设备不回换行时（如应答 pong;），静默 120ms 后按整条处理 */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(id: string, host: string, port: number, events: TcpServerEvents) {
     this.id = id
@@ -47,8 +49,20 @@ export class TcpServerDevice implements OrchDeviceBackend {
             buffer = buffer.slice(idx + 1)
             if (line.trim() !== '') this.events.onIncoming(line)
           }
+          if (buffer.trim() !== '') {
+            if (this.flushTimer) clearTimeout(this.flushTimer)
+            this.flushTimer = setTimeout(() => {
+              this.flushTimer = null
+              if (buffer.trim() !== '') {
+                const rest = buffer
+                buffer = ''
+                this.events.onIncoming(rest)
+              }
+            }, 120)
+          }
         })
         socket.on('close', () => {
+          if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
           if (this.client === socket) {
             this.client = null
             this.events.onClientChange(false)
@@ -69,6 +83,7 @@ export class TcpServerDevice implements OrchDeviceBackend {
   }
 
   async disconnect(): Promise<void> {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     this.client?.destroy()
     this.client = null
     if (this.server) {
@@ -85,6 +100,7 @@ export class TcpServerDevice implements OrchDeviceBackend {
   }
 
   dispose(): void {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     this.client?.destroy()
     this.client = null
     try {

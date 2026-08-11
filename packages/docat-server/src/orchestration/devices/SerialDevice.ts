@@ -17,6 +17,8 @@ export class SerialDevice implements OrchDeviceBackend {
   private baudRate: number
   private events: SerialEvents
   private port: SerialPort | null = null
+  /** 半行 flush：设备不回换行时（如应答 pong;），静默 120ms 后按整条处理 */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(id: string, path: string, baudRate: number, events: SerialEvents) {
     this.id = id
@@ -48,9 +50,21 @@ export class SerialDevice implements OrchDeviceBackend {
           buffer = buffer.slice(idx + 1)
           if (line.trim() !== '') this.events.onIncoming(line)
         }
+        if (buffer.trim() !== '') {
+          if (this.flushTimer) clearTimeout(this.flushTimer)
+          this.flushTimer = setTimeout(() => {
+            this.flushTimer = null
+            if (buffer.trim() !== '') {
+              const rest = buffer
+              buffer = ''
+              this.events.onIncoming(rest)
+            }
+          }, 120)
+        }
       })
       port.on('error', (err) => this.events.onError(err.message))
       port.on('close', () => {
+        if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
         if (this.port === port) {
           this.port = null
           this.events.onClientChange(false)
@@ -63,6 +77,7 @@ export class SerialDevice implements OrchDeviceBackend {
   }
 
   async disconnect(): Promise<void> {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     if (this.port?.isOpen) {
       this.port.close()
     }
@@ -77,6 +92,7 @@ export class SerialDevice implements OrchDeviceBackend {
   }
 
   dispose(): void {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     if (this.port?.isOpen) {
       try {
         this.port.close()
