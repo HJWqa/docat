@@ -17,6 +17,8 @@
  *   log.info / warn / error
  */
 import { createInterface } from 'node:readline'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
 import vm from 'node:vm'
 
 const state = {
@@ -25,6 +27,19 @@ const state = {
   messages: [],
   processing: false,
   exited: false,
+}
+
+/** 脚本 require 的解析基准（服务端脚本目录），init 时下发 */
+let requireFromScriptDir = null
+/** 回退基准：服务端包目录（docat-server 的 dependencies，如 mathjs） */
+const requireFromServer = createRequire(import.meta.url)
+
+/** 内置 mathjs：脚本可直接用全局 math（如 math.add(1,2)），无需 require */
+let mathjs = null
+try {
+  mathjs = requireFromServer('mathjs')
+} catch {
+  // mathjs 未安装时忽略，脚本使用 math 会得到明确的 undefined 错误
 }
 
 const listeners = { message: {}, connect: {}, disconnect: {} }
@@ -202,6 +217,14 @@ rl.on('line', (line) => {
     case 'init':
       state.poses = msg.poses || []
       state.devices = msg.devices || []
+      // require 基准目录（服务端脚本目录，可解析其 node_modules 及上层依赖）
+      if (msg.requireBase) {
+        try {
+          requireFromScriptDir = createRequire(join(String(msg.requireBase), '__docat_require__.js'))
+        } catch {
+          requireFromScriptDir = null
+        }
+      }
       break
     case 'poses':
       state.poses = msg.poses || []
@@ -236,6 +259,22 @@ async function runUserScript(code) {
       poses: docat.poses,
       utils: docat.utils,
       log: docat.log,
+      // 内置 mathjs（全局 math，无需 require；require('mathjs') 同样可用）
+      math: mathjs,
+      // 第三方库：优先从服务端脚本目录解析 node_modules（如 require('mathjs')），
+      // 找不到时回退到服务端包目录（docat-server 的 dependencies）
+      require: (id) => {
+        const target = String(id)
+        if (requireFromScriptDir) {
+          try {
+            return requireFromScriptDir(target)
+          } catch (err) {
+            if (err && err.code !== 'MODULE_NOT_FOUND') throw err
+            return requireFromServer(target)
+          }
+        }
+        return requireFromServer(target)
+      },
     }
     const ctx = vm.createContext(sandbox)
     const fn = script.runInContext(ctx)

@@ -20,6 +20,7 @@
     "commander": "^15.0.0",
     "docat-shared": "workspace:*",
     "fastify": "^5.11.2",
+    "mathjs": "^15.2.0",
     "serialport": "^13.0.0",
     "ssh2-sftp-client": "^12.1.1",
     "uuid": "^14.0.1"

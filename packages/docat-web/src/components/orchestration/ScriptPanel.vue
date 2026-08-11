@@ -98,7 +98,7 @@ import * as jsMonarch from 'monaco-editor/languages/definitions/javascript/javas
 import * as pyMonarch from 'monaco-editor/languages/definitions/python/python'
 import { addLog, isOrchMockMode, onOrchScriptChange, onOrchScriptsDirChange, orchStore, orchTypeLabel } from '../../stores/orchestrationStore'
 import { pickScriptFile, runScript, watchScriptFile, type ScriptRunHandle } from '../../services/orchestration'
-import { orchGetScript, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
+import { orchGetScript, orchListModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
 import Toast from '../Toast.vue'
 
 type ScriptLanguage = 'javascript' | 'python'
@@ -206,6 +206,7 @@ function initEditor() {
       { token: 'string', foreground: '86efac' },
       { token: 'number', foreground: 'fbbf24' },
       { token: 'comment', foreground: '64748b', fontStyle: 'italic' },
+      { token: 'docat-global', foreground: 'a78bfa', fontStyle: 'bold' },
     ],
     colors: {
       'editor.background': '#0c0d0f',
@@ -259,6 +260,25 @@ function initEditor() {
 let completionConfigured = false
 let completionDisposables: Array<{ dispose(): void }> = []
 
+/** 编排脚本全局名（高亮为 docat-global token） */
+const DOCAT_GLOBALS = ['devices', 'poses', 'utils', 'log', 'math', 'docat']
+const DOCAT_GLOBAL_RE = new RegExp(`\\b(?:${DOCAT_GLOBALS.join('|')})\\b`)
+
+/**
+ * 在 Monarch language 的 root 规则前插入全局名规则（浅拷贝，不污染共享模块实例）。
+ * 返回的 token 类型为 docat-global（主题按前缀匹配，兼容 .js/.py postfix）。
+ */
+function withDocatGlobals(lang: monaco.languages.IMonarchLanguage): monaco.languages.IMonarchLanguage {
+  const root = Array.isArray(lang.tokenizer.root) ? [...lang.tokenizer.root] : []
+  return {
+    ...lang,
+    tokenizer: {
+      ...lang.tokenizer,
+      root: [[DOCAT_GLOBAL_RE, 'docat-global'], ...root],
+    },
+  }
+}
+
 interface DocatCompletionItem {
   label: string
   detail: string
@@ -285,6 +305,20 @@ const DOCAT_API_JS: DocatCompletionItem[] = [
   { label: 'log.info', detail: '记录 info 日志', documentation: 'log.info(文本)', insert: 'log.info(\'${1:文本}\')' },
   { label: 'log.warn', detail: '记录 warn 日志', documentation: 'log.warn(文本)', insert: 'log.warn(\'${1:文本}\')' },
   { label: 'log.error', detail: '记录 error 日志', documentation: 'log.error(文本)', insert: 'log.error(\'${1:文本}\')' },
+  { label: 'math', detail: '内置 mathjs（全局，无需 require）', documentation: 'mathjs 全局对象：add / multiply / sqrt / pi 等', insert: 'math' },
+  { label: 'math.add', detail: '加法', documentation: 'math.add(1, 2) → 3', insert: 'math.add(${1:a}, ${2:b})' },
+  { label: 'math.subtract', detail: '减法', documentation: 'math.subtract(5, 2) → 3', insert: 'math.subtract(${1:a}, ${2:b})' },
+  { label: 'math.multiply', detail: '乘法（支持数组/矩阵）', documentation: 'math.multiply([10,20], 0.5) → [5, 10]', insert: 'math.multiply(${1:a}, ${2:b})' },
+  { label: 'math.divide', detail: '除法', documentation: 'math.divide(9, 3) → 3', insert: 'math.divide(${1:a}, ${2:b})' },
+  { label: 'math.sqrt', detail: '平方根', documentation: 'math.sqrt(81) → 9', insert: 'math.sqrt(${1:x})' },
+  { label: 'math.pow', detail: '幂', documentation: 'math.pow(2, 10) → 1024', insert: 'math.pow(${1:x}, ${2:y})' },
+  { label: 'math.round', detail: '四舍五入', documentation: 'math.round(3.7) → 4', insert: 'math.round(${1:x})' },
+  { label: 'math.abs', detail: '绝对值', documentation: 'math.abs(-5) → 5', insert: 'math.abs(${1:x})' },
+  { label: 'math.dot', detail: '点积', documentation: 'math.dot([1,2], [3,4]) → 11', insert: 'math.dot(${1:a}, ${2:b})' },
+  { label: 'math.pi', detail: '圆周率', documentation: 'math.pi', insert: 'math.pi' },
+  { label: 'math.sin', detail: '正弦（弧度）', documentation: 'math.sin(x)', insert: 'math.sin(${1:x})' },
+  { label: 'math.cos', detail: '余弦（弧度）', documentation: 'math.cos(x)', insert: 'math.cos(${1:x})' },
+  { label: 'math.tan', detail: '正切（弧度）', documentation: 'math.tan(x)', insert: 'math.tan(${1:x})' },
 ]
 
 const DOCAT_API_PY: DocatCompletionItem[] = [
@@ -306,18 +340,51 @@ const DOCAT_API_PY: DocatCompletionItem[] = [
   { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本)', insert: 'docat.log.info(\'${1:文本}\')' },
   { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本)', insert: 'docat.log.warn(\'${1:文本}\')' },
   { label: 'docat.log.error', detail: '记录 error 日志', documentation: 'docat.log.error(文本)', insert: 'docat.log.error(\'${1:文本}\')' },
+  { label: 'math', detail: 'Python 标准库 math', documentation: 'import math 后使用：sqrt / pi / sin 等', insert: 'math' },
 ]
 
 const IDENTIFIER_TRIGGERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'.split('')
+
+// ─── 动态模块成员补全（require('xxx') 的导出成员）──────
+
+const memberCache = new Map<string, Array<{ name: string; type: string }>>()
+const memberFetching = new Map<string, Promise<Array<{ name: string; type: string }> | null>>()
+
+function fetchModuleMembers(moduleName: string): Promise<Array<{ name: string; type: string }> | null> {
+  const cached = memberCache.get(moduleName)
+  if (cached) return Promise.resolve(cached)
+  const inflight = memberFetching.get(moduleName)
+  if (inflight) return inflight
+  const p = orchListModuleMembers(moduleName)
+    .then(res => {
+      const members = res.success && res.data && 'members' in res.data ? res.data.members : null
+      if (members) memberCache.set(moduleName, members)
+      return members
+    })
+    .catch(() => null)
+    .finally(() => { memberFetching.delete(moduleName) })
+  memberFetching.set(moduleName, p)
+  return p
+}
+
+/** 解析脚本中的 require 语句：变量名 → 模块名 */
+function collectRequireVars(text: string): Map<string, string> {
+  const map = new Map<string, string>()
+  const RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*['"]([^'"]+)['"]\s*\)/g
+  let m: RegExpExecArray | null
+  while ((m = RE.exec(text))) map.set(m[1], m[2])
+  return map
+}
 
 function configureDocatCompletion() {
   if (completionConfigured) return
   completionConfigured = true
 
   // 主动注册 Monarch tokenizer 与语言配置（不受懒加载影响，保证高亮与补全即时可用）
-  monaco.languages.setMonarchTokensProvider('javascript', jsMonarch.language)
+  // 全局名（devices/poses/utils/log/math/docat）高亮为 docat-global
+  monaco.languages.setMonarchTokensProvider('javascript', withDocatGlobals(jsMonarch.language))
   monaco.languages.setLanguageConfiguration('javascript', jsMonarch.conf)
-  monaco.languages.setMonarchTokensProvider('python', pyMonarch.language)
+  monaco.languages.setMonarchTokensProvider('python', withDocatGlobals(pyMonarch.language))
   monaco.languages.setLanguageConfiguration('python', pyMonarch.conf)
 
   for (const language of ['javascript', 'python'] as const) {
@@ -367,20 +434,52 @@ function configureDocatCompletion() {
           })
         }
 
-        // 兜底去重：HMR 或重复注册时避免同 label 出现多次
-        const seen = new Set<string>()
-        const deduped = suggestions.filter(s => {
-          const key = typeof s.label === 'string' ? s.label : s.label.label
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
+        // 动态补全：require('模块') 的导出成员（如 math. → mathjs 成员）
+        if (language === 'javascript') {
+          const requireVars = collectRequireVars(model.getValue())
+          const lineText = model.getLineContent(position.lineNumber)
+          const beforeCursor = lineText.slice(0, position.column - 1)
+          const dotMatch = beforeCursor.match(/([A-Za-z_$][\w$]*)\.$/)
+          if (dotMatch) {
+            const moduleName = requireVars.get(dotMatch[1])
+            if (moduleName) {
+              return fetchModuleMembers(moduleName).then(members => {
+                if (members) {
+                  for (const member of members) {
+                    suggestions.push({
+                      label: member.name,
+                      kind: member.type === 'function'
+                        ? monaco.languages.CompletionItemKind.Function
+                        : monaco.languages.CompletionItemKind.Variable,
+                      detail: `${moduleName}.${member.name} · ${member.type}`,
+                      insertText: member.type === 'function' ? `${member.name}(` : member.name,
+                      sortText: `0500_${member.name}`,
+                      range,
+                    })
+                  }
+                }
+                return { suggestions: dedupe(suggestions) }
+              })
+            }
+          }
+        }
 
-        return { suggestions: deduped }
+        return { suggestions: dedupe(suggestions) }
       },
     })
     completionDisposables.push(disposable)
   }
+}
+
+/** 兜底去重：HMR 或重复注册时避免同 label 出现多次 */
+function dedupe(items: monaco.languages.CompletionItem[]): monaco.languages.CompletionItem[] {
+  const seen = new Set<string>()
+  return items.filter(s => {
+    const key = typeof s.label === 'string' ? s.label : s.label.label
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // 开发模式 HMR 时释放已注册的 provider，避免旧实例残留导致补全重复

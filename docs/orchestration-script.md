@@ -123,6 +123,24 @@ def on_msg(msg):
 | `PING` | 心跳应答（内容见「通用」设置） | 配置的 pong 内容 |
 | 其他 | 格式错误 | `{命令};error;` |
 
+## 第三方库
+
+**JS**：**mathjs 已内置**——脚本可直接用全局 `math`，无需 require：
+
+```js
+log.info(String(math.sqrt(81)))              // 9
+const angles = math.multiply([10, 20, 30], 0.5)
+devices.send('am', 'MovL;' + utils.toString(angles) + ';0;0;0')
+```
+
+其他第三方库用 `require` 引入（`require('mathjs')` 同样可用，与全局 math 一致）；Node 内置模块（`node:path` 等）也可用。解析顺序：先按**服务端脚本目录**（其 `node_modules` 及上层）查找，找不到再回退到 **docat-server 的依赖**（`pnpm --filter docat-server add <包>` 后即可 require）。也可在脚本目录下 `npm install <包> --prefix <脚本目录>`。
+
+**编辑器自动补全**：`const math = require('mathjs')` 后，输入 `math.` 会自动弹出该模块的导出成员（服务端实时解析模块导出，支持任意已安装包；函数成员带 `(` 快速插入）。
+
+**Python**：`import` 天然可用——标准库直接用；第三方库安装到服务端 python 环境即可（如 `pip install pyserial`）。
+
+**mock 模式（?mock=1）**：脚本在浏览器内模拟运行，无法加载服务端第三方库——请在真实模式运行。
+
 ## 心跳（由引擎处理，脚本无需关心）
 
 开启心跳的设备按「通用」设置（周期/超时/阈值/内容）发送 ping 并期待应答；超时判定链路失活并自动重连（见「通用」设置）。

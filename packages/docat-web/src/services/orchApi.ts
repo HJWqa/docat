@@ -111,3 +111,13 @@ export function orchOpenScriptsInEditor(): Promise<ApiResponse<{ dir: string }>>
 export function orchListSerialPorts(): Promise<ApiResponse<string[]>> {
   return request('GET', '/api/orchestration/serial-ports')
 }
+
+/** 模块导出成员清单（require 自动补全用） */
+export interface OrchModuleMember {
+  name: string
+  type: string
+}
+
+export function orchListModuleMembers(moduleName: string): Promise<ApiResponse<{ members: OrchModuleMember[] } | { error: string }>> {
+  return request('POST', '/api/orchestration/scripts/module-members', { name: moduleName })
+}

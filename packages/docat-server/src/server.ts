@@ -69,6 +69,7 @@ async function main(): Promise<void> {
   const scheduler = new AccessScheduler()
   const orchDevices = new OrchDeviceManager(pool)
   const orchRuntime = new RuntimeManager(orchDevices)
+  orchRuntime.setRequireBase(config.orchScriptsDir)
   setRuntimePoolTcpCheck(deviceId => pool.hasActiveTcp(deviceId))
 
   // 4. 创建 Fastify 服务

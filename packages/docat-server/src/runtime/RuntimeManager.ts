@@ -32,9 +32,16 @@ export class RuntimeManager {
   private buffer = ''
   private stoppedByUser = false
   private failTimer: ReturnType<typeof setTimeout> | null = null
+  /** 脚本 require 的解析基准目录（服务端脚本目录，可被「通用」设置修改） */
+  private requireBase = ''
 
   constructor(manager: OrchDeviceManager) {
     this.manager = manager
+  }
+
+  /** 设置脚本 require 基准目录（脚本目录变更时同步更新） */
+  setRequireBase(dir: string) {
+    this.requireBase = dir
   }
 
   get running(): boolean {
@@ -151,7 +158,7 @@ export class RuntimeManager {
       case 'ready': {
         this.clearFailTimer()
         // 推送姿态/设备快照 + 脚本内容（init 先于 script，子进程按序处理）
-        this.sendToChild({ type: 'init', poses: this.manager.listPoses(), devices: this.manager.list().map(d => ({ name: d.name, connected: d.connected })) })
+        this.sendToChild({ type: 'init', poses: this.manager.listPoses(), devices: this.manager.list().map(d => ({ name: d.name, connected: d.connected })), requireBase: this.requireBase || undefined })
         this.sendToChild({ type: 'script', content: this.pendingContent })
         this.broadcastLog('info', `脚本已启动（${this.fileName}）`)
         break

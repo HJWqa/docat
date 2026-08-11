@@ -7,7 +7,8 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import { getSetting, setSetting } from './system.js'
@@ -18,6 +19,9 @@ import type { OrchDeviceConfig, OrchPose } from '../../orchestration/types.js'
 import type { ApiResponse } from 'docat-shared/types'
 
 const SCRIPT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(js|mjs|cjs|py)$/
+
+/** 服务端包根目录（src/api/rest → 包根；dist 下同样适用） */
+const SERVER_PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
 const SETTING_PREFIX = 'orch.'
 const SETTING_SCRIPTS_DIR = 'orch.scriptsDir'
@@ -163,6 +167,7 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
           if (dir !== currentScriptsDir) {
             currentScriptsDir = dir
             ensureWatch(dir)
+            runtime.setRequireBase(dir)
             eventBus.emit('orch:event', {
               event: 'scripts-dir',
               dir,
@@ -172,6 +177,67 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         }
 
         return { success: true, data: readOrchSettings() }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── 脚本模块成员（自动补全用）：子进程加载模块并列出导出 ──
+  app.post<{ Body: { name?: string } }>(
+    '/api/orchestration/scripts/module-members',
+    async (request, reply): Promise<ApiResponse<{ members: Array<{ name: string; type: string }> } | { error: string }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const moduleName = String(request.body?.name ?? '').trim()
+        if (!moduleName || moduleName.includes('\0')) {
+          return { success: false, error: { code: 42200, message: '缺少模块名' } }
+        }
+
+        const probe = spawnSync(process.execPath, ['-e', `
+          const { createRequire } = require('node:module')
+          const path = require('node:path')
+          const name = process.argv[1]
+          const scriptDir = process.argv[2]
+          // 与脚本运行时一致：先脚本目录解析，回退服务端包目录
+          const scriptRequire = scriptDir ? createRequire(path.join(scriptDir, '__docat_members__.js')) : null
+          let mod = null
+          let lastError = null
+          if (scriptRequire) {
+            try { mod = scriptRequire(name) } catch (e) { lastError = e }
+          }
+          if (!mod) {
+            try { mod = require(name) } catch (e) { lastError = e }
+          }
+          if (!mod) { console.log(JSON.stringify({ error: lastError ? lastError.message : '模块加载失败' })); process.exit(0) }
+          if (typeof mod !== 'object' || mod === null) { console.log(JSON.stringify({ members: [] })); process.exit(0) }
+          const out = []
+          const seen = new Set()
+          for (const k of Object.keys(mod)) {
+            if (seen.has(k)) continue
+            seen.add(k)
+            const v = mod[k]
+            let type = typeof v
+            if (v && typeof v === 'object') type = Array.isArray(v) ? 'array' : 'object'
+            else if (typeof v === 'function') type = 'function'
+            out.push({ name: k, type })
+            if (out.length >= 300) break
+          }
+          console.log(JSON.stringify({ members: out }))
+        `, moduleName, currentScriptsDir], {
+          cwd: SERVER_PKG_ROOT,
+          timeout: 5000,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+
+        if (probe.error || probe.status !== 0 || !probe.stdout) {
+          return { success: false, error: { code: 50000, message: '模块加载失败或超时' } }
+        }
+        const parsed = JSON.parse(probe.stdout) as { error?: string; members?: Array<{ name: string; type: string }> }
+        if (parsed.error) return { success: false, error: { code: 50000, message: parsed.error } }
+        return { success: true, data: { members: parsed.members ?? [] } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
