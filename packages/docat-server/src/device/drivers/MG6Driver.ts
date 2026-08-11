@@ -11,6 +11,7 @@ import {
   type UserList,
   type UserPermissionConfig,
   type CoordinateData,
+  type CoordinateItem,
   type DeviceTypeName,
 } from '../DeviceDriver.js'
 import { HttpTransport } from '../transport/HttpTransport.js'
@@ -880,7 +881,7 @@ export class MG6Driver extends DeviceDriver {
       method: 'post',
       url: '/settings/coordinate/user',
       portName: this.ip,
-      params: data.coordList,
+      params: data.coordList.map(denormalizeCoord),
       timeout: 10000,
     })
     if (!reply.status) {
@@ -906,7 +907,7 @@ export class MG6Driver extends DeviceDriver {
       method: 'post',
       url: '/settings/coordinate/tool',
       portName: this.ip,
-      params: data.coordList,
+      params: data.coordList.map(denormalizeCoord),
       timeout: 10000,
     })
     if (!reply.status) {
@@ -1252,6 +1253,26 @@ export class MG6Driver extends DeviceDriver {
 
   // ─── 通讯设置 ──────────────────────────────────
 
+  async getMotionDefaults(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/properties/default',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async getBus(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/interface/bus',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
   async setBus(params: Record<string, unknown>): Promise<void> {
     const reply = await this.http.send({
       method: 'post',
@@ -1291,7 +1312,17 @@ export class MG6Driver extends DeviceDriver {
       portName: this.ip,
       timeout: 5000,
     })
-    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+    if (reply.status && reply.data) {
+      // 控制器字段：ip / netmask / gateway / dhcp（无 dns）
+      const d = reply.data as Record<string, unknown>
+      return {
+        dhcp: Boolean(d.dhcp),
+        ip: String(d.ip ?? ''),
+        mask: String(d.netmask ?? ''),
+        gateway: String(d.gateway ?? ''),
+      }
+    }
+    return {}
   }
 
   async setEthernet(params: Record<string, unknown>): Promise<void> {
@@ -1299,7 +1330,12 @@ export class MG6Driver extends DeviceDriver {
       method: 'post',
       url: '/interface/ethernet',
       portName: this.ip,
-      params,
+      params: {
+        dhcp: Boolean(params.dhcp),
+        ip: String(params.ip ?? ''),
+        netmask: String(params.mask ?? ''),
+        gateway: String(params.gateway ?? ''),
+      },
       timeout: 10000,
     })
     if (!reply.status) throw new Error(`Set Ethernet failed: ${reply.message}`)
@@ -1509,25 +1545,60 @@ export class MG6Driver extends DeviceDriver {
   }
 }
 
-/** 控制器返回的原始坐标项 */
+/** 控制器返回的原始坐标项：值为 params[] 数组 + alias/enable/caliType/rawP0..rawP5 */
 interface CoordinateItemRaw {
-  name?: string
+  alias?: string
   enable?: boolean
-  x?: number; y?: number; z?: number; r?: number
-  rx?: number; ry?: number; rz?: number
+  params?: Array<number | string>
+  caliType?: number
   [key: string]: unknown
 }
 
-function normalizeCoord(item: CoordinateItemRaw) {
+/** 解析坐标项：id=数组下标，值在 params 中（MG6: [x,y,z,r,0,0]；CR: [x,y,z,rx,ry,rz]） */
+function normalizeCoord(item: CoordinateItemRaw, index: number) {
+  const params = Array.isArray(item.params) ? item.params.map(Number) : []
+  const get = (i: number) => Number(params[i] ?? 0)
+  const alias = String(item.alias ?? '')
   return {
-    name: String(item.name ?? ''),
+    id: String(index),
+    name: alias,
+    alias,
     enable: Boolean(item.enable),
-    x: Number(item.x ?? 0),
-    y: Number(item.y ?? 0),
-    z: Number(item.z ?? 0),
-    r: Number(item.r ?? 0),
-    rx: Number(item.rx ?? 0),
-    ry: Number(item.ry ?? 0),
-    rz: Number(item.rz ?? 0),
+    x: get(0),
+    y: get(1),
+    z: get(2),
+    r: get(3),
+    rx: get(3),
+    ry: get(4),
+    rz: get(5),
+    raw: item,
   }
+}
+
+/** 把前端扁平坐标项还原为控制器线格式（保留 rawP0..rawP5 标定数据） */
+function denormalizeCoord(item: CoordinateItem): Record<string, unknown> {
+  const raw = (item.raw && typeof item.raw === 'object' ? item.raw : {}) as Record<string, unknown>
+  const out: Record<string, unknown> = {
+    alias: item.alias ?? '',
+    caliType: Number(raw.caliType ?? 0),
+    enable: Boolean(item.enable),
+    params: [
+      Number(item.x ?? 0),
+      Number(item.y ?? 0),
+      Number(item.z ?? 0),
+      Number(item.rx ?? 0),
+      Number(item.ry ?? 0),
+      Number(item.rz ?? 0),
+    ],
+  }
+  for (let i = 0; i < 6; i++) {
+    const key = `rawP${i}`
+    if (raw[key] !== undefined) {
+      out[key] = raw[key]
+    } else {
+      // 新增坐标系没有标定原点：补零默认值
+      out[key] = { coordinate: [0, 0, 0, 0, 0, 0], joint: [0, 0, 0, 0, 0, 0], user: 0, tool: 0 }
+    }
+  }
+  return out
 }

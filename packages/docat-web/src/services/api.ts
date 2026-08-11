@@ -691,9 +691,15 @@ export async function setUserPermissions(id: string, config: PermissionConfig[])
 // ─── Coordinate Management ────────────────────
 
 export interface CoordItem {
-  name: string; enable: boolean
-  x?: number; y?: number; z?: number; r?: number
+  /** 控制器槽位 id（数组下标，如 "0"、"1"） */
+  id?: string
+  /** 别名（显示名），协议字段 alias */
+  alias: string
+  enable: boolean
+  x?: number; y?: number; z?: number
   rx?: number; ry?: number; rz?: number
+  /** 控制器原始数据（params / rawP0..rawP5 / caliType），写回时保留 */
+  raw?: Record<string, unknown>
 }
 
 export async function getUserCoordinate(id: string): Promise<ApiResponse<{ coordList: CoordItem[] }>> {
@@ -747,6 +753,14 @@ export async function setTeachCoordinateParams(id: string, p: Record<string, unk
 }
 
 // ─── Communication ────────────────────────────
+
+export async function getMotionDefaults(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/motionDefaults`)
+}
+
+export async function getBus(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/bus`)
+}
 
 export async function setBus(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
   return request('POST', `/api/devices/${id}/bus`, params)

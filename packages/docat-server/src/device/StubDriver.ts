@@ -10,6 +10,7 @@ import {
   type UserList,
   type UserPermissionConfig,
   type CoordinateData,
+  type CoordinateItem,
   type DeviceTypeName,
 } from './DeviceDriver.js'
 import { HttpTransport } from './transport/HttpTransport.js'
@@ -335,7 +336,7 @@ export class StubDriver extends DeviceDriver {
   }
 
   async setUserCoordinate(data: CoordinateData): Promise<void> {
-    const reply = await this.http.send({ method: 'post', url: '/settings/coordinate/user', portName: this.ip, params: data.coordList, timeout: 10000 })
+    const reply = await this.http.send({ method: 'post', url: '/settings/coordinate/user', portName: this.ip, params: data.coordList.map(denormalizeCoordStub), timeout: 10000 })
     if (!reply.status) throw new Error(`Set userCoordinate failed: ${reply.message}`)
   }
 
@@ -350,7 +351,7 @@ export class StubDriver extends DeviceDriver {
   }
 
   async setToolCoordinate(data: CoordinateData): Promise<void> {
-    const reply = await this.http.send({ method: 'post', url: '/settings/coordinate/tool', portName: this.ip, params: data.coordList, timeout: 10000 })
+    const reply = await this.http.send({ method: 'post', url: '/settings/coordinate/tool', portName: this.ip, params: data.coordList.map(denormalizeCoordStub), timeout: 10000 })
     if (!reply.status) throw new Error(`Set toolCoordinate failed: ${reply.message}`)
   }
 
@@ -487,6 +488,20 @@ export class StubDriver extends DeviceDriver {
 
   // ─── 通讯设置 ──────────────────────────────────
 
+  async getMotionDefaults(): Promise<Record<string, unknown>> {
+    try {
+      const reply = await this.http.send({ method: 'get', url: '/properties/default', portName: this.ip, timeout: 5000 })
+      return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+    } catch { return {} }
+  }
+
+  async getBus(): Promise<Record<string, unknown>> {
+    try {
+      const reply = await this.http.send({ method: 'get', url: '/interface/bus', portName: this.ip, timeout: 5000 })
+      return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+    } catch { return {} }
+  }
+
   async setBus(params: Record<string, unknown>): Promise<void> {
     const reply = await this.http.send({ method: 'post', url: '/interface/bus', portName: this.ip, params, timeout: 10000 })
     if (!reply.status) throw new Error(`Set bus failed: ${reply.message}`)
@@ -507,12 +522,33 @@ export class StubDriver extends DeviceDriver {
   async getEthernet(): Promise<Record<string, unknown>> {
     try {
       const reply = await this.http.send({ method: 'get', url: '/interface/ethernet', portName: this.ip, timeout: 5000 })
-      return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
-    } catch { return {} }
+      if (reply.status && reply.data) {
+        // 控制器字段：ip / netmask / gateway / dhcp（无 dns）
+        const d = reply.data as Record<string, unknown>
+        return {
+          dhcp: Boolean(d.dhcp),
+          ip: String(d.ip ?? ''),
+          mask: String(d.netmask ?? ''),
+          gateway: String(d.gateway ?? ''),
+        }
+      }
+    } catch { /* ignore */ }
+    return {}
   }
 
   async setEthernet(params: Record<string, unknown>): Promise<void> {
-    const reply = await this.http.send({ method: 'post', url: '/interface/ethernet', portName: this.ip, params, timeout: 10000 })
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/interface/ethernet',
+      portName: this.ip,
+      params: {
+        dhcp: Boolean(params.dhcp),
+        ip: String(params.ip ?? ''),
+        netmask: String(params.mask ?? ''),
+        gateway: String(params.gateway ?? ''),
+      },
+      timeout: 10000,
+    })
     if (!reply.status) throw new Error(`Set Ethernet failed: ${reply.message}`)
   }
 
@@ -762,16 +798,48 @@ export class StubDriver extends DeviceDriver {
   }
 }
 
-function normalizeCoordStub(item: Record<string, unknown>) {
+function normalizeCoordStub(item: Record<string, unknown>, index: number) {
+  const params = Array.isArray(item.params) ? item.params.map(Number) : []
+  const get = (i: number) => Number(params[i] ?? 0)
+  const alias = String(item.alias ?? '')
   return {
-    name: String(item.name ?? ''),
+    id: String(index),
+    name: alias,
+    alias,
     enable: Boolean(item.enable),
-    x: Number(item.x ?? 0),
-    y: Number(item.y ?? 0),
-    z: Number(item.z ?? 0),
-    r: Number(item.r ?? 0),
-    rx: Number(item.rx ?? 0),
-    ry: Number(item.ry ?? 0),
-    rz: Number(item.rz ?? 0),
+    x: get(0),
+    y: get(1),
+    z: get(2),
+    r: get(3),
+    rx: get(3),
+    ry: get(4),
+    rz: get(5),
+    raw: item,
   }
+}
+
+function denormalizeCoordStub(item: CoordinateItem): Record<string, unknown> {
+  const raw = (item.raw && typeof item.raw === 'object' ? item.raw : {}) as Record<string, unknown>
+  const out: Record<string, unknown> = {
+    alias: item.alias ?? '',
+    caliType: Number(raw.caliType ?? 0),
+    enable: Boolean(item.enable),
+    params: [
+      Number(item.x ?? 0),
+      Number(item.y ?? 0),
+      Number(item.z ?? 0),
+      Number(item.rx ?? 0),
+      Number(item.ry ?? 0),
+      Number(item.rz ?? 0),
+    ],
+  }
+  for (let i = 0; i < 6; i++) {
+    const key = `rawP${i}`
+    if (raw[key] !== undefined) {
+      out[key] = raw[key]
+    } else {
+      out[key] = { coordinate: [0, 0, 0, 0, 0, 0], joint: [0, 0, 0, 0, 0, 0], user: 0, tool: 0 }
+    }
+  }
+  return out
 }

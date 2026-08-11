@@ -1510,6 +1510,38 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
 
   // ─── 通讯设置 ──────────────────────────────────
 
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/motionDefaults',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getMotionDefaults()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/bus',
+    async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const data = await entry.driver.getBus()
+        return { success: true, data }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
     '/api/devices/:id/bus',
     async (request, reply): Promise<ApiResponse<null>> => {

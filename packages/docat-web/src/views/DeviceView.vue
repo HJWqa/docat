@@ -772,7 +772,10 @@
                 <div class="settings-section">
                   <div class="settings-section-header">
                     <h4>当前负载</h4>
-                    <button class="btn btn-primary btn-sm" @click="saveCurrentLoad" :disabled="!loadParamsEditable">应用</button>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <span v-if="maxLoadG" class="text-muted" style="font-size:0.68rem">机型最大负载 {{ maxLoadG }}g</span>
+                      <button class="btn btn-primary btn-sm" @click="saveCurrentLoad" :disabled="!loadParamsEditable || !settingsWritable">应用</button>
+                    </div>
                   </div>
                   <div class="load-fields">
                     <div class="load-field">
@@ -802,7 +805,7 @@
                 <div class="settings-section">
                   <div class="settings-section-header">
                     <h4>负载预设</h4>
-                    <button class="btn btn-secondary btn-sm" @click="startAddPreset" :disabled="editingPresetIdx !== null">+ 新增</button>
+                    <button class="btn btn-secondary btn-sm" @click="startAddPreset" :disabled="editingPresetIdx !== null || !settingsWritable">+ 新增</button>
                   </div>
                   <div v-if="loadConfigs.length === 0 && !addingPreset" class="text-muted" style="padding:12px 0;font-size:0.75rem;">
                     设备上暂无预设 — 请添加一个或在上方设置自定义负载
@@ -865,20 +868,20 @@
                 <div class="settings-section">
                   <div class="settings-section-header"><h4>机器人别名</h4></div>
                   <div style="display:flex;gap:8px">
-                    <input v-model.trim="aliasInput" class="input-sm settings-alias-input" placeholder="机器人别名" @keyup.enter="saveAlias" />
-                    <button class="btn btn-primary btn-sm" @click="saveAlias">保存</button>
+                    <input v-model.trim="aliasInput" class="input-sm settings-alias-input" placeholder="机器人别名" @keyup.enter="saveAlias" :disabled="!settingsWritable" />
+                    <button class="btn btn-primary btn-sm" @click="saveAlias" :disabled="!settingsWritable">保存</button>
                   </div>
                 </div>
                 <div class="settings-section">
                   <div class="settings-section-header"><h4>系统时间</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>日期</label><input v-model.trim="sysTimeForm.date" class="input-sm" placeholder="YYYY-MM-DD" /></div>
-                    <div class="load-field"><label>时间</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" /></div>
-                    <div class="load-field"><label>时区</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="Asia/Shanghai" /></div>
+                    <div class="load-field"><label>日期</label><input v-model.trim="sysTimeForm.date" class="input-sm" placeholder="YYYY-MM-DD" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>时间</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>时区</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="Asia/Shanghai" :disabled="!settingsWritable" /></div>
                   </div>
                   <div style="display:flex;gap:8px" class="mt-2">
-                    <button class="btn btn-primary btn-sm" @click="saveSystemTime">应用</button>
-                    <button class="btn btn-secondary btn-sm" @click="syncLocalTime">同步当前时间</button>
+                    <button class="btn btn-primary btn-sm" @click="saveSystemTime" :disabled="!settingsWritable">应用</button>
+                    <button class="btn btn-secondary btn-sm" @click="syncLocalTime" :disabled="!settingsWritable">同步当前时间</button>
                   </div>
                 </div>
               </div>
@@ -888,7 +891,7 @@
                 <div class="settings-section">
                   <div class="settings-section-header">
                     <h4>用户</h4>
-                    <button class="btn btn-secondary btn-sm" @click="startAddUser">+ 新增</button>
+                    <button class="btn btn-secondary btn-sm" @click="startAddUser" :disabled="!settingsWritable">+ 新增</button>
                   </div>
                   <table class="load-config-table" v-if="ctrlUserList.list.length > 0">
                     <thead><tr><th>名称</th><th>密码</th><th>需密码</th><th style="width:80px">操作</th></tr></thead>
@@ -949,76 +952,92 @@
                       </tbody>
                     </table>
                   </div>
-                  <button class="btn btn-primary btn-sm mt-2" @click="savePermissions">保存权限</button>
+                  <button class="btn btn-primary btn-sm mt-2" @click="savePermissions" :disabled="!settingsWritable">保存权限</button>
                 </div>
               </div>
 
               <!-- Coordinate Management -->
               <div v-else-if="settingsTab === 'coordinates'">
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>工具坐标系</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('tool')">+ 添加</button></div>
+                  <div class="settings-section-header"><h4>工具坐标系</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('tool')" :disabled="!settingsWritable">+ 添加</button></div>
                   <table class="load-config-table" v-if="toolCoords.length > 0">
-                    <thead><tr><th>名称</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>启用</th><th style="width:80px">操作</th></tr></thead>
+                    <thead><tr><th style="width:34px">ID</th><th>名称</th><th>X</th><th>Y</th><th>Z</th><th>RX</th><th>RY</th><th>RZ</th><th style="width:46px">启用</th><th style="width:80px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(c, i) in toolCoords" :key="i" :class="{ 'row--editing': editingCoordIdx === i && editingCoordType === 'tool' }">
                         <template v-if="editingCoordIdx === i && editingCoordType === 'tool'">
-                          <td><input v-model.trim="editCoordForm.name" class="input-xs" style="width:70px" /></td>
-                          <td><input v-model.number="editCoordForm.x" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><input v-model.number="editCoordForm.r" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>启用</span></label></td>
+                          <td class="preset-name">{{ editCoordForm.id }}</td>
+                          <td><input v-model.trim="editCoordForm.alias" class="input-xs" style="width:70px" /></td>
+                          <td><input v-model.number="editCoordForm.x" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.rx" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.ry" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.rz" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /></label></td>
                           <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
                         </template>
                         <template v-else>
-                          <td class="preset-name">{{ c.name }}</td><td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td><td>{{ c.r }}</td><td>{{ c.enable ? '✓' : '—' }}</td>
+                          <td class="preset-name">{{ c.id }}</td><td class="preset-name">{{ c.alias }}</td>
+                          <td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td>
+                          <td>{{ c.rx }}</td><td>{{ c.ry }}</td><td>{{ c.rz }}</td>
+                          <td>{{ c.enable ? '✓' : '—' }}</td>
                           <td class="table-actions"><button class="btn btn-secondary btn-xs" @click="startEditCoord('tool', i)">✎</button><button class="btn btn-secondary btn-xs" @click="deleteCoord('tool', i)">✕</button></td>
                         </template>
                       </tr>
                     </tbody>
                   </table>
                   <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">暂无工具坐标系</div>
-                  <button class="btn btn-primary btn-sm mt-2" :disabled="toolCoords.length === 0" @click="saveCoords('tool')">保存</button>
+                  <button class="btn btn-primary btn-sm mt-2" :disabled="toolCoords.length === 0 || !settingsWritable" @click="saveCoords('tool')">保存</button>
                   <div v-if="addingCoord && addCoordType === 'tool'" class="coord-add-row">
-                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="名称" />
-                    <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:60px" placeholder="x" step="0.1" />
-                    <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:60px" placeholder="y" step="0.1" />
-                    <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:60px" placeholder="z" step="0.1" />
-                    <input v-model.number="addCoordForm.r" type="number" class="input-xs" style="width:60px" placeholder="r" step="0.1" />
+                    <input v-model.trim="addCoordForm.alias" class="input-xs" style="width:100px" placeholder="名称" />
+                    <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:55px" placeholder="x" step="0.1" />
+                    <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:55px" placeholder="y" step="0.1" />
+                    <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:55px" placeholder="z" step="0.1" />
+                    <input v-model.number="addCoordForm.rx" type="number" class="input-xs" style="width:55px" placeholder="rx" step="0.1" />
+                    <input v-model.number="addCoordForm.ry" type="number" class="input-xs" style="width:55px" placeholder="ry" step="0.1" />
+                    <input v-model.number="addCoordForm.rz" type="number" class="input-xs" style="width:55px" placeholder="rz" step="0.1" />
                     <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddCoord">✓</button>
                     <button class="btn btn-secondary btn-xs" @click="addingCoord = false">✕</button></span>
                   </div>
                 </div>
                 <div class="settings-section">
-                  <div class="settings-section-header"><h4>用户坐标系</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('user')">+ 添加</button></div>
+                  <div class="settings-section-header"><h4>用户坐标系</h4><button class="btn btn-secondary btn-sm" @click="startAddCoord('user')" :disabled="!settingsWritable">+ 添加</button></div>
                   <table class="load-config-table" v-if="userCoords.length > 0">
-                    <thead><tr><th>名称</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>启用</th><th style="width:80px">操作</th></tr></thead>
+                    <thead><tr><th style="width:34px">ID</th><th>名称</th><th>X</th><th>Y</th><th>Z</th><th>RX</th><th>RY</th><th>RZ</th><th style="width:46px">启用</th><th style="width:80px">操作</th></tr></thead>
                     <tbody>
                       <tr v-for="(c, i) in userCoords" :key="i" :class="{ 'row--editing': editingCoordIdx === i && editingCoordType === 'user' }">
                         <template v-if="editingCoordIdx === i && editingCoordType === 'user'">
-                          <td><input v-model.trim="editCoordForm.name" class="input-xs" style="width:70px" /></td>
-                          <td><input v-model.number="editCoordForm.x" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><input v-model.number="editCoordForm.r" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
-                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /><span>启用</span></label></td>
+                          <td class="preset-name">{{ editCoordForm.id }}</td>
+                          <td><input v-model.trim="editCoordForm.alias" class="input-xs" style="width:70px" /></td>
+                          <td><input v-model.number="editCoordForm.x" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.y" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.z" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.rx" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.ry" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><input v-model.number="editCoordForm.rz" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
+                          <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /></label></td>
                           <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
                         </template>
                         <template v-else>
-                          <td class="preset-name">{{ c.name }}</td><td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td><td>{{ c.r }}</td><td>{{ c.enable ? '✓' : '—' }}</td>
+                          <td class="preset-name">{{ c.id }}</td><td class="preset-name">{{ c.alias }}</td>
+                          <td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td>
+                          <td>{{ c.rx }}</td><td>{{ c.ry }}</td><td>{{ c.rz }}</td>
+                          <td>{{ c.enable ? '✓' : '—' }}</td>
                           <td class="table-actions"><button class="btn btn-secondary btn-xs" @click="startEditCoord('user', i)">✎</button><button class="btn btn-secondary btn-xs" @click="deleteCoord('user', i)">✕</button></td>
                         </template>
                       </tr>
                     </tbody>
                   </table>
                   <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">暂无用户坐标系</div>
-                  <button class="btn btn-primary btn-sm mt-2" :disabled="userCoords.length === 0" @click="saveCoords('user')">保存</button>
+                  <button class="btn btn-primary btn-sm mt-2" :disabled="userCoords.length === 0 || !settingsWritable" @click="saveCoords('user')">保存</button>
                   <div v-if="addingCoord && addCoordType === 'user'" class="coord-add-row">
-                    <input v-model.trim="addCoordForm.name" class="input-xs" style="width:100px" placeholder="名称" />
-                    <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:60px" placeholder="x" step="0.1" />
-                    <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:60px" placeholder="y" step="0.1" />
-                    <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:60px" placeholder="z" step="0.1" />
-                    <input v-model.number="addCoordForm.r" type="number" class="input-xs" style="width:60px" placeholder="r" step="0.1" />
+                    <input v-model.trim="addCoordForm.alias" class="input-xs" style="width:100px" placeholder="名称" />
+                    <input v-model.number="addCoordForm.x" type="number" class="input-xs" style="width:55px" placeholder="x" step="0.1" />
+                    <input v-model.number="addCoordForm.y" type="number" class="input-xs" style="width:55px" placeholder="y" step="0.1" />
+                    <input v-model.number="addCoordForm.z" type="number" class="input-xs" style="width:55px" placeholder="z" step="0.1" />
+                    <input v-model.number="addCoordForm.rx" type="number" class="input-xs" style="width:55px" placeholder="rx" step="0.1" />
+                    <input v-model.number="addCoordForm.ry" type="number" class="input-xs" style="width:55px" placeholder="ry" step="0.1" />
+                    <input v-model.number="addCoordForm.rz" type="number" class="input-xs" style="width:55px" placeholder="rz" step="0.1" />
                     <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddCoord">✓</button>
                     <button class="btn btn-secondary btn-xs" @click="addingCoord = false">✕</button></span>
                   </div>
@@ -1031,10 +1050,10 @@
                   <div class="settings-section-header">
                     <h4>自定义预设</h4>
                     <div style="display:flex;gap:6px;flex-wrap:wrap">
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected">📋 当前关节角</button>
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected">📋 当前位姿</button>
-                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('joint')">+ 关节角</button>
-                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('cartesian')">+ 位姿</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected || !settingsWritable">📋 当前关节角</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected || !settingsWritable">📋 当前位姿</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('joint')" :disabled="!settingsWritable">+ 关节角</button>
+                      <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('cartesian')" :disabled="!settingsWritable">+ 位姿</button>
                     </div>
                   </div>
                   <div v-if="customPostures.length === 0" class="text-muted" style="padding:12px 0;font-size:0.75rem">暂无自定义预设</div>
@@ -1094,19 +1113,52 @@
 
               <!-- Motion Parameters -->
               <div v-else-if="settingsTab === 'motion'">
-                <div v-for="sec in motionSections" :key="sec.key" class="settings-section">
-                  <div class="settings-section-header"><h4>{{ sec.label }}</h4></div>
-                  <div v-if="sec.data && Object.keys(sec.data).length > 0" class="motion-params-grid">
-                    <div v-for="(val, k) in sec.data" :key="k" class="load-field">
-                      <label>{{ k }}</label>
-                      <input v-model.number="sec.data[k]" type="number" class="input-sm" step="0.01" />
+                <div v-for="grp in motionGroupsList" :key="grp.key" class="settings-section">
+                  <div class="settings-section-header">
+                    <h4>{{ grp.label }}</h4>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <span v-if="grp.loading" class="text-muted" style="font-size:0.7rem">加载中...</span>
+                      <button class="btn btn-secondary btn-sm" @click="loadMotionGroup(grp.key)">读取</button>
+                      <button class="btn btn-secondary btn-sm" :disabled="!grp.loaded || !settingsWritable" @click="resetMotionGroup(grp.key)">恢复默认值</button>
+                      <button class="btn btn-primary btn-sm" :disabled="!grp.loaded || !settingsWritable || grp.saving" @click="saveMotionGroup(grp.key)">
+                        {{ grp.saving ? '保存中...' : '保存' }}
+                      </button>
                     </div>
                   </div>
-                  <div v-else class="text-muted" style="padding:8px 0;font-size:0.7rem">未加载</div>
-                  <div style="display:flex;gap:6px;margin-top:8px">
-                    <button class="btn btn-primary btn-sm" @click="loadMotionParams(sec.key)">读取</button>
-                    <button class="btn btn-secondary btn-sm" :disabled="!sec.data" @click="saveMotionParams(sec.key)">保存</button>
-                  </div>
+                  <table class="load-config-table motion-table">
+                    <thead>
+                      <tr>
+                        <th style="width:70px">轴</th>
+                        <th>速度</th>
+                        <th>加速度</th>
+                        <th v-if="grp.showJerk">加加速度</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in grp.rows" :key="row.label">
+                        <td class="preset-name">{{ row.label }}</td>
+                        <td>
+                          <div class="motion-cell">
+                            <input v-model.number="row.velocity" type="number" class="input-xs motion-input" min="0" step="1" :disabled="!settingsWritable" />
+                            <span class="motion-unit">{{ row.suffixVel }}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="motion-cell">
+                            <input v-model.number="row.acceleration" type="number" class="input-xs motion-input" min="0" step="1" :disabled="!settingsWritable" />
+                            <span class="motion-unit">{{ row.suffixAcc }}</span>
+                          </div>
+                        </td>
+                        <td v-if="grp.showJerk">
+                          <div class="motion-cell">
+                            <input v-model.number="row.jerk" type="number" class="input-xs motion-input" min="0" step="1" :disabled="!settingsWritable" />
+                            <span class="motion-unit">{{ row.suffixJerk }}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-if="grp.loadError" class="text-danger" style="padding:6px 0;font-size:0.72rem">读取失败：{{ grp.loadError }}</div>
                 </div>
               </div>
 
@@ -1116,42 +1168,44 @@
                 <div class="settings-section">
                   <div class="settings-section-header"><h4>WiFi (AP)</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>SSID</label><input v-model.trim="wifiForm.ssid" class="input-sm" /></div>
-                    <div class="load-field"><label>密码</label><input v-model.trim="wifiForm.passWd" class="input-sm" /></div>
-                    <div class="load-field" style="justify-content:flex-end"><label class="checkbox-xs" style="margin-top:18px"><input v-model="wifiForm.enable" type="checkbox" /><span>启用</span></label></div>
+                    <div class="load-field"><label>SSID</label><input v-model.trim="wifiForm.ssid" class="input-sm" :disabled="!settingsWritable || !wifiForm.enable" /></div>
+                    <div class="load-field"><label>密码</label><input v-model.trim="wifiForm.passWd" class="input-sm" :disabled="!settingsWritable || !wifiForm.enable" /></div>
+                    <div class="load-field" style="justify-content:flex-end"><label class="checkbox-xs" style="margin-top:18px"><input v-model="wifiForm.enable" type="checkbox" :disabled="!settingsWritable" /><span>启用</span></label></div>
                   </div>
                   <div style="display:flex;gap:6px;margin-top:8px">
                     <button class="btn btn-primary btn-sm" @click="loadWiFi">读取</button>
-                    <button class="btn btn-secondary btn-sm" @click="saveWiFi">保存</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveWiFi" :disabled="!settingsWritable">保存</button>
                   </div>
                 </div>
                 <!-- Ethernet -->
                 <div class="settings-section">
                   <div class="settings-section-header"><h4>以太网 (IP)</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>DHCP</label><label class="checkbox-xs" style="margin-top:2px"><input v-model="ethForm.dhcp" type="checkbox" /><span>启用</span></label></div>
-                    <div class="load-field"><label>IP</label><input v-model.trim="ethForm.ip" class="input-sm" :disabled="ethForm.dhcp" /></div>
-                    <div class="load-field"><label>子网掩码</label><input v-model.trim="ethForm.mask" class="input-sm" :disabled="ethForm.dhcp" /></div>
-                    <div class="load-field"><label>网关</label><input v-model.trim="ethForm.gateway" class="input-sm" :disabled="ethForm.dhcp" /></div>
-                    <div class="load-field"><label>DNS</label><input v-model.trim="ethForm.dns" class="input-sm" :disabled="ethForm.dhcp" /></div>
+                    <div class="load-field"><label>DHCP</label><label class="checkbox-xs" style="margin-top:2px"><input v-model="ethForm.dhcp" type="checkbox" :disabled="!settingsWritable" /><span>启用</span></label></div>
+                    <div class="load-field"><label>IP</label><input v-model.trim="ethForm.ip" class="input-sm" :disabled="ethForm.dhcp || !settingsWritable" /></div>
+                    <div class="load-field"><label>子网掩码</label><input v-model.trim="ethForm.mask" class="input-sm" :disabled="ethForm.dhcp || !settingsWritable" /></div>
+                    <div class="load-field"><label>网关</label><input v-model.trim="ethForm.gateway" class="input-sm" :disabled="ethForm.dhcp || !settingsWritable" /></div>
                   </div>
                   <div style="display:flex;gap:6px;margin-top:8px">
                     <button class="btn btn-primary btn-sm" @click="loadEthernet">读取</button>
-                    <button class="btn btn-secondary btn-sm" @click="saveEthernet">保存</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveEthernet" :disabled="!settingsWritable">保存</button>
                   </div>
                 </div>
                 <!-- Bus -->
                 <div class="settings-section">
                   <div class="settings-section-header"><h4>总线</h4></div>
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
-                    <div class="load-field"><label>波特率</label><input v-model.number="busForm.baudRate" type="number" class="input-sm" /></div>
-                    <div class="load-field"><label>从站 ID</label><input v-model.number="busForm.slaveId" type="number" class="input-sm" /></div>
-                    <div class="load-field"><label>类型</label><input v-model.trim="busForm.type" class="input-sm" /></div>
-                    <div class="load-field"><label>数据位</label><input v-model.number="busForm.dataBits" type="number" class="input-sm" /></div>
-                    <div class="load-field"><label>停止位</label><input v-model.number="busForm.stopBits" type="number" class="input-sm" step="0.5" /></div>
-                    <div class="load-field"><label>校验位</label><input v-model.trim="busForm.parity" class="input-sm" /></div>
+                    <div class="load-field"><label>波特率</label><input v-model.number="busForm.baudRate" type="number" class="input-sm" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>从站 ID</label><input v-model.number="busForm.slaveId" type="number" class="input-sm" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>类型</label><input v-model.trim="busForm.type" class="input-sm" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>数据位</label><input v-model.number="busForm.dataBits" type="number" class="input-sm" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>停止位</label><input v-model.number="busForm.stopBits" type="number" class="input-sm" step="0.5" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>校验位</label><input v-model.trim="busForm.parity" class="input-sm" :disabled="!settingsWritable" /></div>
                   </div>
-                  <button class="btn btn-primary btn-sm mt-2" @click="saveBus">保存</button>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadBus">读取</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveBus" :disabled="!settingsWritable">保存</button>
+                  </div>
                 </div>
               </div>
 
@@ -1187,7 +1241,7 @@
                         <td>{{ dobotPlusPorts[name] || '—' }}</td>
                         <td class="table-actions">
                           <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="selectDobotPlusPlugin(name)">打开</button>
-                          <button class="btn btn-secondary btn-xs" @click="uninstallDobotPlusPlugin(name)">✕</button>
+                          <button class="btn btn-secondary btn-xs" :disabled="!settingsWritable" @click="uninstallDobotPlusPlugin(name)">✕</button>
                         </td>
                       </tr>
                     </tbody>
@@ -1210,7 +1264,7 @@
                           <span v-if="item.local && item.controller" class="text-muted" style="font-weight:400">· 本地+控制器</span>
                         </td>
                         <td class="table-actions">
-                          <button class="btn btn-primary btn-xs" :disabled="installingDobotPlus || installingName === item.name" @click="installDobotPlusPlugin(item.name)">
+                          <button class="btn btn-primary btn-xs" :disabled="installingDobotPlus || installingName === item.name || !settingsWritable" @click="installDobotPlusPlugin(item.name)">
                             {{ installingName === item.name ? '安装中...' : '安装' }}
                           </button>
                         </td>
@@ -1222,7 +1276,7 @@
                   </div>
                   <div style="display:flex;gap:6px;margin-top:10px">
                     <input v-model.trim="dobotPlusInstallName" class="input-sm settings-alias-input" placeholder="插件完整名（手动安装）" @keyup.enter="installDobotPlusPlugin()" />
-                    <button class="btn btn-secondary btn-sm" :disabled="!dobotPlusInstallName || installingDobotPlus" @click="installDobotPlusPlugin()">
+                    <button class="btn btn-secondary btn-sm" :disabled="!dobotPlusInstallName || installingDobotPlus || !settingsWritable" @click="installDobotPlusPlugin()">
                       {{ installingDobotPlus ? '安装中...' : '安装' }}
                     </button>
                   </div>
@@ -1232,7 +1286,7 @@
                   <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                     <input type="file" accept=".zip" class="input-sm dobotplus-file-input" @change="onDobotPlusFileChange" />
                     <span v-if="dobotPlusUploadFile" class="text-muted" style="font-size:0.7rem">{{ dobotPlusUploadFile.name }}</span>
-                    <button class="btn btn-primary btn-sm" :disabled="!dobotPlusUploadFile || uploadingDobotPlus || !isConnected" @click="uploadDobotPlusPlugin">
+                    <button class="btn btn-primary btn-sm" :disabled="!dobotPlusUploadFile || uploadingDobotPlus || !isConnected || !settingsWritable" @click="uploadDobotPlusPlugin">
                       {{ uploadingDobotPlus ? '上传安装中...' : '上传并安装' }}
                     </button>
                   </div>
@@ -1285,8 +1339,8 @@
                 <div class="settings-section">
                   <div class="settings-section-header"><h4>标定导出目录</h4></div>
                   <div style="display:flex;gap:8px">
-                    <input v-model.trim="calibExportDir" class="input-sm settings-alias-input" placeholder="服务端导出目录，如 ./data/exports" @keyup.enter="saveCalibExportDir" />
-                    <button class="btn btn-primary btn-sm" :disabled="!calibExportDir" @click="saveCalibExportDir">
+                    <input v-model.trim="calibExportDir" class="input-sm settings-alias-input" placeholder="服务端导出目录，如 ./data/exports" @keyup.enter="saveCalibExportDir" :disabled="!isAdminUser" />
+                    <button class="btn btn-primary btn-sm" :disabled="!calibExportDir || savingCalibExportDir || !isAdminUser" @click="saveCalibExportDir">
                       {{ savingCalibExportDir ? '保存中...' : '保存' }}
                     </button>
                   </div>
@@ -1335,8 +1389,22 @@ import {
 } from '../services/offlineKin'
 import { deviceStore } from '../stores/deviceStore'
 import { clearWorkspace } from '../stores/workspaceState'
+import { userStore } from '../stores/userStore'
 import Toast from '../components/Toast.vue'
 import type { DeviceConfig } from 'docat-shared/types'
+import {
+  maxLoadGramsForDevice,
+  validateLoadWeight,
+  validateOffset,
+  validateAlias,
+  validateIpv4,
+  validateSsid,
+  validateWifiPassword,
+  validateDate,
+  validateTime,
+  validateTimeZone,
+  validateUserPassword,
+} from '../services/settingsValidation'
 import {
   fitCalibration,
   applyCalibration,
@@ -1597,6 +1665,39 @@ const settingsTabs = [
   { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
   { key: 'docat', icon: '🐱', label: 'docat' },
 ]
+
+// 设置写操作保护：viewer 只读（对齐服务端 requireOperator）；自动模式下禁止修改（对齐 OpenDobot46 isShowMask）
+const settingsWritable = computed(() => {
+  if (isMock) return true
+  return userStore.currentUser?.role !== 'viewer' && !isAutoMode.value && isConnected.value
+})
+
+/** docat 管理员（标定导出目录等系统级设置需要 admin） */
+const isAdminUser = computed(() => userStore.currentUser?.role === 'admin')
+
+/** 危险操作确认（复用 Toast actions，常驻直至用户选择） */
+function confirmAction(message: string, onConfirm: () => void | Promise<void>, confirmLabel = '确认删除') {
+  toastRef.value?.error(message, {
+    duration: 0,
+    actions: [
+      { label: '取消', handler: () => {} },
+      { label: confirmLabel, variant: 'danger', handler: () => { void onConfirm() } },
+    ],
+  })
+}
+
+/** 切换 tab 时清理各表单的编辑状态，避免残留 */
+function resetSettingsEditState() {
+  editingCoordIdx.value = -1
+  editingCoordType.value = ''
+  addingCoord.value = false
+  editingPostureIdx.value = null
+  renamingPostureKey.value = ''
+  editingUserIdx.value = null
+  addingUser.value = false
+  addingPreset.value = false
+  editingPresetIdx.value = null
+}
 const loadingLogs = ref(false)
 const logListRef = ref<HTMLElement>()
 const logPanelTab = ref<'alarms' | 'history'>('alarms')
@@ -3921,6 +4022,25 @@ const editPresetForm = reactive<LoadConfigItem>({ name: '', centerX: 0, centerY:
 const loadingLoadData = ref(false)
 const loadParamsEditable = computed(() => isConnected.value && !loadingLoadData.value)
 
+/** 当前机型最大负载（g），未知机型为 null */
+const maxLoadG = computed(() => maxLoadGramsForDevice(device.value?.type || device.value?.name))
+
+/** 负载表单校验：重量 ≤ 机型最大负载，质心偏移 ±1000mm（对齐 OpenDobot46 ruler） */
+function validateLoadForm(form: { loadValue: number; centerX: number; centerY: number; centerZ: number }): string | null {
+  const weightErr = validateLoadWeight(Number(form.loadValue), device.value?.type || device.value?.name)
+  if (weightErr) return weightErr
+  const axes: Array<[number, string]> = [
+    [Number(form.centerX), 'X'],
+    [Number(form.centerY), 'Y'],
+    [Number(form.centerZ), 'Z'],
+  ]
+  for (const [v, label] of axes) {
+    const offErr = validateOffset(v)
+    if (offErr) return `质心${label}${offErr}`
+  }
+  return null
+}
+
 // 当前负载名称：仅当与设备上的预设匹配时才视为预设挡位（自定义挡位不显示名称）
 const loadBadgeName = computed(() => {
   const name = loadParamsForm.name.trim()
@@ -3970,6 +4090,11 @@ async function loadLoadData() {
 }
 
 async function saveCurrentLoad() {
+  const formErr = validateLoadForm(loadParamsForm)
+  if (formErr) {
+    toastRef.value?.error(formErr)
+    return
+  }
   try {
     if (isMock) {
       toastRef.value?.success('负载参数已应用（Mock）')
@@ -4013,8 +4138,14 @@ function cancelAddPreset() {
 }
 
 async function confirmAddPreset() {
-  if (!addPresetForm.name.trim()) {
-    toastRef.value?.error('请填写预设名称')
+  const nameErr = validateAlias(addPresetForm.name)
+  if (nameErr) {
+    toastRef.value?.error(nameErr)
+    return
+  }
+  const formErr = validateLoadForm(addPresetForm)
+  if (formErr) {
+    toastRef.value?.error(formErr)
     return
   }
   if (loadConfigs.value.some(c => c.name === addPresetForm.name.trim())) {
@@ -4037,8 +4168,14 @@ function cancelEditPreset() {
 }
 
 async function saveEditPreset(idx: number) {
-  if (!editPresetForm.name.trim()) {
-    toastRef.value?.error('请填写预设名称')
+  const nameErr = validateAlias(editPresetForm.name)
+  if (nameErr) {
+    toastRef.value?.error(nameErr)
+    return
+  }
+  const formErr = validateLoadForm(editPresetForm)
+  if (formErr) {
+    toastRef.value?.error(formErr)
     return
   }
   if (loadConfigs.value.some((c, i) => i !== idx && c.name === editPresetForm.name.trim())) {
@@ -4053,17 +4190,18 @@ async function saveEditPreset(idx: number) {
 
 async function deletePreset(idx: number) {
   const name = loadConfigs.value[idx].name
-  loadConfigs.value.splice(idx, 1)
-  if (editingPresetIdx.value === idx) editingPresetIdx.value = null
-  await saveLoadConfig()
-  toastRef.value?.success(`预设 "${name}" 已删除`)
+  confirmAction(`删除负载预设「${name}」？`, async () => {
+    loadConfigs.value.splice(idx, 1)
+    if (editingPresetIdx.value === idx) editingPresetIdx.value = null
+    await saveLoadConfig()
+    toastRef.value?.success(`预设 "${name}" 已删除`)
+  })
 }
 
-// Watch: reload load data when settings panel opens
+// Watch: reload settings data when settings panel opens / tab changes
 watch(showSettings, (val) => {
   if (val) {
-    loadLoadData()
-    // 面板打开时也加载当前 tab 的数据（默认 system tab 不触发 settingsTab 变更）
+    // 面板打开时加载当前 tab 的数据（默认 system tab 不触发 settingsTab 变更）
     loadSettingsTabData(settingsTab.value)
   }
 })
@@ -4088,6 +4226,12 @@ async function loadSystemTime() {
   if (res.success && res.data) Object.assign(sysTimeForm, res.data)
 }
 async function saveSystemTime() {
+  const dErr = validateDate(sysTimeForm.date)
+  if (dErr) { toastRef.value?.error(dErr); return }
+  const tErr = validateTime(sysTimeForm.time)
+  if (tErr) { toastRef.value?.error(tErr); return }
+  const zErr = validateTimeZone(sysTimeForm.timeZone)
+  if (zErr) { toastRef.value?.error(zErr); return }
   const res = await api.setSystemTime(deviceId, { ...sysTimeForm })
   if (res.success) toastRef.value?.success('系统时间已保存')
   else toastRef.value?.error(`保存时间失败：${res.error?.message}`)
@@ -4221,20 +4365,33 @@ function startAddUser() {
   Object.assign(addUserForm, { level: maxLevel + 1, name: '', password: '', enablePassword: false })
 }
 async function confirmAddUser() {
-  if (!addUserForm.name.trim()) { toastRef.value?.error('名称不能为空'); return }
+  const nameErr = validateAlias(addUserForm.name)
+  if (nameErr) { toastRef.value?.error(nameErr); return }
+  if (addUserForm.enablePassword) {
+    const pwdErr = validateUserPassword(addUserForm.password, true)
+    if (pwdErr) { toastRef.value?.error(pwdErr); return }
+  }
   ctrlUserList.value.list.push({ ...addUserForm })
   addingUser.value = false
   await saveUserList()
 }
 async function saveEditUser(i: number) {
-  if (!editUserForm.name.trim()) { toastRef.value?.error('名称不能为空'); return }
+  const nameErr = validateAlias(editUserForm.name)
+  if (nameErr) { toastRef.value?.error(nameErr); return }
+  if (editUserForm.enablePassword) {
+    const pwdErr = validateUserPassword(editUserForm.password, true)
+    if (pwdErr) { toastRef.value?.error(pwdErr); return }
+  }
   ctrlUserList.value.list[i] = { ...editUserForm }
   editingUserIdx.value = null
   await saveUserList()
 }
-async function deleteUser(i: number) {
-  ctrlUserList.value.list.splice(i, 1)
-  await saveUserList()
+function deleteUser(i: number) {
+  const u = ctrlUserList.value.list[i]
+  confirmAction(`删除用户「${isFixedLevel(u.level) ? levelName(u.level) : u.name}」？`, async () => {
+    ctrlUserList.value.list.splice(i, 1)
+    await saveUserList()
+  })
 }
 async function saveUserList() {
   const res = await api.setControllerUsers(deviceId, ctrlUserList.value)
@@ -4257,43 +4414,74 @@ const toolCoords = ref<api.CoordItem[]>([])
 const userCoords = ref<api.CoordItem[]>([])
 const editingCoordIdx = ref(-1)
 const editingCoordType = ref('')
-const editCoordForm = reactive<api.CoordItem>({ name: '', enable: true, x: 0, y: 0, z: 0, r: 0 })
+const editCoordForm = reactive<api.CoordItem>({ id: '', alias: '', enable: true, x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
 const addingCoord = ref(false)
 const addCoordType = ref('')
-const addCoordForm = reactive<api.CoordItem>({ name: '', enable: true, x: 0, y: 0, z: 0, r: 0 })
+const addCoordForm = reactive<api.CoordItem>({ id: '', alias: '', enable: true, x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
 
 async function loadCoords() {
   const [toolR, userR] = await Promise.all([api.getToolCoordinate(deviceId), api.getUserCoordinate(deviceId)])
   if (toolR.success && toolR.data) toolCoords.value = toolR.data.coordList
   if (userR.success && userR.data) userCoords.value = userR.data.coordList
 }
-function startAddCoord(type: string) { addingCoord.value = true; addCoordType.value = type; Object.assign(addCoordForm, { name: '', enable: true, x: 0, y: 0, z: 0, r: 0 }) }
+/** 新增坐标系：id 取当前列表长度（对齐 OpenDobot46：name = id = 索引） */
+function nextCoordId(list: api.CoordItem[]): string {
+  const used = new Set(list.map(c => String(c.id)).filter(Boolean))
+  let n = 0
+  while (used.has(String(n))) n++
+  return String(n)
+}
+function startAddCoord(type: string) {
+  addingCoord.value = true
+  addCoordType.value = type
+  const list = type === 'tool' ? toolCoords.value : userCoords.value
+  Object.assign(addCoordForm, { id: nextCoordId(list), alias: '', enable: true, x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
+}
 async function confirmAddCoord() {
-  if (!addCoordForm.name.trim()) { toastRef.value?.error('请填写名称'); return }
-  if (addCoordType.value === 'tool') toolCoords.value.push({ ...addCoordForm })
-  else userCoords.value.push({ ...addCoordForm })
+  const nameErr = validateAlias(addCoordForm.alias)
+  if (nameErr) { toastRef.value?.error(nameErr); return }
+  const item: api.CoordItem = { ...addCoordForm, alias: addCoordForm.alias.trim() }
+  if (addCoordType.value === 'tool') toolCoords.value.push(item)
+  else userCoords.value.push(item)
   addingCoord.value = false
   await saveCoords(addCoordType.value)
 }
 function startEditCoord(type: string, idx: number) {
   editingCoordIdx.value = idx; editingCoordType.value = type
   const src = type === 'tool' ? toolCoords.value[idx] : userCoords.value[idx]
-  Object.assign(editCoordForm, src)
+  Object.assign(editCoordForm, {
+    id: String(src.id ?? idx),
+    alias: src.alias ?? '',
+    enable: Boolean(src.enable),
+    x: Number(src.x ?? 0),
+    y: Number(src.y ?? 0),
+    z: Number(src.z ?? 0),
+    rx: Number(src.rx ?? 0),
+    ry: Number(src.ry ?? 0),
+    rz: Number(src.rz ?? 0),
+    raw: src.raw,
+  })
 }
 async function saveEditCoord() {
-  if (!editCoordForm.name.trim()) { toastRef.value?.error('请填写名称'); return }
+  const nameErr = validateAlias(editCoordForm.alias)
+  if (nameErr) { toastRef.value?.error(nameErr); return }
+  const item: api.CoordItem = { ...editCoordForm, alias: editCoordForm.alias.trim() }
   if (editingCoordType.value === 'tool') {
-    toolCoords.value[editingCoordIdx.value] = { ...editCoordForm }
+    toolCoords.value[editingCoordIdx.value] = item
   } else {
-    userCoords.value[editingCoordIdx.value] = { ...editCoordForm }
+    userCoords.value[editingCoordIdx.value] = item
   }
   editingCoordIdx.value = -1
   await saveCoords(editingCoordType.value)
 }
-async function deleteCoord(type: string, idx: number) {
-  if (type === 'tool') toolCoords.value.splice(idx, 1)
-  else userCoords.value.splice(idx, 1)
-  await saveCoords(type)
+function deleteCoord(type: string, idx: number) {
+  const list = type === 'tool' ? toolCoords.value : userCoords.value
+  const name = list[idx]?.alias || '(未命名)'
+  confirmAction(`删除${type === 'tool' ? '工具' : '用户'}坐标系「${name}」？`, async () => {
+    if (type === 'tool') toolCoords.value.splice(idx, 1)
+    else userCoords.value.splice(idx, 1)
+    await saveCoords(type)
+  })
 }
 async function saveCoords(type: string) {
   const data = { coordList: type === 'tool' ? toolCoords.value : userCoords.value }
@@ -4541,6 +4729,8 @@ function startEditPosture(i: number) {
   editPostureForm.pose = cur.pose ? { ...cur.pose } : emptyPose()
 }
 async function saveEditPosture(i: number) {
+  const nameErr = validateAlias(editPostureForm.name)
+  if (nameErr) { toastRef.value?.error(nameErr); return }
   customPostures.value[i] = normalizePostureItem({
     name: String(editPostureForm.name || '').trim() || nextAutoName(),
     type: editPostureForm.type === 'cartesian' ? 'cartesian' : 'joint',
@@ -4550,7 +4740,13 @@ async function saveEditPosture(i: number) {
   editingPostureIdx.value = null
   await savePostures()
 }
-async function deletePosture(i: number) { customPostures.value.splice(i, 1); await savePostures() }
+function deletePosture(i: number) {
+  const name = customPostures.value[i]?.name || '(未命名)'
+  confirmAction(`删除姿态预设「${name}」？`, async () => {
+    customPostures.value.splice(i, 1)
+    await savePostures()
+  })
+}
 function deletePostureItem(ctrlIdx: number) { deletePosture(ctrlIdx) }
 async function savePostures(successMessage?: string): Promise<boolean> {
   // 规范化后再提交，避免脏数据
@@ -4638,6 +4834,8 @@ function confirmRenamePosture(p: PostureItem) {
     renamingPostureKey.value = ''
     return
   }
+  const nameErr = validateAlias(renamePostureValue.value)
+  if (nameErr) { toastRef.value?.error(nameErr); return }
   if (p._controllerIdx !== undefined) {
     customPostures.value[p._controllerIdx] = {
       ...normalizePostureItem(customPostures.value[p._controllerIdx], p._controllerIdx),
@@ -4695,47 +4893,215 @@ function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?:
 
 // ─── Motion Parameters ─────────────────────────
 
-const motionParamsData = reactive<Record<string, Record<string, number> | null>>({
-  playbackJoint: null, playbackCoordinate: null, teachJoint: null, teachCoordinate: null,
-})
-const motionSections = computed(() => [
-  { key: 'playbackJoint', label: '复现 - 关节参数', data: motionParamsData.playbackJoint },
-  { key: 'playbackCoordinate', label: '复现 - 坐标参数', data: motionParamsData.playbackCoordinate },
-  { key: 'teachJoint', label: '示教/点动 - 关节参数', data: motionParamsData.teachJoint },
-  { key: 'teachCoordinate', label: '示教/点动 - 坐标参数', data: motionParamsData.teachCoordinate },
-])
-async function loadMotionParams(key: string) {
-  const fnMap: Record<string, () => Promise<{ success: boolean; data?: Record<string, unknown>; error?: { code: number; message: string } }>> = {
-    playbackJoint: () => api.getPlaybackJointParams(deviceId),
-    playbackCoordinate: () => api.getPlaybackCoordinateParams(deviceId),
-    teachJoint: () => api.getTeachJointParams(deviceId),
-    teachCoordinate: () => api.getTeachCoordinateParams(deviceId),
-  }
-  const res = await fnMap[key]()
-  if (res.success && res.data) motionParamsData[key] = res.data as Record<string, number>
-  else toastRef.value?.error(`读取 ${key} 失败：${res.error?.message}`)
+interface MotionRowModel {
+  label: string
+  velocity: number
+  acceleration: number
+  jerk: number
+  suffixVel: string
+  suffixAcc: string
+  suffixJerk: string
 }
-async function saveMotionParams(key: string) {
-  const data = motionParamsData[key]
-  if (!data) return
-  const fnMap: Record<string, (p: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: { code: number; message: string } }>> = {
-    playbackJoint: (d) => api.setPlaybackJointParams(deviceId, d),
-    playbackCoordinate: (d) => api.setPlaybackCoordinateParams(deviceId, d),
-    teachJoint: (d) => api.setTeachJointParams(deviceId, d),
-    teachCoordinate: (d) => api.setTeachCoordinateParams(deviceId, d),
+
+interface MotionGroupModel {
+  key: 'teach' | 'playback'
+  label: string
+  showJerk: boolean
+  loading: boolean
+  saving: boolean
+  loaded: boolean
+  loadError: string
+  rows: MotionRowModel[]
+  /** 坐标组的额外字段（如 playback coordinate 的 jerkMulti），写回时保留 */
+  extra: Record<string, unknown>
+}
+
+const MOTION_LABELS = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6', 'X/Y/Z', 'RX/RY/RZ']
+
+function makeMotionRows(): MotionRowModel[] {
+  return MOTION_LABELS.map((label, i) => {
+    const unit = i === 6 ? 'mm' : '°'
+    return {
+      label,
+      velocity: 0,
+      acceleration: 0,
+      jerk: 0,
+      suffixVel: `${unit}/s`,
+      suffixAcc: `${unit}/s²`,
+      suffixJerk: `${unit}/s³`,
+    }
+  })
+}
+
+const motionGroups = reactive<Record<'teach' | 'playback', MotionGroupModel>>({
+  teach: {
+    key: 'teach', label: '示教设置', showJerk: false,
+    loading: false, saving: false, loaded: false, loadError: '', rows: makeMotionRows(), extra: {},
+  },
+  playback: {
+    key: 'playback', label: '再现设置', showJerk: true,
+    loading: false, saving: false, loaded: false, loadError: '', rows: makeMotionRows(), extra: {},
+  },
+})
+
+const motionGroupsList = computed(() => [motionGroups.teach, motionGroups.playback])
+
+function motionArrays(raw: Record<string, unknown>): { velocity: number[]; acceleration: number[]; jerk: number[] } {
+  const toArr = (v: unknown) => (Array.isArray(v) ? v.map(n => Number(n) || 0) : [])
+  return { velocity: toArr(raw.velocity), acceleration: toArr(raw.acceleration), jerk: toArr(raw.jerk) }
+}
+
+/** 读取一组运动参数（示教 / 再现），填充 8 行（J1..J6、X/Y/Z、RX/RY/RZ） */
+async function loadMotionGroup(key: 'teach' | 'playback') {
+  const grp = motionGroups[key]
+  grp.loading = true
+  grp.loadError = ''
+  try {
+    const [jointR, coordR] = key === 'teach'
+      ? [await api.getTeachJointParams(deviceId), await api.getTeachCoordinateParams(deviceId)]
+      : [await api.getPlaybackJointParams(deviceId), await api.getPlaybackCoordinateParams(deviceId)]
+    if (!jointR.success || !jointR.data || !coordR.success || !coordR.data) {
+      grp.loadError = jointR.error?.message || coordR.error?.message || '读取失败'
+      grp.loaded = false
+      return
+    }
+    const j = motionArrays(jointR.data as Record<string, unknown>)
+    const c = motionArrays(coordR.data as Record<string, unknown>)
+    const rows = grp.rows
+    for (let i = 0; i < 6; i++) {
+      rows[i].velocity = j.velocity[i] ?? 0
+      rows[i].acceleration = j.acceleration[i] ?? 0
+      rows[i].jerk = j.jerk[i] ?? 0
+    }
+    rows[6].velocity = c.velocity[0] ?? 0
+    rows[6].acceleration = c.acceleration[0] ?? 0
+    rows[6].jerk = c.jerk[0] ?? 0
+    rows[7].velocity = c.velocity[1] ?? 0
+    rows[7].acceleration = c.acceleration[1] ?? 0
+    rows[7].jerk = c.jerk[1] ?? 0
+    grp.extra = { ...(coordR.data as Record<string, unknown>) }
+    grp.loaded = true
+  } catch (err) {
+    grp.loadError = (err as Error).message
+    grp.loaded = false
+  } finally {
+    grp.loading = false
   }
-  const res = await fnMap[key](data)
-  if (res.success) toastRef.value?.success(`${key} 已保存`)
-  else toastRef.value?.error(`保存失败：${res.error?.message}`)
+}
+
+/** 保存一组运动参数（joint + coordinate 两个接口） */
+async function saveMotionGroup(key: 'teach' | 'playback') {
+  const grp = motionGroups[key]
+  if (!grp.loaded) return
+  for (const row of grp.rows) {
+    for (const f of ['velocity', 'acceleration', 'jerk'] as const) {
+      const v = row[f]
+      if (!Number.isFinite(v) || v < 0) {
+        const label = f === 'velocity' ? '速度' : f === 'acceleration' ? '加速度' : '加加速度'
+        toastRef.value?.error(`${row.label} 的${label}必须 ≥ 0`)
+        return
+      }
+    }
+  }
+  const joint = {
+    velocity: grp.rows.slice(0, 6).map(r => r.velocity),
+    acceleration: grp.rows.slice(0, 6).map(r => r.acceleration),
+    jerk: grp.rows.slice(0, 6).map(r => r.jerk),
+  }
+  const coordinate = {
+    ...grp.extra,
+    velocity: [grp.rows[6].velocity, grp.rows[7].velocity],
+    acceleration: [grp.rows[6].acceleration, grp.rows[7].acceleration],
+    jerk: [grp.rows[6].jerk, grp.rows[7].jerk],
+  }
+  grp.saving = true
+  try {
+    const [r1, r2] = key === 'teach'
+      ? [await api.setTeachJointParams(deviceId, joint), await api.setTeachCoordinateParams(deviceId, coordinate)]
+      : [await api.setPlaybackJointParams(deviceId, joint), await api.setPlaybackCoordinateParams(deviceId, coordinate)]
+    if (!r1.success || !r2.success) {
+      toastRef.value?.error(`保存失败：${r1.error?.message || r2.error?.message}`)
+      return
+    }
+    toastRef.value?.success(`${grp.label}已保存`)
+    await loadMotionGroup(key)
+  } catch (err) {
+    toastRef.value?.error(`保存出错：${(err as Error).message}`)
+  } finally {
+    grp.saving = false
+  }
+}
+
+/** 恢复默认值：从 /properties/default 读取 def 并写回 */
+async function resetMotionGroup(key: 'teach' | 'playback') {
+  const grp = motionGroups[key]
+  confirmAction(`将 ${grp.label}恢复为默认值？`, async () => {
+    const res = await api.getMotionDefaults(deviceId)
+    if (!res.success || !res.data) {
+      toastRef.value?.error(`读取默认值失败：${res.error?.message}`)
+      return
+    }
+    const section = (res.data[key] ?? {}) as Record<string, unknown>
+    const joint = (section.joint ?? {}) as Record<string, unknown>
+    const coord = (section.coordinate ?? {}) as Record<string, unknown>
+    const defOf = (holder: Record<string, unknown>, field: string, i: number): number => {
+      const list = Array.isArray(holder[field]) ? (holder[field] as Array<Record<string, unknown>>) : []
+      return Number(list[i]?.def ?? 0)
+    }
+    const rows = grp.rows
+    for (let i = 0; i < 6; i++) {
+      rows[i].velocity = defOf(joint, 'velocity', i)
+      rows[i].acceleration = defOf(joint, 'acceleration', i)
+      rows[i].jerk = defOf(joint, 'jerk', i)
+    }
+    rows[6].velocity = defOf(coord, 'velocity', 0)
+    rows[6].acceleration = defOf(coord, 'acceleration', 0)
+    rows[6].jerk = defOf(coord, 'jerk', 0)
+    rows[7].velocity = defOf(coord, 'velocity', 1)
+    rows[7].acceleration = defOf(coord, 'acceleration', 1)
+    rows[7].jerk = defOf(coord, 'jerk', 1)
+    await saveMotionGroup(key)
+  }, '恢复默认')
+}
+
+/** 切换「运动」tab 时自动读取全部两组参数 */
+async function loadAllMotionParams() {
+  await Promise.all([loadMotionGroup('teach'), loadMotionGroup('playback')])
 }
 
 // ─── Communication ─────────────────────────────
 
 const busForm = reactive({ type: '', baudRate: 115200, slaveId: 1, dataBits: 8, stopBits: 1, parity: 'none' })
+async function loadBus() {
+  const res = await api.getBus(deviceId)
+  if (res.success && res.data) {
+    const d = res.data as Record<string, unknown>
+    busForm.type = String(d.type ?? busForm.type)
+    busForm.baudRate = Number(d.baudRate ?? busForm.baudRate) || 0
+    busForm.slaveId = Number(d.slaveId ?? busForm.slaveId) || 0
+    busForm.dataBits = Number(d.dataBits ?? busForm.dataBits) || 0
+    busForm.stopBits = Number(d.stopBits ?? busForm.stopBits) || 0
+    busForm.parity = String(d.parity ?? busForm.parity)
+  } else if (res.error?.code !== 40401) {
+    toastRef.value?.error(`读取总线失败：${res.error?.message}`)
+  }
+}
 async function saveBus() {
+  if (!Number.isFinite(busForm.baudRate) || busForm.baudRate < 1200 || busForm.baudRate > 4000000) {
+    toastRef.value?.error('波特率范围 1200 ~ 4000000')
+    return
+  }
+  if (!Number.isFinite(busForm.slaveId) || busForm.slaveId < 1 || busForm.slaveId > 247) {
+    toastRef.value?.error('从站 ID 范围 1 ~ 247')
+    return
+  }
   const res = await api.setBus(deviceId, { ...busForm })
-  if (res.success) toastRef.value?.success('总线设置已保存')
-  else toastRef.value?.error(`总线保存失败：${res.error?.message}`)
+  if (res.success) {
+    toastRef.value?.success('总线设置已保存')
+    loadBus()
+  } else {
+    toastRef.value?.error(`总线保存失败：${res.error?.message}`)
+  }
 }
 
 const wifiForm = reactive<Record<string, unknown>>({ ssid: '', passWd: '', enable: false })
@@ -4744,12 +5110,23 @@ async function loadWiFi() {
   if (res.success && res.data) Object.assign(wifiForm, res.data)
 }
 async function saveWiFi() {
+  const enabled = !!wifiForm.enable
+  if (enabled) {
+    const ssidErr = validateSsid(String(wifiForm.ssid ?? ''))
+    if (ssidErr) { toastRef.value?.error(ssidErr); return }
+    const pwdErr = validateWifiPassword(String(wifiForm.passWd ?? ''))
+    if (pwdErr) { toastRef.value?.error(pwdErr); return }
+  }
   const res = await api.setWiFi(deviceId, { ...wifiForm })
-  if (res.success) toastRef.value?.success('WiFi 设置已保存')
-  else toastRef.value?.error(`WiFi 保存失败：${res.error?.message}`)
+  if (res.success) {
+    toastRef.value?.success('WiFi 设置已保存')
+    loadWiFi()
+  } else {
+    toastRef.value?.error(`WiFi 保存失败：${res.error?.message}`)
+  }
 }
 
-const ethForm = reactive({ dhcp: true, ip: '', mask: '', gateway: '', dns: '' })
+const ethForm = reactive({ dhcp: true, ip: '', mask: '', gateway: '' })
 async function loadEthernet() {
   const res = await api.getEthernet(deviceId)
   if (res.success && res.data) {
@@ -4758,13 +5135,27 @@ async function loadEthernet() {
     ethForm.ip = String(d.ip ?? '')
     ethForm.mask = String(d.mask ?? '')
     ethForm.gateway = String(d.gateway ?? '')
-    ethForm.dns = String(d.dns ?? '')
   }
 }
 async function saveEthernet() {
-  const res = await api.setEthernet(deviceId, { dhcp: ethForm.dhcp, ip: ethForm.ip, mask: ethForm.mask, gateway: ethForm.gateway, dns: ethForm.dns })
-  if (res.success) toastRef.value?.success('以太网设置已保存')
-  else toastRef.value?.error(`以太网保存失败：${res.error?.message}`)
+  if (!ethForm.dhcp) {
+    const checks: Array<[string, string]> = [
+      ['ip', 'IP'],
+      ['mask', '子网掩码'],
+      ['gateway', '网关'],
+    ]
+    for (const [key, label] of checks) {
+      const err = validateIpv4(ethForm[key as 'ip'], label)
+      if (err) { toastRef.value?.error(err); return }
+    }
+  }
+  const res = await api.setEthernet(deviceId, { dhcp: ethForm.dhcp, ip: ethForm.ip, mask: ethForm.mask, gateway: ethForm.gateway })
+  if (res.success) {
+    toastRef.value?.success('以太网设置已保存')
+    loadEthernet()
+  } else {
+    toastRef.value?.error(`以太网保存失败：${res.error?.message}`)
+  }
 }
 
 // ─── Dobot+ ─────────────────────────────────────
@@ -5002,16 +5393,18 @@ async function uploadDobotPlusPlugin() {
 }
 
 async function uninstallDobotPlusPlugin(name: string) {
-  try {
-    const res = await api.manageDobotPlus(deviceId, name, 'uninstall')
-    if (res.success) {
-      toastRef.value?.success(`插件 "${name}" 已卸载`)
-      if (activeDobotPlus.value === name || activeDobotPlusIframeName.value === name) closeDobotPlusPanel()
-      await Promise.all([loadDobotPlusList(), loadDobotPlusCatalog(), loadDobotPlusLocal()])
-    } else {
-      toastRef.value?.error(`卸载失败：${res.error?.message}`)
-    }
-  } catch (err) { toastRef.value?.error(`卸载出错：${(err as Error).message}`) }
+  confirmAction(`卸载插件「${name}」？`, async () => {
+    try {
+      const res = await api.manageDobotPlus(deviceId, name, 'uninstall')
+      if (res.success) {
+        toastRef.value?.success(`插件 "${name}" 已卸载`)
+        if (activeDobotPlus.value === name || activeDobotPlusIframeName.value === name) closeDobotPlusPanel()
+        await Promise.all([loadDobotPlusList(), loadDobotPlusCatalog(), loadDobotPlusLocal()])
+      } else {
+        toastRef.value?.error(`卸载失败：${res.error?.message}`)
+      }
+    } catch (err) { toastRef.value?.error(`卸载出错：${(err as Error).message}`) }
+  }, '确认卸载')
 }
 
 /** 打开某个插件（顶部菜单入口：同时打开设置面板） */
@@ -5479,8 +5872,13 @@ function loadSettingsTabData(tab: string) {
   }
   else if (tab === 'users') loadUsers()
   else if (tab === 'coordinates') loadCoords()
+  else if (tab === 'load') loadLoadData()
   else if (tab === 'postures') loadPostures()
+  else if (tab === 'motion') loadAllMotionParams()
+  else if (tab === 'comm') { loadWiFi(); loadEthernet(); loadBus() }
+  else if (tab === 'dobotplus') { loadDobotPlusList(); loadDobotPlusCatalog(); loadDobotPlusLocal() }
   else if (tab === 'docat') loadCalibExportDir()
+  resetSettingsEditState()
 }
 
 // Watch settings tab to auto-load
@@ -6090,8 +6488,11 @@ onUnmounted(() => {
 .checkbox-xs { display: inline-flex; align-items: center; gap: 3px; font-size: 0.66rem; cursor: pointer; }
 .checkbox-xs input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--cyan-500); }
 
-.coord-add-row { display: flex; gap: 6px; align-items: center; padding: 8px 0; }
-.motion-params-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.coord-add-row { display: flex; gap: 6px; align-items: center; padding: 8px 0; flex-wrap: wrap; }
+.motion-table { min-width: 460px; }
+.motion-cell { display: flex; align-items: center; gap: 6px; }
+.motion-input { width: 84px; }
+.motion-unit { font-size: 0.62rem; color: var(--text-muted); white-space: nowrap; }
 
 .dobotplus-args-input {
   width: 100%; margin-top: 8px; padding: 6px 8px;

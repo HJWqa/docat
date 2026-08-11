@@ -238,6 +238,12 @@ export abstract class DeviceDriver {
 
   // ─── 通讯设置 ──────────────────────────────────
 
+  /** 获取总线通讯参数 */
+  abstract getBus(): Promise<Record<string, unknown>>
+
+  /** 获取运动参数默认值（/properties/default：teach/playback 的 velocity/acceleration/jerk min/max/def） */
+  abstract getMotionDefaults(): Promise<Record<string, unknown>>
+
   /** 设置总线通讯参数 */
   abstract setBus(params: Record<string, unknown>): Promise<void>
 
@@ -327,6 +333,7 @@ export interface CoordinateData {
 export interface CoordinateItem {
   id?: string
   name: string
+  alias?: string
   enable: boolean
   x?: number
   y?: number
@@ -335,4 +342,6 @@ export interface CoordinateItem {
   rx?: number
   ry?: number
   rz?: number
+  /** 控制器原始数据（params / rawP0..rawP5 / caliType），写回时透传保留标定数据 */
+  raw?: Record<string, unknown>
 }
