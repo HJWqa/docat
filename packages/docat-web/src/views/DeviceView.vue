@@ -874,7 +874,7 @@
                   <div class="load-fields" style="grid-template-columns:1fr 1fr 1fr">
                     <div class="load-field"><label>日期</label><input v-model.trim="sysTimeForm.date" class="input-sm" placeholder="YYYY-MM-DD" /></div>
                     <div class="load-field"><label>时间</label><input v-model.trim="sysTimeForm.time" class="input-sm" placeholder="HH:mm:ss" /></div>
-                    <div class="load-field"><label>时区</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="UTC+8" /></div>
+                    <div class="load-field"><label>时区</label><input v-model.trim="sysTimeForm.timeZone" class="input-sm" placeholder="Asia/Shanghai" /></div>
                   </div>
                   <div style="display:flex;gap:8px" class="mt-2">
                     <button class="btn btn-primary btn-sm" @click="saveSystemTime">应用</button>
@@ -4060,12 +4060,20 @@ async function deletePreset(idx: number) {
 
 // Watch: reload load data when settings panel opens
 watch(showSettings, (val) => {
-  if (val) loadLoadData()
+  if (val) {
+    loadLoadData()
+    // 面板打开时也加载当前 tab 的数据（默认 system tab 不触发 settingsTab 变更）
+    loadSettingsTabData(settingsTab.value)
+  }
 })
 
 // ─── System Settings ───────────────────────────
 
 const aliasInput = ref('')
+async function loadAlias() {
+  const res = await api.getDeviceAlias(deviceId)
+  if (res.success && res.data) aliasInput.value = res.data.alias ?? ''
+}
 async function saveAlias() {
   if (!aliasInput.value.trim()) { toastRef.value?.error('请填写别名'); return }
   const res = await api.setDeviceAlias(deviceId, aliasInput.value.trim())
@@ -4087,13 +4095,10 @@ async function saveSystemTime() {
 function syncLocalTime() {
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
-  const offsetMin = -now.getTimezoneOffset()
-  const sign = offsetMin >= 0 ? '+' : '-'
-  const absMin = Math.abs(offsetMin)
-  const tz = `UTC${sign}${Math.floor(absMin / 60)}${absMin % 60 ? `:${pad(absMin % 60)}` : ''}`
   sysTimeForm.date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
   sysTimeForm.time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
-  sysTimeForm.timeZone = tz
+  // 控制器要求 IANA 时区名（如 Asia/Shanghai），UTC+8 会被拒绝
+  sysTimeForm.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   saveSystemTime()
 }
 
@@ -4106,19 +4111,35 @@ function persistCheckDeviceTime() {
   localStorage.setItem(CHECK_TIME_KEY, checkDeviceTime.value ? '1' : '0')
 }
 
-/** 解析设备时间（含 UTC 偏移时区）为毫秒时间戳；无法解析返回 null */
+/** 解析设备时间为毫秒时间戳。
+ * 控制器返回的 timeZone 是 IANA 名（如 Asia/Shanghai），按 OpenDobot46 convertToUTCTime 方式解析；
+ * 无法解析时按浏览器本地墙钟兜底，并取最接近当前时刻的候选，避免时区语义差异导致误报 */
 function parseDeviceTime(t: { date?: string; time?: string; timeZone?: string }): number | null {
   if (!t.date || !t.time) return null
-  const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(t.date)
-  const tm = /^(\d{2}):(\d{2}):(\d{2})/.exec(t.time)
-  if (!dm || !tm) return null
-  let utc = Date.UTC(+dm[1], +dm[2] - 1, +dm[3], +tm[1], +tm[2], +tm[3])
-  const tzm = /UTC([+-])(\d{1,2})(?::?(\d{2}))?/i.exec(t.timeZone ?? '')
-  if (tzm) {
-    const offsetMin = (+tzm[2] * 60 + (+tzm[3] || 0)) * (tzm[1] === '-' ? -1 : 1)
-    utc -= offsetMin * 60000
+  const wall = Date.parse(`${t.date} ${t.time}`)
+  if (Number.isNaN(wall)) return null
+  const candidates: number[] = [wall - new Date().getTimezoneOffset() * 60000]
+  const tz = (t.timeZone ?? '').trim()
+  if (tz) {
+    try {
+      const name = new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'short' })
+        .formatToParts()
+        .find(p => p.type === 'timeZoneName')?.value
+      if (name) {
+        const parsed = Date.parse(`${t.date} ${t.time} ${name}`)
+        if (!Number.isNaN(parsed)) candidates.push(parsed)
+      }
+    } catch { /* 无效时区名，忽略 */ }
+    const m = /(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?/i.exec(tz)
+    if (m) {
+      const off = (+m[2] * 60 + (+m[3] || 0)) * (m[1] === '-' ? -1 : 1)
+      candidates.push(wall - off * 60000)
+    }
   }
-  return utc
+  const now = Date.now()
+  let best = candidates[0]
+  for (const c of candidates) if (Math.abs(c - now) < Math.abs(best - now)) best = c
+  return best
 }
 
 function formatDrift(ms: number): string {
@@ -5450,13 +5471,20 @@ watch(showTrajectory, (v) => {
   }
 })
 
-// Watch settings tab to auto-load
-watch(settingsTab, (tab) => {
-  if (tab === 'system') loadSystemTime()
+function loadSettingsTabData(tab: string) {
+  if (tab === 'system') {
+    loadSystemTime()
+    loadAlias()
+  }
   else if (tab === 'users') loadUsers()
   else if (tab === 'coordinates') loadCoords()
   else if (tab === 'postures') loadPostures()
   else if (tab === 'docat') loadCalibExportDir()
+}
+
+// Watch settings tab to auto-load
+watch(settingsTab, (tab) => {
+  loadSettingsTabData(tab)
 })
 
 // ─── Lifecycle ──────────────────────────────────

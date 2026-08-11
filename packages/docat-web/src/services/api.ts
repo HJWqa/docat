@@ -615,6 +615,10 @@ export async function setDeviceAlias(id: string, alias: string): Promise<ApiResp
   return request('POST', `/api/devices/${id}/deviceAlias`, { alias })
 }
 
+export async function getDeviceAlias(id: string): Promise<ApiResponse<{ alias: string }>> {
+  return request('GET', `/api/devices/${id}/deviceAlias`)
+}
+
 // ─── 标定导出 & 应用设置 ────────────────────────
 
 export interface CalibrationExportRow {

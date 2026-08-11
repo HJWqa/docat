@@ -1180,7 +1180,25 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
         const entry = pool.getDevice(request.params.id)
         if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
         await entry.driver.setDeviceAlias(request.body.alias)
+        // 控制器固件不支持读取别名（GET Unsupported method），服务端缓存一份用于回显
+        getDb().prepare('UPDATE devices SET alias = ? WHERE id = ?').run(request.body.alias ?? '', entry.id)
         return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/deviceAlias',
+    async (request, reply): Promise<ApiResponse<{ alias: string }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        const row = getDb().prepare('SELECT alias FROM devices WHERE id = ?').get(entry.id) as { alias?: string } | undefined
+        return { success: true, data: { alias: row?.alias ?? '' } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }

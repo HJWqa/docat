@@ -257,6 +257,16 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 009_orch_poses applied')
   }
 
+  // ─── 010: 设备别名（控制器不支持读取，服务端缓存）────
+  if (!applied.has('010_device_alias')) {
+    db.exec(`
+      ALTER TABLE devices ADD COLUMN alias TEXT NOT NULL DEFAULT '';
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('010_device_alias')").run()
+    console.log('[DB] Migration 010_device_alias applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 
