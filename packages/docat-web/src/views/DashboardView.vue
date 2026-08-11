@@ -469,6 +469,7 @@ async function doConnect(id: string, mode: 'exclusive' | 'virtual' = 'exclusive'
     } else if (code === 1001 || msg.includes('occupied') || msg.includes('无法连接')) {
       if (res.error?.status === 'occupied') {
         toastRef.value?.error(msg, {
+          duration: 10000,
           action: { label: 'vConnect', variant: 'virtual', handler: () => doConnect(id, 'virtual') },
         })
       } else {

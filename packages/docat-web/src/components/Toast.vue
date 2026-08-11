@@ -5,6 +5,8 @@
         v-for="t in toasts"
         :key="t.id"
         :class="['toast', `toast--${t.type}`]"
+        @mouseenter="pause(t)"
+        @mouseleave="resume(t)"
       >
         <span class="toast-icon">{{ iconMap[t.type] }}</span>
         <span class="toast-msg">{{ t.message }}</span>
@@ -32,7 +34,17 @@ interface ToastAction {
   variant?: 'danger' | 'virtual'
 }
 
-interface ToastItem { id: number; type: ToastType; message: string; actions?: ToastAction[] }
+interface ToastItem {
+  id: number
+  type: ToastType
+  message: string
+  actions?: ToastAction[]
+  timer?: ReturnType<typeof setTimeout>
+  remaining?: number
+  deadline?: number
+}
+
+const DEFAULTS: Record<ToastType, number> = { success: 3000, info: 4000, error: 8000 }
 
 const toasts = ref<ToastItem[]>([])
 let nextId = 0
@@ -47,20 +59,48 @@ function normalizeOpts(opts?: { action?: ToastAction; actions?: ToastAction[]; d
 
 function add(type: ToastType, message: string, opts?: ToastOptions) {
   const id = nextId++
-  toasts.value.push({ id, type, message, actions: opts?.actions })
-  if (opts?.duration && opts.duration > 0) {
-    setTimeout(() => remove(id), opts.duration)
+  const item: ToastItem = { id, type, message, actions: opts?.actions }
+  const duration = opts?.duration ?? DEFAULTS[type]
+  if (duration > 0) {
+    item.remaining = duration
+    item.timer = setTimeout(() => remove(id), duration)
+    item.deadline = Date.now() + duration
+  }
+  toasts.value.push(item)
+}
+
+function clearTimer(item: ToastItem) {
+  if (item.timer) {
+    clearTimeout(item.timer)
+    item.timer = undefined
   }
 }
 
 function remove(id: number) {
+  const item = toasts.value.find(t => t.id === id)
+  if (item) clearTimer(item)
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
 
+function pause(item: ToastItem) {
+  if (!item.timer || item.remaining === undefined || item.deadline === undefined) return
+  item.remaining = Math.max(0, item.deadline - Date.now())
+  clearTimer(item)
+}
+
+function resume(item: ToastItem) {
+  if (item.remaining === undefined) return
+  clearTimer(item)
+  if (item.remaining > 0) {
+    item.deadline = Date.now() + item.remaining
+    item.timer = setTimeout(() => remove(item.id), item.remaining)
+  }
+}
+
 defineExpose({
-  success: (m: string) => add('success', m),
+  success: (m: string, opts?: { action?: ToastAction; actions?: ToastAction[]; duration?: number }) => add('success', m, normalizeOpts(opts)),
   error: (m: string, opts?: { action?: ToastAction; actions?: ToastAction[]; duration?: number }) => add('error', m, normalizeOpts(opts)),
-  info: (m: string) => add('info', m),
+  info: (m: string, opts?: { action?: ToastAction; actions?: ToastAction[]; duration?: number }) => add('info', m, normalizeOpts(opts)),
 })
 </script>
 
