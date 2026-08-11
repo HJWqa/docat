@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSy
 import * as path from 'node:path'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
-import type { DevicePool, ConnectionMode } from '../../device/DevicePool.js'
+import type { DevicePool, ConnectionMode, DeviceEntry } from '../../device/DevicePool.js'
 import type { AccessScheduler } from '../../access/AccessScheduler.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
@@ -1612,6 +1612,47 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool, scheduler: 
       } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
     }
   )
+
+  // ─── 按键 / 电源 / 拖动 / 远程控制设置 ──────────
+
+  const settingsRoutePairs: Array<{
+    path: string
+    get: (entry: DeviceEntry) => Promise<Record<string, unknown>>
+    set: (entry: DeviceEntry, params: Record<string, unknown>) => Promise<void>
+  }> = [
+    { path: 'buttonMode', get: e => e.driver.getButtonMode(), set: (e, p) => e.driver.setButtonMode(p) },
+    { path: 'ccboxVoltage', get: e => e.driver.getCCBoxVoltage(), set: (e, p) => e.driver.setCCBoxVoltage(p) },
+    { path: 'dragSensivity', get: e => e.driver.getDragSensivity(), set: (e, p) => e.driver.setDragSensivity(p) },
+    { path: 'remoteIOCtrl', get: e => e.driver.getRemoteIOCtrl(), set: (e, p) => e.driver.setRemoteIOCtrl(p) },
+    { path: 'remoteModbus', get: e => e.driver.getRemoteModbus(), set: (e, p) => e.driver.setRemoteModbus(p) },
+  ]
+  for (const r of settingsRoutePairs) {
+    app.get<{ Params: { id: string } }>(
+      `/api/devices/:id/${r.path}`,
+      async (request, reply): Promise<ApiResponse<Record<string, unknown>>> => {
+        try {
+          await authMiddleware(request, reply)
+          if (reply.sent) return reply
+          const entry = pool.getDevice(request.params.id)
+          if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+          const data = await r.get(entry)
+          return { success: true, data }
+        } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+      }
+    )
+    app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+      `/api/devices/:id/${r.path}`,
+      async (request, reply): Promise<ApiResponse<null>> => {
+        try {
+          await authMiddleware(request, reply); if (reply.sent) return reply; requireOperator(request, reply)
+          const entry = pool.getDevice(request.params.id)
+          if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+          await r.set(entry, request.body)
+          return { success: true, data: null }
+        } catch (err) { return { success: false, error: { code: 50000, message: (err as Error).message } } }
+      }
+    )
+  }
 
   // ─── Dobot+ 插件管理 ──────────────────────────
 

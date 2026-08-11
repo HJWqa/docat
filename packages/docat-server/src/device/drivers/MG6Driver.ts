@@ -1341,6 +1341,119 @@ export class MG6Driver extends DeviceDriver {
     if (!reply.status) throw new Error(`Set Ethernet failed: ${reply.message}`)
   }
 
+  // ─── 按键设置 ──────────────────────────────────
+
+  async getButtonMode(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/runButtonModeE6',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setButtonMode(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/runButtonModeE6',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set button mode failed: ${reply.message}`)
+  }
+
+  // ─── 电源设置 ──────────────────────────────────
+
+  async getCCBoxVoltage(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/ccboxVoltage',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setCCBoxVoltage(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/ccboxVoltage',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set ccboxVoltage failed: ${reply.message}`)
+  }
+
+  // ─── 拖动设置 ──────────────────────────────────
+
+  async getDragSensivity(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/dragSensivity',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setDragSensivity(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/dragSensivity',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set dragSensivity failed: ${reply.message}`)
+  }
+
+  // ─── 远程控制 ──────────────────────────────────
+
+  async getRemoteIOCtrl(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/ioCtrl',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setRemoteIOCtrl(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/ioCtrl',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set ioCtrl failed: ${reply.message}`)
+  }
+
+  async getRemoteModbus(): Promise<Record<string, unknown>> {
+    const reply = await this.http.send({
+      method: 'get',
+      url: '/settings/function/modbusCtrl',
+      portName: this.ip,
+      timeout: 5000,
+    })
+    return (reply.status && reply.data) ? (reply.data as Record<string, unknown>) : {}
+  }
+
+  async setRemoteModbus(params: Record<string, unknown>): Promise<void> {
+    const reply = await this.http.send({
+      method: 'post',
+      url: '/settings/function/modbusCtrl',
+      portName: this.ip,
+      params,
+      timeout: 10000,
+    })
+    if (!reply.status) throw new Error(`Set modbusCtrl failed: ${reply.message}`)
+  }
+
   // ─── 告警 ──────────────────────────────────────
 
   async getAlarms(): Promise<Array<{ id: number; level: number; description: string; solution: string; date: string; time: string }>> {

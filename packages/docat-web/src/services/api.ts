@@ -782,6 +782,48 @@ export async function setEthernet(id: string, params: Record<string, unknown>): 
   return request('POST', `/api/devices/${id}/ethernet`, params)
 }
 
+// ─── 按键 / 电源 / 拖动 / 远程控制设置 ──────────
+
+export async function getButtonMode(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/buttonMode`)
+}
+
+export async function setButtonMode(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/buttonMode`, params)
+}
+
+export async function getCCBoxVoltage(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/ccboxVoltage`)
+}
+
+export async function setCCBoxVoltage(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/ccboxVoltage`, params)
+}
+
+export async function getDragSensivity(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/dragSensivity`)
+}
+
+export async function setDragSensivity(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/dragSensivity`, params)
+}
+
+export async function getRemoteIOCtrl(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/remoteIOCtrl`)
+}
+
+export async function setRemoteIOCtrl(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/remoteIOCtrl`, params)
+}
+
+export async function getRemoteModbus(id: string): Promise<ApiResponse<Record<string, unknown>>> {
+  return request('GET', `/api/devices/${id}/remoteModbus`)
+}
+
+export async function setRemoteModbus(id: string, params: Record<string, unknown>): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/remoteModbus`, params)
+}
+
 // ─── Trajectory / Tracks (via controller SFTP) ─
 
 export async function startTrackRecording(id: string): Promise<ApiResponse<{ started: boolean }>> {

@@ -259,6 +259,44 @@ export abstract class DeviceDriver {
   /** 设置以太网配置 */
   abstract setEthernet(params: Record<string, unknown>): Promise<void>
 
+  // ─── 按键设置 ────────────────────────────────
+
+  /** 获取底座按键模式（{ mode: 'playback' | 'project', projectName }） */
+  abstract getButtonMode(): Promise<Record<string, unknown>>
+
+  /** 设置底座按键模式 */
+  abstract setButtonMode(params: Record<string, unknown>): Promise<void>
+
+  // ─── 电源设置 ────────────────────────────────
+
+  /** 获取控制柜刹车电压（{ min, max }） */
+  abstract getCCBoxVoltage(): Promise<Record<string, unknown>>
+
+  /** 设置控制柜刹车电压 */
+  abstract setCCBoxVoltage(params: Record<string, unknown>): Promise<void>
+
+  // ─── 拖动设置 ────────────────────────────────
+
+  /** 获取拖动灵敏度（{ j1..j6 }，范围 30~70） */
+  abstract getDragSensivity(): Promise<Record<string, unknown>>
+
+  /** 设置拖动灵敏度 */
+  abstract setDragSensivity(params: Record<string, unknown>): Promise<void>
+
+  // ─── 远程控制 ────────────────────────────────
+
+  /** 获取远程 IO 控制配置（/settings/function/ioCtrl） */
+  abstract getRemoteIOCtrl(): Promise<Record<string, unknown>>
+
+  /** 设置远程 IO 控制配置 */
+  abstract setRemoteIOCtrl(params: Record<string, unknown>): Promise<void>
+
+  /** 获取远程 Modbus 控制配置（/settings/function/modbusCtrl） */
+  abstract getRemoteModbus(): Promise<Record<string, unknown>>
+
+  /** 设置远程 Modbus 控制配置 */
+  abstract setRemoteModbus(params: Record<string, unknown>): Promise<void>
+
   // ─── 脚本 / 项目 ─────────────────────────────
   abstract runScript(script: string): Promise<void>
   abstract stopScript(): Promise<void>

@@ -1209,6 +1209,200 @@
                 </div>
               </div>
 
+              <!-- Key Settings (底座按键) -->
+              <div v-else-if="settingsTab === 'key'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>底座按键模式</h4></div>
+                  <div class="jog-mode-selector" style="justify-content:flex-start">
+                    <button
+                      :class="['jog-mode-btn', { 'jog-mode-btn--active': buttonModeForm.mode === 'playback' }]"
+                      :disabled="!settingsWritable"
+                      @click="buttonModeForm.mode = 'playback'"
+                    >复现轨迹</button>
+                    <button
+                      :class="['jog-mode-btn', { 'jog-mode-btn--active': buttonModeForm.mode === 'project' }]"
+                      :disabled="!settingsWritable"
+                      @click="buttonModeForm.mode = 'project'"
+                    >运行工程</button>
+                  </div>
+                  <div v-if="buttonModeForm.mode === 'project'" style="display:flex;gap:8px;margin-top:8px;align-items:center">
+                    <select v-model="buttonModeForm.projectName" class="input-sm settings-alias-input" :disabled="!settingsWritable">
+                      <option value="" disabled>选择工程</option>
+                      <option v-for="p in buttonProjects" :key="p" :value="p">{{ p }}</option>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" @click="loadButtonProjects" :disabled="loadingButtonProjects">🔄 工程列表</button>
+                  </div>
+                  <div class="text-muted" style="margin-top:8px;font-size:0.7rem;line-height:1.6">
+                    E6 底座按键功能：按下底座按键时复现所选轨迹，或运行指定工程。
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadButtonMode">读取</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!settingsWritable || (buttonModeForm.mode === 'project' && !buttonModeForm.projectName)" @click="saveButtonMode">保存</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Power Setting (刹车电压) -->
+              <div v-else-if="settingsTab === 'power'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>控制柜刹车电压</h4></div>
+                  <div class="load-fields" style="grid-template-columns:1fr 1fr">
+                    <div class="load-field"><label>最低电压 (V)</label><input v-model.number="ccboxForm.min" type="number" class="input-sm" min="30" max="60" step="1" :disabled="!settingsWritable" /></div>
+                    <div class="load-field"><label>最高电压 (V)</label><input v-model.number="ccboxForm.max" type="number" class="input-sm" min="30" max="60" step="1" :disabled="!settingsWritable" /></div>
+                  </div>
+                  <div class="text-muted" style="margin-top:6px;font-size:0.7rem">范围 30 ~ 60V；恢复默认将设置 {0, 0}（由控制器按出厂自动判断）。</div>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadCCBoxVoltage">读取</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!settingsWritable" @click="resetCCBoxVoltage">恢复默认</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!settingsWritable" @click="saveCCBoxVoltage">保存</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Remote Control (IO / Modbus) -->
+              <div v-else-if="settingsTab === 'remote'">
+                <div class="settings-section">
+                  <div class="log-tabs" style="margin-bottom:10px">
+                    <button :class="['log-tab', { 'log-tab--active': remoteTab === 'io' }]" @click="remoteTab = 'io'">IO</button>
+                    <button :class="['log-tab', { 'log-tab--active': remoteTab === 'modbus' }]" @click="remoteTab = 'modbus'">Modbus</button>
+                  </div>
+
+                  <template v-if="remoteTab === 'io'">
+                    <div class="settings-section-header">
+                      <h4>IO 远程控制</h4>
+                      <div style="display:flex;gap:6px">
+                        <button class="btn btn-primary btn-sm" @click="loadRemoteIO">读取</button>
+                        <button class="btn btn-secondary btn-sm" :disabled="!settingsWritable || !ioCtrlRaw" @click="saveRemoteIO">保存</button>
+                      </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap">
+                      <span class="amp-limit-label">工程模式</span>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': ioCtrlForm.optionProject.type === 0 }]" :disabled="!settingsWritable" @click="ioCtrlForm.optionProject.type = 0">默认运行工程</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': ioCtrlForm.optionProject.type === 1 }]" :disabled="!settingsWritable" @click="ioCtrlForm.optionProject.type = 1">组IO选择工程</button>
+                    </div>
+
+                    <div v-if="ioCtrlForm.optionProject.type === 0" class="remote-field" style="margin-top:10px">
+                      <label>默认运行工程</label>
+                      <select v-model="ioCtrlForm.optionProject.defaultProject" class="input-sm settings-alias-input" :disabled="!settingsWritable">
+                        <option value="" disabled>选择工程</option>
+                        <option v-for="p in buttonProjects" :key="p" :value="p">{{ p }}</option>
+                      </select>
+                    </div>
+
+                    <div v-else class="di-group-section" style="margin-top:10px">
+                      <div class="di-group-header">
+                        <span class="amp-limit-label">DI地址分配</span>
+                        <button class="btn btn-secondary btn-xs" title="添加一组" :disabled="!settingsWritable || ioDiGroup.length >= 4" @click="ioDiAddGroup">十</button>
+                        <button class="btn btn-secondary btn-xs" title="删除一组" :disabled="!settingsWritable || ioDiGroup.length === 0" @click="ioDiRemoveGroup">一</button>
+                      </div>
+                      <table class="load-config-table">
+                        <thead><tr><th style="width:110px">组IO数值</th><th>选择工程</th></tr></thead>
+                        <tbody>
+                          <tr v-for="(row, i) in ioDiProjects" :key="row.value">
+                            <td>{{ row.value }}</td>
+                            <td>
+                              <select v-model="ioDiProjects[i].name" class="input-xs" style="width:170px" :disabled="!settingsWritable">
+                                <option value="">—</option>
+                                <option v-for="p in buttonProjects" :key="p" :value="p">{{ p }}</option>
+                              </select>
+                            </td>
+                          </tr>
+                          <tr v-if="ioDiProjects.length === 0">
+                            <td colspan="2" class="text-muted" style="text-align:center;padding:10px 0">暂无数据</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div class="text-muted" style="margin-top:4px;font-size:0.68rem">每添加一组 DI，可组合的数值翻倍（2ⁿ 个）；数值相同的组 IO 触发对应工程。</div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+                      <span class="amp-limit-label">触发模式</span>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': ioCtrlForm.triggerMode === 1 }]" :disabled="!settingsWritable" @click="ioCtrlForm.triggerMode = 1">上升沿</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': ioCtrlForm.triggerMode === 2 }]" :disabled="!settingsWritable" @click="ioCtrlForm.triggerMode = 2">下降沿</button>
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <div class="settings-section-header">
+                      <h4>Modbus 远程控制</h4>
+                      <div style="display:flex;gap:6px">
+                        <button class="btn btn-primary btn-sm" @click="loadRemoteModbus">读取</button>
+                        <button class="btn btn-secondary btn-sm" :disabled="!settingsWritable || !modbusRaw" @click="saveRemoteModbus">保存</button>
+                      </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap">
+                      <span class="amp-limit-label">触发模式</span>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': modbusForm.triggerMode === 1 }]" :disabled="!settingsWritable" @click="modbusForm.triggerMode = 1">上升沿</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': modbusForm.triggerMode === 2 }]" :disabled="!settingsWritable" @click="modbusForm.triggerMode = 2">下降沿</button>
+                    </div>
+
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+                      <span class="amp-limit-label">选择工程</span>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': modbusForm.holdType === 0 }]" :disabled="!settingsWritable" @click="modbusForm.holdType = 0">默认运行工程</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': modbusForm.holdType === 1 }]" :disabled="!settingsWritable" @click="modbusForm.holdType = 1">保持寄存器选择工程</button>
+                    </div>
+
+                    <div v-if="modbusForm.holdType === 0" class="remote-field" style="margin-top:10px">
+                      <label>默认运行工程</label>
+                      <select v-model="modbusForm.holdDefaultProject" class="input-sm settings-alias-input" :disabled="!settingsWritable">
+                        <option value="" disabled>选择工程</option>
+                        <option v-for="p in buttonProjects" :key="p" :value="p">{{ p }}</option>
+                      </select>
+                    </div>
+
+                    <div v-else class="di-group-section" style="margin-top:10px">
+                      <div class="remote-field">
+                        <label>寄存器数值</label>
+                        <input v-model.number="modbusHoldOption" type="number" class="input-sm" style="width:120px" min="0" step="1" :disabled="!settingsWritable" />
+                      </div>
+                      <div class="di-group-header">
+                        <span class="amp-limit-label">备选工程</span>
+                        <button class="btn btn-secondary btn-xs" title="添加一项" :disabled="!settingsWritable || modbusHoldProjects.length >= 256" @click="modbusHoldAddProject">十</button>
+                        <button class="btn btn-secondary btn-xs" title="删除一项" :disabled="!settingsWritable || modbusHoldProjects.length === 0" @click="modbusHoldRemoveProject">一</button>
+                      </div>
+                      <table class="load-config-table">
+                        <thead><tr><th style="width:110px">寄存器数值</th><th>选择工程</th></tr></thead>
+                        <tbody>
+                          <tr v-for="(row, i) in modbusHoldProjects" :key="row.value">
+                            <td>{{ row.value }}</td>
+                            <td>
+                              <select v-model="modbusHoldProjects[i].name" class="input-xs" style="width:170px" :disabled="!settingsWritable">
+                                <option value="">—</option>
+                                <option v-for="p in buttonProjects" :key="p" :value="p">{{ p }}</option>
+                              </select>
+                            </td>
+                          </tr>
+                          <tr v-if="modbusHoldProjects.length === 0">
+                            <td colspan="2" class="text-muted" style="text-align:center;padding:10px 0">暂无数据</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Drag Setting (拖动灵敏度) -->
+              <div v-else-if="settingsTab === 'drag'">
+                <div class="settings-section">
+                  <div class="settings-section-header"><h4>拖动灵敏度</h4></div>
+                  <div class="drag-grid">
+                    <div v-for="j in 6" :key="j" class="drag-item">
+                      <span class="drag-label">J{{ j }}</span>
+                      <input v-model.number="dragForm['j' + j]" type="range" min="30" max="70" step="1" class="speed-slider" :disabled="!settingsWritable" />
+                      <span class="drag-value">{{ dragForm['j' + j] }}</span>
+                    </div>
+                  </div>
+                  <div class="text-muted" style="margin-top:6px;font-size:0.7rem">范围 30 ~ 70，数值越大拖动越灵敏。</div>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="btn btn-primary btn-sm" @click="loadDragSensivity">读取</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!settingsWritable" @click="saveDragSensivity">保存</button>
+                  </div>
+                </div>
+              </div>
+
               <!-- Dobot+ -->
               <div v-else-if="settingsTab === 'dobotplus'">
                 <!-- ES01 吸盘 -->
@@ -1662,6 +1856,10 @@ const settingsTabs = [
   { key: 'postures', icon: '📌', label: '姿态' },
   { key: 'motion', icon: '🏃', label: '运动' },
   { key: 'comm', icon: '🌐', label: '通讯' },
+  { key: 'key', icon: '🔘', label: '按键' },
+  { key: 'power', icon: '🔋', label: '电源' },
+  { key: 'remote', icon: '📡', label: '远程控制' },
+  { key: 'drag', icon: '🤲', label: '拖拽' },
   { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
   { key: 'docat', icon: '🐱', label: 'docat' },
 ]
@@ -5158,6 +5356,245 @@ async function saveEthernet() {
   }
 }
 
+// ─── 按键设置 ──────────────────────────────────
+
+const buttonModeForm = reactive<{ mode: 'playback' | 'project'; projectName: string }>({ mode: 'playback', projectName: '' })
+const buttonProjects = ref<string[]>([])
+const loadingButtonProjects = ref(false)
+
+async function loadButtonMode() {
+  const res = await api.getButtonMode(deviceId)
+  if (res.success && res.data) {
+    const d = res.data as Record<string, unknown>
+    buttonModeForm.mode = d.mode === 'project' ? 'project' : 'playback'
+    buttonModeForm.projectName = String(d.projectName ?? '')
+  } else if (res.error?.code !== 40401) {
+    toastRef.value?.error(`读取按键模式失败：${res.error?.message}`)
+  }
+}
+async function loadButtonProjects() {
+  loadingButtonProjects.value = true
+  try {
+    const res = await api.listDeviceProjects(deviceId)
+    if (res.success && res.data) {
+      buttonProjects.value = res.data
+        .map(p => typeof p === 'string' ? p : String((p as { name?: string }).name ?? ''))
+        .filter(Boolean)
+    }
+  } catch { /* ignore */ }
+  finally { loadingButtonProjects.value = false }
+}
+async function saveButtonMode() {
+  const res = await api.setButtonMode(deviceId, { ...buttonModeForm })
+  if (res.success) {
+    toastRef.value?.success('按键模式已保存')
+    loadButtonMode()
+  } else {
+    toastRef.value?.error(`保存按键模式失败：${res.error?.message}`)
+  }
+}
+
+// ─── 电源设置（刹车电压）───────────────────────
+
+const ccboxForm = reactive({ min: 0, max: 0 })
+
+async function loadCCBoxVoltage() {
+  const res = await api.getCCBoxVoltage(deviceId)
+  if (res.success && res.data) {
+    const d = res.data as Record<string, unknown>
+    ccboxForm.min = Number(d.min ?? 0)
+    ccboxForm.max = Number(d.max ?? 0)
+  } else if (res.error?.code !== 40401) {
+    toastRef.value?.error(`读取刹车电压失败：${res.error?.message}`)
+  }
+}
+function validateCCBox(): string | null {
+  const { min, max } = ccboxForm
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return '电压必须为数字'
+  if (min < 30 || min > 60 || max < 30 || max > 60) return '电压范围 30 ~ 60V'
+  if (min > max) return '最低电压不能高于最高电压'
+  return null
+}
+async function saveCCBoxVoltage() {
+  const err = validateCCBox()
+  if (err) { toastRef.value?.error(err); return }
+  const res = await api.setCCBoxVoltage(deviceId, { ...ccboxForm })
+  if (res.success) {
+    toastRef.value?.success('刹车电压已保存')
+    loadCCBoxVoltage()
+  } else {
+    toastRef.value?.error(`保存刹车电压失败：${res.error?.message}`)
+  }
+}
+function resetCCBoxVoltage() {
+  confirmAction('将刹车电压恢复为默认值（{0, 0}）？', async () => {
+    const res = await api.setCCBoxVoltage(deviceId, { min: 0, max: 0 })
+    if (res.success) {
+      toastRef.value?.success('刹车电压已恢复默认')
+      loadCCBoxVoltage()
+    } else {
+      toastRef.value?.error(`恢复失败：${res.error?.message}`)
+    }
+  }, '恢复默认')
+}
+
+// ─── 拖动设置 ──────────────────────────────────
+
+const dragForm = reactive<Record<string, number>>({ j1: 50, j2: 50, j3: 50, j4: 50, j5: 50, j6: 50 })
+
+async function loadDragSensivity() {
+  const res = await api.getDragSensivity(deviceId)
+  if (res.success && res.data) {
+    const d = res.data as Record<string, unknown>
+    for (let j = 1; j <= 6; j++) {
+      const v = Number(d['j' + j])
+      if (Number.isFinite(v)) dragForm['j' + j] = v
+    }
+  } else if (res.error?.code !== 40401) {
+    toastRef.value?.error(`读取拖动灵敏度失败：${res.error?.message}`)
+  }
+}
+async function saveDragSensivity() {
+  const payload: Record<string, number> = { ...dragForm }
+  for (const v of Object.values(payload)) {
+    if (!Number.isFinite(v) || v < 30 || v > 70) {
+      toastRef.value?.error('灵敏度范围 30 ~ 70')
+      return
+    }
+  }
+  const res = await api.setDragSensivity(deviceId, payload)
+  if (res.success) {
+    toastRef.value?.success('拖动灵敏度已保存')
+    loadDragSensivity()
+  } else {
+    toastRef.value?.error(`保存拖动灵敏度失败：${res.error?.message}`)
+  }
+}
+
+// ─── 远程控制（IO / Modbus）────────────────────
+
+const remoteTab = ref<'io' | 'modbus'>('io')
+const ioCtrlRaw = ref<Record<string, unknown> | null>(null)
+const modbusRaw = ref<Record<string, unknown> | null>(null)
+
+interface RemoteProjectRow { name: string; value: number }
+
+const ioCtrlForm = reactive<{ triggerMode: number; optionProject: { type: number; defaultProject: string } }>({
+  triggerMode: 1, optionProject: { type: 0, defaultProject: '' },
+})
+/** DI 组数值（DI 地址，最多 4 组） */
+const ioDiGroup = ref<number[]>([])
+/** 组 IO → 工程映射（2^len 项：value = 组IO数值） */
+const ioDiProjects = ref<RemoteProjectRow[]>([])
+
+async function loadRemoteIO() {
+  const res = await api.getRemoteIOCtrl(deviceId)
+  if (!res.success || !res.data) {
+    toastRef.value?.error(`读取远程 IO 失败：${res.error?.message}`)
+    return
+  }
+  const raw = res.data as Record<string, unknown>
+  ioCtrlRaw.value = raw
+  const opt = (raw.optionProject ?? {}) as Record<string, unknown>
+  ioCtrlForm.triggerMode = Number(raw.triggerMode ?? 1) || 1
+  ioCtrlForm.optionProject.type = Number(opt.type ?? 0)
+  ioCtrlForm.optionProject.defaultProject = String(opt.defaultProject ?? '')
+  ioDiGroup.value = (Array.isArray(opt.diGroup) ? opt.diGroup : []).map(n => Number(n) || 0)
+  ioDiProjects.value = (Array.isArray(opt.projectList) ? opt.projectList : [])
+    .map(r => ({ name: String((r as RemoteProjectRow).name ?? ''), value: Number((r as RemoteProjectRow).value ?? 0) }))
+    .sort((a, b) => a.value - b.value)
+  syncIoDiProjects()
+}
+/** 组数变化时重建工程映射表：2^len 项，保留同名数值的已有选择 */
+function syncIoDiProjects() {
+  const count = Math.pow(2, ioDiGroup.value.length)
+  const prev = ioDiProjects.value
+  ioDiProjects.value = new Array(count).fill(0).map((_, idx) => {
+    const found = prev.find(p => p.value === idx)
+    return { name: found ? found.name : '', value: idx }
+  })
+}
+function ioDiAddGroup() {
+  if (ioDiGroup.value.length >= 4) return
+  ioDiGroup.value.push(ioDiGroup.value.length)
+  syncIoDiProjects()
+}
+function ioDiRemoveGroup() {
+  if (ioDiGroup.value.length === 0) return
+  ioDiGroup.value.pop()
+  syncIoDiProjects()
+}
+async function saveRemoteIO() {
+  if (!ioCtrlRaw.value) return
+  const payload = JSON.parse(JSON.stringify(ioCtrlRaw.value)) as Record<string, unknown>
+  const opt = (payload.optionProject ?? {}) as Record<string, unknown>
+  opt.type = ioCtrlForm.optionProject.type
+  opt.defaultProject = ioCtrlForm.optionProject.defaultProject
+  opt.diGroup = [...ioDiGroup.value]
+  opt.projectList = ioDiProjects.value.map(p => ({ ...p }))
+  payload.optionProject = opt
+  payload.triggerMode = ioCtrlForm.triggerMode
+  const res = await api.setRemoteIOCtrl(deviceId, payload)
+  if (res.success) {
+    toastRef.value?.success('IO 远程控制已保存')
+    loadRemoteIO()
+  } else {
+    toastRef.value?.error(`保存 IO 远程控制失败：${res.error?.message}`)
+  }
+}
+
+const modbusForm = reactive<{ triggerMode: number; holdType: number; holdDefaultProject: string }>({
+  triggerMode: 1, holdType: 0, holdDefaultProject: '',
+})
+/** 保持寄存器数值（寄存器数值字段） */
+const modbusHoldOption = ref(0)
+/** 备选工程映射表（寄存器数值 → 工程名） */
+const modbusHoldProjects = ref<RemoteProjectRow[]>([])
+
+async function loadRemoteModbus() {
+  const res = await api.getRemoteModbus(deviceId)
+  if (!res.success || !res.data) {
+    toastRef.value?.error(`读取远程 Modbus 失败：${res.error?.message}`)
+    return
+  }
+  const raw = res.data as Record<string, unknown>
+  modbusRaw.value = raw
+  const hold = (raw.hold ?? {}) as Record<string, unknown>
+  modbusForm.triggerMode = Number(raw.triggerMode ?? 1) || 1
+  modbusForm.holdType = Number(hold.type ?? 0)
+  modbusForm.holdDefaultProject = String(hold.defaultProject ?? '')
+  modbusHoldOption.value = Number(hold.optionProject ?? 0)
+  modbusHoldProjects.value = (Array.isArray(hold.projectList) ? hold.projectList : [])
+    .map(r => ({ name: String((r as RemoteProjectRow).name ?? ''), value: Number((r as RemoteProjectRow).value ?? 0) }))
+    .sort((a, b) => a.value - b.value)
+}
+function modbusHoldAddProject() {
+  if (modbusHoldProjects.value.length >= 256) return
+  modbusHoldProjects.value.push({ name: '', value: modbusHoldProjects.value.length })
+}
+function modbusHoldRemoveProject() {
+  if (modbusHoldProjects.value.length === 0) return
+  modbusHoldProjects.value.pop()
+}
+async function saveRemoteModbus() {
+  if (!modbusRaw.value) return
+  const payload = JSON.parse(JSON.stringify(modbusRaw.value)) as Record<string, unknown>
+  const hold = (payload.hold ?? {}) as Record<string, unknown>
+  hold.type = modbusForm.holdType
+  hold.defaultProject = modbusForm.holdDefaultProject
+  hold.optionProject = modbusHoldOption.value
+  hold.projectList = modbusHoldProjects.value.map(p => ({ ...p }))
+  payload.hold = hold
+  payload.triggerMode = modbusForm.triggerMode
+  const res = await api.setRemoteModbus(deviceId, payload)
+  if (res.success) {
+    toastRef.value?.success('Modbus 远程控制已保存')
+    loadRemoteModbus()
+  } else {
+    toastRef.value?.error(`保存 Modbus 远程控制失败：${res.error?.message}`)
+  }
+}
+
 // ─── Dobot+ ─────────────────────────────────────
 
 const dobotPlusList = ref<string[]>([])
@@ -5876,6 +6313,10 @@ function loadSettingsTabData(tab: string) {
   else if (tab === 'postures') loadPostures()
   else if (tab === 'motion') loadAllMotionParams()
   else if (tab === 'comm') { loadWiFi(); loadEthernet(); loadBus() }
+  else if (tab === 'key') { loadButtonMode(); loadButtonProjects() }
+  else if (tab === 'power') loadCCBoxVoltage()
+  else if (tab === 'remote') { loadRemoteIO(); loadRemoteModbus(); loadButtonProjects() }
+  else if (tab === 'drag') loadDragSensivity()
   else if (tab === 'dobotplus') { loadDobotPlusList(); loadDobotPlusCatalog(); loadDobotPlusLocal() }
   else if (tab === 'docat') loadCalibExportDir()
   resetSettingsEditState()
@@ -6464,9 +6905,10 @@ onUnmounted(() => {
 .load-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .load-field { display: flex; flex-direction: column; gap: 3px; }
 .load-field label { font-family: var(--font-body); font-size: 0.66rem; font-weight: 500; color: var(--text-muted); }
-.load-field .input-sm { width: 100%; padding: 5px 8px; font-family: var(--font-mono); font-size: 0.74rem; background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
-.load-field .input-sm:focus { border-color: var(--accent); }
-.load-field .input-sm[readonly] { opacity: 0.55; cursor: default; user-select: none; }
+.input-sm { padding: 5px 8px; font-family: var(--font-mono); font-size: 0.74rem; background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); outline: none; }
+.input-sm:focus { border-color: var(--accent); }
+.input-sm[readonly] { opacity: 0.55; cursor: default; user-select: none; }
+.load-field .input-sm { width: 100%; }
 
 .load-config-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.72rem; }
 .load-config-table th { text-align: left; padding: 6px 6px; font-family: var(--font-body); font-size: 0.66rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
@@ -6493,6 +6935,17 @@ onUnmounted(() => {
 .motion-cell { display: flex; align-items: center; gap: 6px; }
 .motion-input { width: 84px; }
 .motion-unit { font-size: 0.62rem; color: var(--text-muted); white-space: nowrap; }
+
+.remote-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.remote-col-title { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+.remote-field { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.remote-field label { width: 92px; flex-shrink: 0; font-size: 0.68rem; color: var(--text-muted); }
+.di-group-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.drag-grid { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+.drag-item { display: flex; align-items: center; gap: 10px; }
+.drag-label { width: 24px; font-size: 0.72rem; color: var(--text-muted); flex-shrink: 0; }
+.drag-item .speed-slider { flex: 1; }
+.drag-value { width: 30px; text-align: right; font-size: 0.72rem; color: var(--text-primary); }
 
 .dobotplus-args-input {
   width: 100%; margin-top: 8px; padding: 6px 8px;
