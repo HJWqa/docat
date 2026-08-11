@@ -222,7 +222,7 @@
             <button class="btn btn-primary btn-sm" :disabled="!calibFit || !calibFit.usable" @click="runCalibConvert">转换</button>
             <input v-model.trim="calibConvertResult" class="calib-convert-input calib-convert-result" placeholder="物理X 物理Y 或 物理X,物理Y"
               title="转换结果；用逗号或任意个数空格分隔；Shift/Ctrl+Enter 移动到该位置"
-              @keydown="onCalibResultKeydown" />
+              @input="calibConvertDirty = true" @keydown="onCalibResultKeydown" />
           </div>
         </div>
       </div>
@@ -2931,6 +2931,8 @@ const calibRows = ref<CalibPoint[]>([])
 const calibFit = ref<CalibResult | null>(null)
 const calibConvertInput = ref('')
 const calibConvertResult = ref('')
+const calibConvertRaw = ref<{ x: number; y: number } | null>(null)
+const calibConvertDirty = ref(false)
 const calibFileInputRef = ref<HTMLInputElement | null>(null)
 const calibImportMode = ref<'image' | 'full'>('image')
 const calibPasteOpen = ref(false)
@@ -2961,12 +2963,12 @@ const calibInactiveSet = computed<Record<number, boolean>>(() => {
   return set
 })
 
-function fmtNum(v: number): string {
-  return String(Math.round(v * 1000) / 1000)
-}
-
 function round3(v: number): number {
   return Math.round(v * 1000) / 1000
+}
+
+function round6(v: number): number {
+  return Math.round(v * 1e6) / 1e6
 }
 
 function newCalibRow(): CalibPoint {
@@ -3316,7 +3318,9 @@ function runCalibConvert() {
     return
   }
   const r = applyCalibration(calibFit.value, parts[0], parts[1])
-  calibConvertResult.value = `${fmtNum(r.x)},${fmtNum(r.y)}`
+  calibConvertRaw.value = { x: r.x, y: r.y }
+  calibConvertDirty.value = false
+  calibConvertResult.value = `${r.x.toFixed(6)},${r.y.toFixed(6)}`
 }
 
 function onCalibResultKeydown(e: KeyboardEvent) {
@@ -3330,14 +3334,17 @@ async function runCalibToPosition() {
     toastRef.value?.error('设备未连接')
     return
   }
-  const parts = parseCoordPair(calibConvertResult.value)
+  const raw = calibConvertRaw.value
+  const parts = raw && !calibConvertDirty.value
+    ? [raw.x, raw.y]
+    : parseCoordPair(calibConvertResult.value)
   if (parts.length < 2) {
     toastRef.value?.error('没有可用的物理坐标结果')
     return
   }
   const cur = getCurrentCartesian()
-  targetPose.x = round3(parts[0])
-  targetPose.y = round3(parts[1])
+  targetPose.x = round6(parts[0])
+  targetPose.y = round6(parts[1])
   if (cur) {
     targetPose.z = round3(cur.z)
     targetPose.rx = round3(cur.rx)
