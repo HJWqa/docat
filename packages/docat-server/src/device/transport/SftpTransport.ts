@@ -248,11 +248,7 @@ export class SftpTransport {
     const data = await client.get(toControllerPath(remotePath))
     if (Buffer.isBuffer(data)) return data.toString('utf8')
     if (typeof data === 'string') return data
-    const chunks: Buffer[] = []
-    for await (const chunk of data) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
-    }
-    return Buffer.concat(chunks).toString('utf8')
+    throw new Error(`unexpected return type from sftp.get: ${typeof data}`)
   }
 
   private async writeTextWithClient(client: SftpClient, remotePath: string, content: string): Promise<void> {

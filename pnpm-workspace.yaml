@@ -3,7 +3,7 @@ packages:
 allowBuilds:
   '@serialport/bindings-cpp': true
   bcrypt: true
-  better-sqlite3: true
+  better-sqlite3: false
   cpu-features: true
   esbuild: true
   ssh2: true
@@ -20,5 +20,4 @@ minimumReleaseAgeExclude:
 onlyBuiltDependencies:
   - '@serialport/bindings-cpp'
   - bcrypt
-  - better-sqlite3
   - esbuild

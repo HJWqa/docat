@@ -77,6 +77,8 @@ coverage/
 # Generated maps and typings
 *.js.map
 *.d.ts
+!packages/docat-web/src/shims-monaco-languages.d.ts
+!packages/docat-server/src/types/ssh2-sftp-client.d.ts
 
 # Repository-specific runtime data
 packages/docat-server/data/
