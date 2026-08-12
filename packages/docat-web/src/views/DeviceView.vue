@@ -1559,6 +1559,9 @@
                     <button class="btn btn-primary btn-sm" :disabled="!calibExportDir || savingCalibExportDir || !isAdminUser" @click="saveCalibExportDir">
                       {{ savingCalibExportDir ? '保存中...' : '保存' }}
                     </button>
+                    <button class="btn btn-secondary btn-sm" :disabled="!calibExportDir || openingCalibExportDir || !isAdminUser" @click="openCalibExportDir" title="用服务端的文件管理器打开该目录">
+                      {{ openingCalibExportDir ? '打开中...' : '打开目录' }}
+                    </button>
                   </div>
                   <div class="text-muted" style="margin-top:8px;font-size:0.68rem;line-height:1.6">
                     标定辅助「导出」按钮：左键将标定数据写入该目录下的 txt/xml 文件（服务端）；右键由浏览器直接下载文件。
@@ -3215,6 +3218,7 @@ function applyClipboardText(text: string, mode: 'image' | 'full') {
 
 const calibExportDir = ref('')
 const savingCalibExportDir = ref(false)
+const openingCalibExportDir = ref(false)
 
 function fmtExportNum(v: number): string {
   const n = Number(v)
@@ -3339,6 +3343,25 @@ async function saveCalibExportDir() {
     }
   } finally {
     savingCalibExportDir.value = false
+  }
+}
+
+async function openCalibExportDir() {
+  const dir = calibExportDir.value.trim()
+  if (!dir) {
+    toastRef.value?.error('请先填写导出目录')
+    return
+  }
+  openingCalibExportDir.value = true
+  try {
+    const res = await api.openExportDir(dir)
+    if (res.success && res.data) {
+      toastRef.value?.success(`已用${res.data.opener}打开 ${res.data.path}`)
+    } else {
+      toastRef.value?.error(`打开失败: ${apiErrorText(res)}`)
+    }
+  } finally {
+    openingCalibExportDir.value = false
   }
 }
 

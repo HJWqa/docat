@@ -74,9 +74,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import type { AuthToken, UserRole } from 'docat-shared/types'
 import { login, register, setToken } from '../services/api'
 import { wsClient } from '../services/ws'
 import { initRuntimeStore } from '../stores/runtimeStore'
+import { userStore } from '../stores/userStore'
 
 const router = useRouter()
 const mode = ref<'login' | 'register'>('login')
@@ -88,6 +90,11 @@ const error = ref('')
 function toggleMode() {
   mode.value = mode.value === 'login' ? 'register' : 'login'
   error.value = ''
+}
+
+/** 登录成功后同步当前用户（AuthToken 映射为 User），避免角色相关 UI 失效 */
+function applyCurrentUser(t: AuthToken) {
+  userStore.setCurrentUser({ id: t.userId, username: t.username, role: t.role as UserRole, createdAt: '' })
 }
 
 async function handleLogin() {
@@ -109,10 +116,12 @@ async function handleLogin() {
       const loginRes = await login(username.value, password.value)
       if (!loginRes.success || !loginRes.data) throw new Error(loginRes.error?.message ?? '自动登录失败')
       setToken(loginRes.data.token)
+      applyCurrentUser(loginRes.data)
     } else {
       const res = await login(username.value, password.value)
       if (!res.success || !res.data) throw new Error(res.error?.message ?? '登录失败')
       setToken(res.data.token)
+      applyCurrentUser(res.data)
     }
     // 登录后建立 WS 连接并注册运行状态订阅（登出再登录时同样生效）
     wsClient.connect()

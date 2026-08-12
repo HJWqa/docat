@@ -3,6 +3,9 @@
  * /api/system/info, /api/system/logs
  */
 import type { FastifyInstance } from 'fastify'
+import { mkdirSync, readFileSync } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireAdmin } from '../../auth/auth.js'
 import type { DevicePool } from '../../device/DevicePool.js'
@@ -45,6 +48,64 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO app_settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, value)
+}
+
+const execFileAsync = promisify(execFile)
+
+/** WSL（Windows Subsystem for Linux）检测 */
+function isWsl(): boolean {
+  try {
+    return /microsoft|wsl/i.test(readFileSync('/proc/version', 'utf8'))
+  } catch {
+    return false
+  }
+}
+
+/** Linux 桌面环境检测（有 DISPLAY/WAYLAND_DISPLAY 视为桌面，否则视为无头服务器） */
+function hasDesktopEnv(): boolean {
+  return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
+}
+
+function spawnDetached(cmd: string, args: string[]): void {
+  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref()
+}
+
+/**
+ * 在服务端打开目录（供桌面用户使用）：
+ * - Windows / WSL：explorer.exe 打开
+ * - Linux 桌面：xdg-open
+ * - Linux 无头服务器：不支持，返回 null
+ * 返回成功时的打开方式描述；失败/不支持返回 null。
+ */
+export async function openDirectory(dir: string): Promise<string | null> {
+  try {
+    mkdirSync(dir, { recursive: true })
+  } catch {
+    return null
+  }
+
+  try {
+    if (process.platform === 'win32') {
+      spawnDetached('explorer.exe', [dir])
+      return 'Windows 资源管理器'
+    }
+
+    if (isWsl()) {
+      const { stdout } = await execFileAsync('wslpath', ['-w', dir])
+      const winPath = stdout.trim()
+      spawnDetached('explorer.exe', [winPath])
+      return 'Windows 资源管理器（WSL）'
+    }
+
+    if (hasDesktopEnv()) {
+      spawnDetached('xdg-open', [dir])
+      return '系统文件管理器'
+    }
+
+    return null
+  } catch {
+    return null
+  }
 }
 
 export function systemRoutes(app: FastifyInstance, pool: DevicePool): void {
@@ -142,6 +203,28 @@ export function systemRoutes(app: FastifyInstance, pool: DevicePool): void {
       }
       setSetting(SETTING_CALIB_EXPORT_DIR, dir)
       return { success: true, data: null }
+    } catch (err) {
+      return { success: false, error: { code: 50000, message: (err as Error).message } }
+    }
+  })
+
+  /** 在服务端打开标定导出目录（管理员；Linux 无头服务器不支持） */
+  app.post<{ Body: { dir?: string } }>('/api/system/settings/openExportDir', async (request, reply): Promise<ApiResponse<{ path: string; opener: string } | null>> => {
+    try {
+      await authMiddleware(request, reply)
+      if (reply.sent) return reply
+      requireAdmin(request, reply)
+
+      const raw = request.body?.dir?.trim() || getSetting(SETTING_CALIB_EXPORT_DIR)
+      const dir = resolveExportDir(raw)
+      const opener = await openDirectory(dir)
+      if (!opener) {
+        return {
+          success: false,
+          error: { code: 40000, message: '服务端无桌面环境（Linux 无头服务器），无法打开目录' },
+        }
+      }
+      return { success: true, data: { path: dir, opener } }
     } catch (err) {
       return { success: false, error: { code: 50000, message: (err as Error).message } }
     }

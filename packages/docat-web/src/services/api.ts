@@ -641,6 +641,10 @@ export async function saveSystemSettings(settings: { calibExportDir: string }): 
   return request('POST', `/api/system/settings`, settings)
 }
 
+export async function openExportDir(dir: string): Promise<ApiResponse<{ path: string; opener: string } | null>> {
+  return request('POST', `/api/system/settings/openExportDir`, { dir })
+}
+
 // ─── User Management ──────────────────────────
 
 export interface ControllerUserItem {
