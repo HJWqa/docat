@@ -380,7 +380,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
     const map = new Map<string, Record<string, unknown> | null>()
     if (!projectNames.length) return map
     try {
-      const contents = await sftp.readTexts(projectNames.map(name => projectFilePath(name, 'prj.json')))
+      const contents = await sftp.readTextsLoose(projectNames.map(name => projectFilePath(name, 'prj.json')))
       for (const name of projectNames) {
         const content = contents.get(projectFilePath(name, 'prj.json'))
         try {
@@ -409,7 +409,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         if (ai >= 0 || bi >= 0) return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi)
         return a.name.localeCompare(b.name)
       })
-    const contents = await sftp.readTexts(entries.map(entry => projectFilePath(projectName, entry.name)))
+    const contents = await sftp.readTextsLoose(entries.map(entry => projectFilePath(projectName, entry.name)))
     const prj = await readProjectPrj(sftp, projectName)
     return {
       ...summary,

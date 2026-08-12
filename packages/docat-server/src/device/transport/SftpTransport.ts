@@ -35,6 +35,16 @@ type SftpClientWithMode = SftpClient & {
 /** 每个设备（host）的连接池大小 */
 const POOL_SIZE = 2
 
+/** 握手超时（弱 CPU 控制器 DH 密钥交换在负载下可能超过 5s） */
+const DEFAULT_READY_TIMEOUT_MS = 15000
+
+/** 建立连接的最大尝试次数（握手超时等瞬时故障可重试） */
+const CONNECT_RETRY_ATTEMPTS = 3
+const CONNECT_RETRY_BACKOFF_MS = 800
+
+/** 操作因连接层错误失败时的整体重试次数（换新连接再跑一次） */
+const OPERATION_RETRY_ATTEMPTS = 2
+
 interface PooledConnection {
   client: SftpClient
   inUse: boolean
@@ -117,7 +127,7 @@ export class SftpTransport {
     this.username = options.username ?? process.env.DOCAT_SFTP_USER ?? 'root'
     this.password = options.password ?? process.env.DOCAT_SFTP_PASSWORD ?? 'dobot'
     this.port = options.port ?? DEVICE_PORTS.SFTP
-    this.readyTimeout = options.readyTimeout ?? 5000
+    this.readyTimeout = options.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
   }
 
   async list(remotePath: string): Promise<SftpFileEntry[]> {
@@ -146,6 +156,23 @@ export class SftpTransport {
       const files = new Map<string, string>()
       for (const remotePath of remotePaths) {
         files.set(remotePath, await this.readTextWithClient(client, remotePath))
+      }
+      return files
+    })
+  }
+
+  /** 批量读取文本（单连接往返）；单个文件读取失败时记为空串，不拖垮整体 */
+  async readTextsLoose(remotePaths: string[]): Promise<Map<string, string>> {
+    return this.withClient(async client => {
+      const files = new Map<string, string>()
+      for (const remotePath of remotePaths) {
+        try {
+          files.set(remotePath, await this.readTextWithClient(client, remotePath))
+        } catch (err) {
+          // 连接层故障交给 withClient 换连接重试，避免整批文件被记为空串
+          if (isConnectionError(err)) throw err
+          files.set(remotePath, '')
+        }
       }
       return files
     })
@@ -212,35 +239,58 @@ export class SftpTransport {
 
   private async withClient<T>(fn: (client: SftpClient) => Promise<T>): Promise<T> {
     const key = poolKey(this.host, this.port, this.username)
-    const entry = await checkoutPooledClient(key, async () => {
-      const client = new SftpClient('docat-device-sftp', {
-        error: () => undefined,
-        end: () => undefined,
-        close: () => undefined,
-      })
+    for (let attempt = 0; attempt < OPERATION_RETRY_ATTEMPTS; attempt++) {
+      const entry = await checkoutPooledClient(key, () => this.createClientWithRetry())
       try {
-        await client.connect({
-          host: this.host,
-          port: this.port,
-          username: this.username,
-          password: this.password,
-          readyTimeout: this.readyTimeout,
-        })
-        return client
+        const result = await fn(entry.client)
+        releasePooled(key, entry)
+        return result
       } catch (err) {
-        await client.end().catch(() => undefined)
+        if (isConnectionError(err)) {
+          // 连接层故障（握手超时/被服务端静默回收）：淘汰旧连接，换新连接重试一次
+          evictPooled(key, entry)
+          releasePooled(key, entry)
+          if (attempt < OPERATION_RETRY_ATTEMPTS - 1) continue
+        } else {
+          releasePooled(key, entry)
+        }
         throw err
       }
-    })
+    }
+    throw new Error('unreachable: withClient retry exhausted')
+  }
 
+  private async createClientWithRetry(): Promise<SftpClient> {
+    let lastErr: unknown
+    for (let attempt = 0; attempt < CONNECT_RETRY_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(CONNECT_RETRY_BACKOFF_MS * attempt)
+      try {
+        return await this.createClient()
+      } catch (err) {
+        lastErr = err
+      }
+    }
+    throw lastErr
+  }
+
+  private async createClient(): Promise<SftpClient> {
+    const client = new SftpClient('docat-device-sftp', {
+      error: () => undefined,
+      end: () => undefined,
+      close: () => undefined,
+    })
     try {
-      return await fn(entry.client)
+      await client.connect({
+        host: this.host,
+        port: this.port,
+        username: this.username,
+        password: this.password,
+        readyTimeout: this.readyTimeout,
+      })
+      return client
     } catch (err) {
-      // 操作失败：淘汰该连接，下次操作自动重建
-      evictPooled(key, entry)
+      await client.end().catch(() => undefined)
       throw err
-    } finally {
-      releasePooled(key, entry)
     }
   }
 
@@ -248,6 +298,8 @@ export class SftpTransport {
     const data = await client.get(toControllerPath(remotePath))
     if (Buffer.isBuffer(data)) return data.toString('utf8')
     if (typeof data === 'string') return data
+    // ssh2-sftp-client 空文件经 concat-stream 返回空数组 []，等价于空串
+    if (Array.isArray(data) && data.length === 0) return ''
     throw new Error(`unexpected return type from sftp.get: ${typeof data}`)
   }
 
@@ -258,6 +310,20 @@ export class SftpTransport {
 
 function joinRemotePath(base: string, name: string): string {
   return `${base.replace(/\/+$/, '')}/${name.replace(/^\/+/, '')}`
+}
+
+/**
+ * 判断是否为连接层错误：
+ * ssh2-sftp-client 的 SFTP 协议错误（文件不存在等）带数字状态码，
+ * 连接层错误（握手超时、socket 断开、连接被服务端回收）无数字状态码。
+ */
+function isConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  return typeof (err as NodeJS.ErrnoException).code !== 'number'
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function toControllerPath(path: string): string {
