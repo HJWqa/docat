@@ -287,103 +287,130 @@
     <div class="control-grid mt-2">
       <!-- Jog Control Panel -->
       <div class="card jog-panel" ref="jogPanelRef" tabindex="-1" title="按 B / Alt+B 快速聚焦此板块">
-        <div class="jog-panel-header">
-          <div class="hud-label">手动点动控制</div>
-          <div class="jog-settings">
-            <!-- Mode Switches -->
-            <div class="mode-switch-group">
-              <span class="amp-limit-label">手动自动</span>
-              <label class="toggle-switch">
-                <input type="checkbox" :checked="autoModeEnabled" @change="toggleAutoModeEnabled" :disabled="modeSwitching" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-                <span class="toggle-label">{{ autoModeEnabled ? '开' : '关' }}</span>
-              </label>
+        <div class="hud-label">手动点动控制</div>
+        <div class="jog-panel-main">
+          <div class="jog-panel-main-left">
+            <div class="jog-panel-header">
+              <div class="jog-settings">
+              <div class="jog-settings-rows">
+                  <div class="jog-settings-row">
+                    <div class="mode-switch-group">
+                      <span class="amp-limit-label">手动自动</span>
+                      <label class="toggle-switch">
+                        <input type="checkbox" :checked="autoModeEnabled" @change="toggleAutoModeEnabled" :disabled="modeSwitching" />
+                        <span class="toggle-track"><span class="toggle-thumb" /></span>
+                        <span class="toggle-label">{{ autoModeEnabled ? '开' : '关' }}</span>
+                      </label>
+                    </div>
+                    <div class="jog-mode-selector">
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isAutoMode }]" @click="setMode('auto')" :disabled="!autoModeEnabled || modeSwitching">自动</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isAutoMode }]" @click="setMode('manual')" :disabled="!autoModeEnabled || modeSwitching">手动</button>
+                    </div>
+                    <div class="jog-mode-selector">
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isOnlineMode }]" @click="setDeviceMode('online')" :disabled="isAutoMode || modeSwitching">ONLINE</button>
+                    </div>
+                    <!-- 点动坐标系（按键/按钮动哪一套轴），与 MovJ/MovL 路径类型无关 -->
+                    <div class="jog-mode-selector" title="点动时操作的坐标系：关节角 J1–J6，或笛卡尔 X/Y/Z/RX/RY/RZ">
+                      <button
+                        :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate === 'joint' }]"
+                        :disabled="!isConnected || jogCoordSwitching"
+                        @click="changeJogCoordinate('joint')"
+                      >点动·关节</button>
+                      <button
+                        :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate !== 'joint' }]"
+                        :disabled="!isConnected || jogCoordSwitching"
+                        @click="changeJogCoordinate('cartesian')"
+                      >点动·笛卡尔</button>
+                    </div>
+                  </div>
+                  <div class="jog-settings-row">
+                    <!-- Amplitude limit -->
+                    <div class="amp-limit">
+                      <span class="amp-limit-label">最大增量</span>
+                      <input
+                        v-model.number="ampLimit"
+                        type="number"
+                        min="0"
+                        max="500"
+                        step="1"
+                        class="amp-input"
+                        title="聚焦时可改数值；填 0 表示不限制、持续移动。键盘点动请先点击页面空白处"
+                      />
+                      <span class="amp-limit-unit">{{ jogAxisUnit }}</span>
+                    </div>
+                    <div class="jog-mode-selector">
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">连续</button>
+                      <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'step' }]" @click="changeJogMode('step')">步进</button>
+                    </div>
+                    <div v-if="jogMode === 'step'" class="inch-setting">
+                      <span class="amp-limit-label">步长</span>
+                      <input v-model.number="jogInch" type="number" min="0.01" step="0.01" class="amp-input" @change="applyTeachInch" />
+                      <span class="amp-limit-unit">{{ jogCoordinate === 'joint' ? '°' : 'mm/°' }}</span>
+                      <button v-for="value in inchPresets" :key="value" :class="['inch-preset', { 'inch-preset--active': jogInch === value }]" @click="setTeachInchPreset(value)">
+                        {{ value }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="mode-switch-group">
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isAutoMode }]" @click="setMode('auto')" :disabled="!autoModeEnabled || modeSwitching">自动</button>
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isAutoMode }]" @click="setMode('manual')" :disabled="!autoModeEnabled || modeSwitching">手动</button>
+            <div class="jog-body">
+              <div class="jog-grid">
+                <div v-for="axis in activeJogAxes" :key="axis" class="jog-axis-col">
+                  <span class="jog-axis-name">{{ formatJogAxisName(axis) }}</span>
+                  <button class="jog-btn" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '+' }"
+                    :disabled="!isConnected"
+                    @mousedown.prevent="beginAxisJog(axis, '+')" @mouseup="stopJog" @mouseleave="stopJog"
+                    @touchstart.prevent="beginAxisJog(axis, '+')" @touchend="stopJog">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <span class="jog-axis-val">{{ formatJogAxisValue(axis) }}</span>
+                  <button class="jog-btn jog-btn--down" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '-' }"
+                    :disabled="!isConnected"
+                    @mousedown.prevent="beginAxisJog(axis, '-')" @mouseup="stopJog" @mouseleave="stopJog"
+                    @touchstart.prevent="beginAxisJog(axis, '-')" @touchend="stopJog">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 19l-6-6M12 19l6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div class="mode-switch-group">
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isOnlineMode }]" @click="setDeviceMode('online')" :disabled="isAutoMode || modeSwitching">ONLINE</button>
-            </div>
-            <!-- 点动坐标系（按键/按钮动哪一套轴），与 MovJ/MovL 路径类型无关 -->
-            <div class="jog-mode-selector" title="点动时操作的坐标系：关节角 J1–J6，或笛卡尔 X/Y/Z/RX/RY/RZ">
-              <button
-                :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate === 'joint' }]"
-                :disabled="!isConnected || jogCoordSwitching"
-                @click="changeJogCoordinate('joint')"
-              >点动·关节</button>
-              <button
-                :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate !== 'joint' }]"
-                :disabled="!isConnected || jogCoordSwitching"
-                @click="changeJogCoordinate('cartesian')"
-              >点动·笛卡尔</button>
-            </div>
-            <!-- Amplitude limit -->
-            <div class="amp-limit">
-              <span class="amp-limit-label">最大增量</span>
-              <input
-                v-model.number="ampLimit"
-                type="number"
-                min="0"
-                max="500"
-                step="1"
-                class="amp-input"
-                title="聚焦时可改数值；填 0 表示不限制、持续移动。键盘点动请先点击页面空白处"
-              />
-              <span class="amp-limit-unit">{{ jogAxisUnit }}</span>
-            </div>
-            <div class="jog-mode-selector">
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'continuous' }]" @click="changeJogMode('continuous')">连续</button>
-              <button :class="['jog-mode-btn', { 'jog-mode-btn--active': jogMode === 'step' }]" @click="changeJogMode('step')">步进</button>
-            </div>
-            <div class="jog-mode-selector" title="反转 WASD + 方向键的 X/Y；Shift/Space（Z）不参与反转">
-              <button
-                :class="['jog-mode-btn', { 'jog-mode-btn--active': !wasdInvert }]"
-                @click="setWasdInvert(false)"
-              >WASD 正向</button>
-              <button
-                :class="['jog-mode-btn', { 'jog-mode-btn--active': wasdInvert }]"
-                @click="setWasdInvert(true)"
-              >WASD 反转</button>
-            </div>
-            <div v-if="jogMode === 'step'" class="inch-setting">
-              <span class="amp-limit-label">步长</span>
-              <input v-model.number="jogInch" type="number" min="0.01" step="0.01" class="amp-input" @change="applyTeachInch" />
-              <span class="amp-limit-unit">{{ jogCoordinate === 'joint' ? '°' : 'mm/°' }}</span>
-              <button v-for="value in inchPresets" :key="value" :class="['inch-preset', { 'inch-preset--active': jogInch === value }]" @click="setTeachInchPreset(value)">
-                {{ value }}
+          </div>
+          <!-- 设备朝向：WASD + 方向键 X/Y 的方向模式，占三行高度（表头两行 + jog 按钮行） -->
+          <div class="device-orientation">
+            <span class="device-orientation-title">设备朝向</span>
+            <div class="wasd-dir-picker" :title="`WASD 方向模式（当前：W 指向 ${wasdDirArrow}）：A=正向 B=反转 C=右转90° D=左转90°`">
+              <button class="wasd-dir-btn wasd-dir-btn--c" :class="{ 'wasd-dir-btn--active': wasdDir === 'd' }" @click="setWasdDir('d')" title="D（左转90°）：W→X-  A→Y-  S→X+  D→Y+">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="wasd-dir-btn wasd-dir-btn--a" :class="{ 'wasd-dir-btn--active': wasdDir === 'b' }" @click="setWasdDir('b')" title="B（反转）：W→Y-  A→X+  S→Y+  D→X-">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M5 12l6-6M5 12l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="wasd-dir-center" :title="`当前方向：W 指向 ${wasdDirArrow}`">
+                <svg width="26" height="14.3" viewBox="0 0 800 440">
+                  <path
+                    d="M 200 20 H 600 C 710 20, 780 110, 780 220 C 780 330, 710 420, 600 420 H 570 C 560 420, 554 423, 549 429 C 544 435, 537 438, 528 438 H 465 C 456 438, 449 435, 444 429 C 439 423, 433 416, 423 412 H 350 C 340 412, 334 415, 329 421 C 324 427, 317 438, 308 438 H 280 C 271 438, 264 435, 259 429 C 254 423, 248 416, 238 412 H 200 C 90 420, 20 330, 20 220 C 20 110, 90 20, 200 20 Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </div>
+              <button class="wasd-dir-btn wasd-dir-btn--b" :class="{ 'wasd-dir-btn--active': wasdDir === 'a' }" @click="setWasdDir('a')" title="A（正向）：W→Y+  A→X-  S→Y-  D→X+">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M19 12l-6-6M19 12l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="wasd-dir-btn wasd-dir-btn--d" :class="{ 'wasd-dir-btn--active': wasdDir === 'c' }" @click="setWasdDir('c')" title="C（右转90°）：W→X+  A→Y+  S→X-  D→Y-">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 19l-6-6M12 19l6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
           </div>
         </div>
-
-        <div class="jog-body">
-          <div class="jog-grid">
-            <div v-for="axis in activeJogAxes" :key="axis" class="jog-axis-col">
-              <span class="jog-axis-name">{{ formatJogAxisName(axis) }}</span>
-              <button class="jog-btn" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '+' }"
-                :disabled="!isConnected"
-                @mousedown.prevent="beginAxisJog(axis, '+')" @mouseup="stopJog" @mouseleave="stopJog"
-                @touchstart.prevent="beginAxisJog(axis, '+')" @touchend="stopJog">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-              <span class="jog-axis-val">{{ formatJogAxisValue(axis) }}</span>
-              <button class="jog-btn jog-btn--down" :class="{ 'jog-btn--active': jogActive && jogAxis === axis && jogDir === '-' }"
-                :disabled="!isConnected"
-                @mousedown.prevent="beginAxisJog(axis, '-')" @mouseup="stopJog" @mouseleave="stopJog"
-                @touchstart.prevent="beginAxisJog(axis, '-')" @touchend="stopJog">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 19l-6-6M12 19l6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-            </div>
-          </div>
-          <div class="jog-shortcut-hints">
-            <span v-for="hint in activeShortcutHints" :key="hint.label" class="jog-shortcut-hint">
+        <div class="jog-shortcut-hints">
+          <template v-for="(hint, hi) in activeShortcutHints" :key="hint.label">
+            <span v-if="hi === 3" class="jog-shortcut-hints-break"></span>
+            <span class="jog-shortcut-hint">
               <b>{{ hint.label }}</b>
               <kbd>{{ hint.pos }}</kbd>/<kbd>{{ hint.neg }}</kbd>
             </span>
-          </div>
+          </template>
         </div>
       </div>
 
@@ -2406,7 +2433,8 @@ function normalizeJogKey(e: KeyboardEvent): string {
  * W=Y+  A=X-  S=Y-  D=X+  Shift=Z-  Space=Z+
  * -/_=Z-  =/+=Z+（编辑框内：- 留给负号输入，用 _ 与 =/+ 调 Z）
  * ↑=Y+  ↓=Y-  ←=X-  →=X+
- * 「WASD 反转」同时反转 WASD 与方向键的 X/Y；Shift/Space（Z）不参与反转。
+ * WASD + 方向键的 X/Y 方向由四向模式决定（A=正向 B=反转 C=右转90° D=左转90°）；
+ * Shift/Space（Z）不参与。
  */
 const FLIGHT_KEY_BASE: Record<string, { axis: string; dir: string }> = {
   w: { axis: 'y', dir: '+' },
@@ -2423,39 +2451,71 @@ const FLIGHT_KEY_BASE: Record<string, { axis: string; dir: string }> = {
   arrowright: { axis: 'x', dir: '+' },
 }
 
-/** X/Y 水平键受「WASD 反转」影响；Shift/Space（Z）不在此集合 */
-const FLIGHT_XY_INVERT_KEYS = new Set([
-  'w', 'a', 's', 'd',
-  'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
-])
+/** WASD 方向四模式：A=正向（W→Y+） B=反转（W→Y-） C=右转90°（W→X+） D=左转90°（W→X-） */
+type WasdDir = 'a' | 'b' | 'c' | 'd'
 
-const WASD_INVERT_STORAGE_KEY = 'docat.wasdInvert'
-const wasdInvert = ref(false)
+/** 四模式下 WASD + 方向键（X/Y 键）各自的映射；Shift/Space（Z）不在此表 */
+const FLIGHT_XY_MODE_MAP: Record<WasdDir, Record<string, { axis: string; dir: string }>> = {
+  a: {
+    w: { axis: 'y', dir: '+' }, a: { axis: 'x', dir: '-' },
+    s: { axis: 'y', dir: '-' }, d: { axis: 'x', dir: '+' },
+    arrowup: { axis: 'y', dir: '+' }, arrowleft: { axis: 'x', dir: '-' },
+    arrowdown: { axis: 'y', dir: '-' }, arrowright: { axis: 'x', dir: '+' },
+  },
+  b: {
+    w: { axis: 'y', dir: '-' }, a: { axis: 'x', dir: '+' },
+    s: { axis: 'y', dir: '+' }, d: { axis: 'x', dir: '-' },
+    arrowup: { axis: 'y', dir: '-' }, arrowleft: { axis: 'x', dir: '+' },
+    arrowdown: { axis: 'y', dir: '+' }, arrowright: { axis: 'x', dir: '-' },
+  },
+  c: {
+    w: { axis: 'x', dir: '+' }, a: { axis: 'y', dir: '+' },
+    s: { axis: 'x', dir: '-' }, d: { axis: 'y', dir: '-' },
+    arrowup: { axis: 'x', dir: '+' }, arrowleft: { axis: 'y', dir: '+' },
+    arrowdown: { axis: 'x', dir: '-' }, arrowright: { axis: 'y', dir: '-' },
+  },
+  d: {
+    w: { axis: 'x', dir: '-' }, a: { axis: 'y', dir: '-' },
+    s: { axis: 'x', dir: '+' }, d: { axis: 'y', dir: '+' },
+    arrowup: { axis: 'x', dir: '-' }, arrowleft: { axis: 'y', dir: '-' },
+    arrowdown: { axis: 'x', dir: '+' }, arrowright: { axis: 'y', dir: '+' },
+  },
+}
+
+const WASD_DIR_STORAGE_KEY = 'docat.wasdDir'
+const LEGACY_WASD_INVERT_STORAGE_KEY = 'docat.wasdInvert'
+const wasdDir = ref<WasdDir>('a')
 try {
-  wasdInvert.value = localStorage.getItem(WASD_INVERT_STORAGE_KEY) === '1'
+  const saved = localStorage.getItem(WASD_DIR_STORAGE_KEY) as WasdDir | null
+  if (saved === 'a' || saved === 'b' || saved === 'c' || saved === 'd') {
+    wasdDir.value = saved
+  } else if (localStorage.getItem(LEGACY_WASD_INVERT_STORAGE_KEY) === '1') {
+    wasdDir.value = 'b'
+  }
 } catch { /* ignore */ }
+
+/** 中心指针旋转角：指示当前模式下 W 键指向 */
+const WASD_DIR_ROTATE: Record<WasdDir, number> = { a: 0, b: 180, c: 90, d: 270 }
+const wasdDirArrow = computed(() =>
+  ({ 0: '↑', 180: '↓', 90: '→', 270: '←' } as const)[WASD_DIR_ROTATE[wasdDir.value]]
+)
 
 /** 坐标编辑框内仍放行的点动键：WASD（X/Y）+ =（Z+）；普通 - 保留给负号输入，仅 _（Shift+-）触发 Z- */
 const JOG_IN_EDIT_KEYS = new Set(['w', 'a', 's', 'd', 'equal'])
 
-function setWasdInvert(on: boolean) {
-  if (wasdInvert.value === on) return
+function setWasdDir(mode: WasdDir) {
+  if (wasdDir.value === mode) return
   // 切换时若正在用飞行键点动，先停，避免方向突变
   if (jogActive.value) stopJog()
   keysDown.clear()
-  wasdInvert.value = on
+  wasdDir.value = mode
   try {
-    localStorage.setItem(WASD_INVERT_STORAGE_KEY, on ? '1' : '0')
+    localStorage.setItem(WASD_DIR_STORAGE_KEY, mode)
   } catch { /* ignore */ }
 }
 
 function resolveFlightMapping(key: string): { axis: string; dir: string } | undefined {
-  const base = FLIGHT_KEY_BASE[key]
-  if (!base) return undefined
-  if (wasdInvert.value && FLIGHT_XY_INVERT_KEYS.has(key)) {
-    return { axis: base.axis, dir: base.dir === '+' ? '-' : '+' }
-  }
-  return base
+  return FLIGHT_XY_MODE_MAP[wasdDir.value][key] ?? FLIGHT_KEY_BASE[key]
 }
 
 const jointKeyMap: Record<string, { axis: string; dir: string }> = {
@@ -2487,14 +2547,16 @@ const jointShortcutHints = [
 ]
 
 const cartesianShortcutHints = computed(() => {
-  // WASD + 方向键提示随反转开关更新；Z（Space/Shift）固定
-  const xPos = wasdInvert.value ? 'A / ←' : 'D / →'
-  const xNeg = wasdInvert.value ? 'D / →' : 'A / ←'
-  const yPos = wasdInvert.value ? 'S / ↓' : 'W / ↑'
-  const yNeg = wasdInvert.value ? 'W / ↑' : 'S / ↓'
+  // WASD + 方向键提示随四向模式更新；Z（Space/Shift）固定
+  const m = FLIGHT_XY_MODE_MAP[wasdDir.value]
+  const arrowOf = (k: string) =>
+    ({ arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→' } as const)[k] ?? k.toUpperCase()
+  const fmt = (axis: string, dir: string) =>
+    Object.entries(m).filter(([, v]) => v.axis === axis && v.dir === dir)
+      .map(([k]) => arrowOf(k)).join(' / ')
   return [
-    { label: 'X', pos: xPos, neg: xNeg },
-    { label: 'Y', pos: yPos, neg: yNeg },
+    { label: 'X', pos: fmt('x', '+'), neg: fmt('x', '-') },
+    { label: 'Y', pos: fmt('y', '+'), neg: fmt('y', '-') },
     { label: 'Z', pos: 'Space / = / +', neg: 'Shift / - / _' },
     { label: 'RX', pos: 'O', neg: 'L' },
     { label: 'RY', pos: 'P', neg: ';' },
@@ -6667,8 +6729,20 @@ onUnmounted(() => {
 .joint-gauge-center { position: absolute; top: -3px; left: 50%; transform: translateX(-50%); width: 2px; height: 10px; background: var(--text-muted); border-radius: 1px; }
 .joint-value { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-secondary); width: 60px; text-align: right; }
 
-.jog-panel-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
-.jog-settings { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.jog-panel-main { display: flex; gap: 16px; align-items: stretch; }
+.jog-panel-main-left { flex: 1; min-width: 0; }
+.jog-panel-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.jog-settings { display: flex; align-items: stretch; gap: 16px; flex-wrap: wrap; }
+.jog-settings-rows { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+.jog-settings-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+/* 手动自动 开关的 开/关 标签只需单字宽度，去掉 72px 预留，让 自动/手动 与 行2 连续/步进 对齐 */
+.jog-settings .toggle-label { min-width: 0; }
+/* 设备朝向板块：占三行高度（表头两行 + jog 按钮行），顶部对齐，无卡片样式 */
+.device-orientation {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  gap: 8px;
+}
+.device-orientation-title { font-family: var(--font-body); font-size: 0.72rem; font-weight: 500; color: var(--text-muted); }
 .mode-switch-group { display: flex; align-items: center; gap: 6px; }
 .amp-limit { display: flex; align-items: center; gap: 4px; }
 .amp-limit-label { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); }
@@ -6687,6 +6761,34 @@ onUnmounted(() => {
 .jog-mode-btn--active { background: var(--cyan-900); border-color: var(--cyan-500); color: var(--cyan-300); }
 .jog-mode-btn:hover:not(.jog-mode-btn--active) { color: var(--text-primary); border-color: var(--border-bright); }
 .jog-mode-btn:active { transform: translateY(1px); }
+
+/* WASD 方向十字选择器：设备朝向板块内，中心指针指示 W 指向 */
+.wasd-dir-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 26px);
+  grid-template-rows: repeat(3, 26px);
+  gap: 2px;
+}
+.wasd-dir-btn--c { grid-area: 1 / 2; }
+.wasd-dir-btn--a { grid-area: 2 / 1; }
+.wasd-dir-btn--b { grid-area: 2 / 3; }
+.wasd-dir-btn--d { grid-area: 3 / 2; }
+.wasd-dir-btn {
+  width: 26px; height: 26px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer; color: var(--text-muted);
+  line-height: 1; transition: all var(--duration-fast);
+}
+.wasd-dir-btn--active { background: var(--cyan-900); border-color: var(--cyan-500); color: var(--cyan-300); }
+.wasd-dir-btn:hover:not(.wasd-dir-btn--active) { color: var(--text-primary); border-color: var(--border-bright); }
+.wasd-dir-btn:active { transform: translateY(1px); }
+.wasd-dir-center {
+  grid-area: 2 / 2;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); pointer-events: none;
+}
 .inch-setting { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .inch-preset {
   min-width: 38px; height: 22px; padding: 0 6px; border: 1px solid var(--border);
@@ -6704,6 +6806,7 @@ onUnmounted(() => {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px;
   padding: 4px 0 2px; border-top: 1px solid var(--border); margin-top: 6px;
 }
+.jog-shortcut-hints-break { flex-basis: 100%; width: 0; height: 0; }
 .jog-shortcut-hint {
   font-family: var(--font-body); font-size: 0.62rem; color: var(--text-muted);
   display: inline-flex; align-items: center; gap: 4px;
