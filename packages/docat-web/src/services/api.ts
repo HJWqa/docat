@@ -109,12 +109,20 @@ export async function scanDevices(): Promise<ApiResponse<DeviceInfo[]>> {
   return request('GET', '/api/devices/scan')
 }
 
-export async function registerDevice(ip: string, name: string, autoConnect = false): Promise<ApiResponse<DeviceConfig>> {
-  return request('POST', '/api/devices', { ip, name, autoConnect })
+export async function listSerialPorts(): Promise<ApiResponse<string[]>> {
+  return request('GET', '/api/devices/serial-ports')
 }
 
-export async function updateDevice(id: string, params: { ip?: string; name?: string; type?: string; autoConnect?: boolean }): Promise<ApiResponse<DeviceConfig>> {
+export async function registerDevice(ip: string, name: string, autoConnect = false, extra?: { type?: string; serialPort?: string; baudRate?: number }): Promise<ApiResponse<DeviceConfig>> {
+  return request('POST', '/api/devices', { ip, name, autoConnect, ...extra })
+}
+
+export async function updateDevice(id: string, params: { ip?: string; name?: string; type?: string; autoConnect?: boolean; serialPort?: string; baudRate?: number }): Promise<ApiResponse<DeviceConfig>> {
   return request('PUT', `/api/devices/${id}`, params)
+}
+
+export async function setEndEffector(id: string, kind: 'suction' | 'gripper', on: boolean): Promise<ApiResponse<null>> {
+  return request('POST', `/api/devices/${id}/end-effector`, { kind, on })
 }
 
 export async function deleteDevice(id: string): Promise<ApiResponse<null>> {

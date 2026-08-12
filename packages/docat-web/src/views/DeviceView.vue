@@ -13,7 +13,8 @@
         </div>
       </div>
       <div class="workspace-header-center">
-        <div class="workspace-switch">
+        <!-- Magician 只支持串口模式，隐藏顶部 控制/编程/TCP 切换 -->
+        <div v-if="!isMagician" class="workspace-switch">
           <router-link :to="{ path: `/device/${deviceId}`, query: $route.query }" class="workspace-switch-btn workspace-switch-btn--active">
             控制
           </router-link>
@@ -30,8 +31,8 @@
           <span class="status-dot" :class="`status-dot--${isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
           {{ isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
         </span>
-        <!-- Enable Toggle Switch -->
-        <label v-if="isConnected" class="toggle-switch" title="使能开关 (Ctrl+E)">
+        <!-- Enable Toggle Switch（Magician 无使能概念，隐藏） -->
+        <label v-if="isConnected && !isMagician" class="toggle-switch" title="使能开关 (Ctrl+E)">
           <input type="checkbox" :checked="enabled" @change="toggleEnable" />
           <span class="toggle-track">
             <span class="toggle-thumb" />
@@ -77,7 +78,7 @@
       <div class="card pose-card">
         <div class="hud-label">位姿</div>
         <div class="pose-readout">
-          <div v-for="axis in ['x','y','z','rx','ry','rz']" :key="axis" class="pose-axis-row">
+          <div v-for="axis in poseAxes" :key="axis" class="pose-axis-row">
             <span class="pose-axis-label">{{ axis.toUpperCase() }}</span>
             <span class="pose-axis-value">{{ getPoseVal(axis) }}</span>
             <span class="pose-axis-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
@@ -88,7 +89,7 @@
       <div class="card joint-card">
         <div class="hud-label">关节角度</div>
         <div class="joint-readout">
-          <div v-for="j in 6" :key="j" class="joint-row">
+          <div v-for="j in jointCount" :key="j" class="joint-row">
             <span class="joint-label">J{{ j }}</span>
             <div class="joint-gauge">
               <div class="joint-gauge-track">
@@ -101,17 +102,18 @@
         </div>
       </div>
 
-      <!-- 3D Model -->
+      <!-- 3D Model / 标定辅助（Magician 无 3D 模型，直接显示标定辅助） -->
       <div class="card model-panel">
         <div class="model-panel-header">
           <div>
-            <div class="hud-label" style="margin-bottom:0">{{ calibMode ? '标定辅助' : '3D 模型' }}</div>
-            <div class="model-subtitle" v-if="!calibMode">{{ robotModelType }} · 实时关节姿态</div>
+            <div class="hud-label" style="margin-bottom:0">{{ calibPanelActive ? '标定辅助' : '3D 模型' }}</div>
+            <div class="model-subtitle" v-if="!calibPanelActive">{{ robotModelType }} · 实时关节姿态</div>
             <div class="model-subtitle" v-else>图像坐标 → 物理坐标 · {{ calibModelLabel }} / {{ calibWeightLabel }}</div>
           </div>
           <div class="model-panel-actions">
-            <button v-if="!calibMode" class="btn btn-secondary btn-sm" @click="reset3DView">重置视角</button>
+            <button v-if="!calibPanelActive" class="btn btn-secondary btn-sm" @click="reset3DView">重置视角</button>
             <button
+              v-if="!isMagician"
               class="btn-icon btn-icon--convert"
               :class="{ 'btn-icon--active': calibMode }"
               :title="calibMode ? '返回 3D 模型' : '标定辅助（图像坐标 ↔ 物理坐标）'"
@@ -121,7 +123,7 @@
             </button>
           </div>
         </div>
-        <template v-if="!calibMode">
+        <template v-if="!calibPanelActive">
           <div class="model-frame-shell">
             <iframe
               ref="modelIframeRef"
@@ -294,6 +296,8 @@
               <div class="jog-settings">
               <div class="jog-settings-rows">
                   <div class="jog-settings-row">
+                    <!-- Magician（串口模式）无 手动自动/自动/手动/TCP/ONLINE 模式切换 -->
+                    <template v-if="!isMagician">
                     <div class="mode-switch-group">
                       <span class="amp-limit-label">手动自动</span>
                       <label class="toggle-switch">
@@ -310,8 +314,9 @@
                       <button :class="['jog-mode-btn', { 'jog-mode-btn--active': !isOnlineMode }]" @click="setDeviceMode('tcp')" :disabled="isAutoMode || modeSwitching">TCP</button>
                       <button :class="['jog-mode-btn', { 'jog-mode-btn--active': isOnlineMode }]" @click="setDeviceMode('online')" :disabled="isAutoMode || modeSwitching">ONLINE</button>
                     </div>
+                    </template>
                     <!-- 点动坐标系（按键/按钮动哪一套轴），与 MovJ/MovL 路径类型无关 -->
-                    <div class="jog-mode-selector" title="点动时操作的坐标系：关节角 J1–J6，或笛卡尔 X/Y/Z/RX/RY/RZ">
+                    <div class="jog-mode-selector" :title="`点动时操作的坐标系：关节角 J1–J${jointCount}，或笛卡尔 ${isMagician ? 'X/Y/Z/R' : 'X/Y/Z/RX/RY/RZ'}`">
                       <button
                         :class="['jog-mode-btn', { 'jog-mode-btn--active': jogCoordinate === 'joint' }]"
                         :disabled="!isConnected || jogCoordSwitching"
@@ -451,7 +456,7 @@
           </div>
         </div>
         <div class="move-grid">
-          <div v-for="j in 6" :key="j" class="move-field">
+          <div v-for="j in jointCount" :key="j" class="move-field">
             <label class="move-label">J{{ j }}</label>
             <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input"
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('joint', $event)" ref="jointInputRefs" />
@@ -467,7 +472,7 @@
         </div>
         <!-- Pose targets -->
         <div class="move-grid" style="margin-top:10px">
-          <div v-for="axis in ['x','y','z','rx','ry','rz']" :key="axis" class="move-field">
+          <div v-for="axis in poseAxes" :key="axis" class="move-field">
             <label class="move-label">{{ axis.toUpperCase() }}</label>
             <input v-model.number="targetPose[axis]" type="number" step="0.1" class="move-input"
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('pose', $event)" ref="poseInputRefs" />
@@ -554,9 +559,12 @@
 
     <!-- Action Buttons -->
     <div class="action-bar mt-2">
-      <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ 上电</button>
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ 下电</button>
-      <!-- 回零：Magician 机型预留动作，默认隐藏；接入 Magician 时置 supportsHome = true 启用 -->
+      <!-- Magician 无上电/下电命令 -->
+      <template v-if="!isMagician">
+        <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ 上电</button>
+        <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ 下电</button>
+      </template>
+      <!-- 回零：Magician 支持（HOMECmd）；其余机型预留 -->
       <button v-if="supportsHome" class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
       <span class="action-sep" />
       <!-- Speed Slider -->
@@ -572,7 +580,8 @@
       <span class="action-sep" />
       <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop" title="停止运动 (Alt+Enter)">⏹ 停止</button>
       <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
-      <button :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="toggleTrajectory" :disabled="!isConnected">
+      <!-- Magician 无轨迹录制 -->
+      <button v-if="!isMagician" :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="toggleTrajectory" :disabled="!isConnected">
         📍 轨迹
       </button>
       <!-- DobotES01 吸盘快捷控制 -->
@@ -584,6 +593,22 @@
           <button class="btn btn-primary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('grip')" title="吸取 (Z)">吸取</button>
           <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('release')" title="释放 (X)">释放</button>
           <button class="btn btn-secondary btn-sm" :disabled="!isConnected || es01Busy" @click="doES01('clearAlarm')" title="清错 (C)">清错</button>
+        </div>
+      </template>
+      <!-- Magician 末端执行器：吸盘（Z/X）+ 夹爪（V/B） -->
+      <template v-if="isMagician">
+        <span class="action-sep" />
+        <div class="es01-control">
+          <span class="es01-label">吸盘</span>
+          <span :class="['es01-status', `es01-status--${magicianSuction ? 'grip' : 'release'}`]">{{ magicianSuction ? '吸附中' : '已释放' }}</span>
+          <button class="btn btn-primary btn-sm" :disabled="!isConnected" @click="setMagicianSuction(true)" title="吸取 (Z)">吸取</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="setMagicianSuction(false)" title="释放 (X)">释放</button>
+        </div>
+        <div class="es01-control">
+          <span class="es01-label">夹爪</span>
+          <span :class="['es01-status', `es01-status--${magicianGripper ? 'grip' : 'release'}`]">{{ magicianGripper ? '抓紧中' : '已松开' }}</span>
+          <button class="btn btn-primary btn-sm" :disabled="!isConnected" @click="setMagicianGripper(true)" title="抓紧 (V)">抓紧</button>
+          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="setMagicianGripper(false)" title="松开 (B)">松开</button>
         </div>
       </template>
     </div>
@@ -1102,12 +1127,12 @@
                           <td><input v-model.trim="editPostureForm.name" class="input-xs" style="width:80px" /></td>
                           <td>
                             <div v-if="editPostureForm.type === 'cartesian'" style="display:flex;gap:3px;flex-wrap:wrap">
-                              <input v-for="axis in (['x','y','z','rx','ry','rz'] as const)" :key="axis"
-                                v-model.number="editPostureForm.pose![axis]" type="number" class="input-xs"
+                              <input v-for="axis in poseAxes" :key="axis"
+                                v-model.number="editPostureForm.pose![axis === 'r' ? 'rx' : axis]" type="number" class="input-xs"
                                 style="width:58px" step="0.1" :title="axis.toUpperCase()" :placeholder="axis.toUpperCase()" />
                             </div>
                             <div v-else style="display:flex;gap:3px;flex-wrap:wrap">
-                              <input v-for="j in 6" :key="j" v-model.number="editPostureForm.joint[j-1]"
+                              <input v-for="j in jointCount" :key="j" v-model.number="editPostureForm.joint[j-1]"
                                 type="number" class="input-xs" style="width:58px" step="0.1" :placeholder="'J' + j" />
                             </div>
                           </td>
@@ -1872,7 +1897,7 @@ let warningDetailSeq = 0
 let deviceLogSeq = 0
 const showDobotPlusBar = ref(false)
 const settingsTab = ref('system')
-const settingsTabs = [
+const ALL_SETTINGS_TABS = [
   { key: 'system', icon: '⚙', label: '系统' },
   { key: 'users', icon: '👤', label: '用户' },
   { key: 'coordinates', icon: '📐', label: '坐标系' },
@@ -1887,6 +1912,21 @@ const settingsTabs = [
   { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
   { key: 'docat', icon: '🐱', label: 'docat' },
 ]
+/** Magician 只保留 姿态 与 docat 两个 tab */
+const settingsTabs = computed(() =>
+  isMagician.value
+    ? ALL_SETTINGS_TABS.filter(t => t.key === 'postures' || t.key === 'docat')
+    : ALL_SETTINGS_TABS,
+)
+// 当前 tab 不在可用列表时（如 Magician 无 system），回退到第一个可用 tab
+// 注意：不能 watch(settingsTabs)——watch 会在 setup 阶段求值源（TDZ：isMagician 在文件后部声明）
+// 由 toggleSettings 打开面板时调用；isMagician 变化时由下方 watch(isMagician) 联动
+function syncSettingsTab() {
+  const tabs = settingsTabs.value
+  if (!tabs.some(t => t.key === settingsTab.value)) {
+    settingsTab.value = tabs[0]?.key ?? ''
+  }
+}
 
 // 设置写操作保护：viewer 只读（对齐服务端 requireOperator）；自动模式下禁止修改（对齐 OpenDobot46 isShowMask）
 const settingsWritable = computed(() => {
@@ -1947,8 +1987,21 @@ const logCountText = computed(() => {
 })
 const robotModelType = computed(() => normalizeRobotModelType(device.value?.type || device.value?.name || 'MG6'))
 
+/** 是否 Magician（4 轴串口机）：控制 UI 显示与轴数 */
+const isMagician = computed(() => robotModelType.value === 'Magician')
+/** 关节轴数：Magician=4，其余 6 */
+const jointCount = computed(() => (isMagician.value ? 4 : 6))
+/** 位姿显示轴：Magician 用 XYZR（R 占 RX 位置），其余 XYZ+RXRYRZ */
+const poseAxes = computed(() =>
+  isMagician.value
+    ? (['x', 'y', 'z', 'r'] as const)
+    : (['x', 'y', 'z', 'rx', 'ry', 'rz'] as const),
+)
+
 function normalizeRobotModelType(raw: string): string {
   const value = String(raw || '').toUpperCase().replace(/\s+/g, '')
+  // Magician（4 轴）优先于 E6/MG6 判断："Magician E6" 是 6 轴 MG6，"Magician" 是 4 轴
+  if (value.includes('MAGICIAN') && !value.includes('E6')) return 'Magician'
   if (value.includes('MG6') || value.includes('E6')) return 'MG6'
   if (value.includes('CR30')) return 'CR30'
   if (value.includes('CR20AF')) return 'CR20AF'
@@ -2148,6 +2201,8 @@ function toggleSettings() {
   showSettings.value = !showSettings.value
   if (!showSettings.value) return
   closeSiblingSidePanels('settings')
+  // 打开时同步默认 tab（Magician 无 system 等 tab）
+  syncSettingsTab()
 }
 
 function switchLogTab(tab: 'alarms' | 'history') {
@@ -2333,8 +2388,13 @@ watch(robotModelType, () => {
 
 const isConnected = computed(() => deviceStore.isConnected(deviceId))
 const isVirtualMode = computed(() => deviceStore.isVirtual(deviceId))
-/** 回零：Magician 机型预留动作，默认 false（按钮隐藏）；接入 Magician 时置 true */
+/** 回零：Magician 支持（HOMECmd）；其余机型预留，默认隐藏 */
 const supportsHome = ref(false)
+watch(isMagician, (v) => {
+  supportsHome.value = v
+  // 机型变化时同步设置面板可用 tab（isMagician 在此之后声明，可安全求值）
+  syncSettingsTab()
+}, { immediate: true })
 const tcpDown = ref(false)
 
 // ─── Speed Ratio ─────────────────────────────────
@@ -2344,8 +2404,13 @@ let speedDebounceTimer: ReturnType<typeof setTimeout> | null = null
 // ─── Jog State ───────────────────────────────────
 
 type JogCoordinateMode = 'joint' | 'cartesian' | 'tool'
-const JOINT_AXES = ['j1', 'j2', 'j3', 'j4', 'j5', 'j6'] as const
-const CARTESIAN_AXES = ['x', 'y', 'z', 'rx', 'ry', 'rz'] as const
+/** 点动轴列表：Magician 四轴（关节 J1-4，笛卡尔 XYZR——R 占 RX 位置） */
+const JOINT_AXES = computed(() => (isMagician.value
+  ? (['j1', 'j2', 'j3', 'j4'] as const)
+  : (['j1', 'j2', 'j3', 'j4', 'j5', 'j6'] as const)))
+const CARTESIAN_AXES = computed(() => (isMagician.value
+  ? (['x', 'y', 'z', 'r'] as const)
+  : (['x', 'y', 'z', 'rx', 'ry', 'rz'] as const)))
 
 const jogCoordinate = ref<JogCoordinateMode>('joint')
 const jogCoordSwitching = ref(false)
@@ -2392,7 +2457,7 @@ const JOG_REPEAT_MS = 100
 let jogTickInFlight = false
 
 const activeJogAxes = computed(() =>
-  jogCoordinate.value === 'joint' ? [...JOINT_AXES] : [...CARTESIAN_AXES]
+  jogCoordinate.value === 'joint' ? [...JOINT_AXES.value] : [...CARTESIAN_AXES.value]
 )
 
 const jogAxisUnit = computed(() => {
@@ -2521,33 +2586,42 @@ function resolveFlightMapping(key: string): { axis: string; dir: string } | unde
   return FLIGHT_XY_MODE_MAP[wasdDir.value][key] ?? FLIGHT_KEY_BASE[key]
 }
 
-const jointKeyMap: Record<string, { axis: string; dir: string }> = {
+const jointKeyMap = computed<Record<string, { axis: string; dir: string }>>(() => ({
   y: { axis: 'j1', dir: '+' }, h: { axis: 'j1', dir: '-' },
   u: { axis: 'j2', dir: '+' }, j: { axis: 'j2', dir: '-' },
   i: { axis: 'j3', dir: '+' }, k: { axis: 'j3', dir: '-' },
   o: { axis: 'j4', dir: '+' }, l: { axis: 'j4', dir: '-' },
-  p: { axis: 'j5', dir: '+' }, semicolon: { axis: 'j5', dir: '-' },
-  '[': { axis: 'j6', dir: '+' }, "'": { axis: 'j6', dir: '-' },
-}
+  // J5/J6 仅 6 轴机型；Magician（4 轴）不映射
+  ...(isMagician.value ? {} : {
+    p: { axis: 'j5', dir: '+' }, semicolon: { axis: 'j5', dir: '-' },
+    '[': { axis: 'j6', dir: '+' }, "'": { axis: 'j6', dir: '-' },
+  }),
+}))
 
-const cartesianKeyMap: Record<string, { axis: string; dir: string }> = {
+const cartesianKeyMap = computed<Record<string, { axis: string; dir: string }>>(() => ({
   // 保留原 YUHJ… 映射；飞行键由 resolveFlightMapping 优先处理
   y: { axis: 'x', dir: '+' }, h: { axis: 'x', dir: '-' },
   u: { axis: 'y', dir: '+' }, j: { axis: 'y', dir: '-' },
   i: { axis: 'z', dir: '+' }, k: { axis: 'z', dir: '-' },
-  o: { axis: 'rx', dir: '+' }, l: { axis: 'rx', dir: '-' },
-  p: { axis: 'ry', dir: '+' }, semicolon: { axis: 'ry', dir: '-' },
-  '[': { axis: 'rz', dir: '+' }, "'": { axis: 'rz', dir: '-' },
-}
+  // Magician：R 使用 RX 的位置与快捷键（O/L）
+  o: { axis: isMagician.value ? 'r' : 'rx', dir: '+' }, l: { axis: isMagician.value ? 'r' : 'rx', dir: '-' },
+  // RY/RZ 仅 6 轴机型
+  ...(isMagician.value ? {} : {
+    p: { axis: 'ry', dir: '+' }, semicolon: { axis: 'ry', dir: '-' },
+    '[': { axis: 'rz', dir: '+' }, "'": { axis: 'rz', dir: '-' },
+  }),
+}))
 
-const jointShortcutHints = [
+const jointShortcutHints = computed(() => [
   { label: 'J1', pos: 'Y', neg: 'H' },
   { label: 'J2', pos: 'U', neg: 'J' },
   { label: 'J3', pos: 'I', neg: 'K' },
   { label: 'J4', pos: 'O', neg: 'L' },
-  { label: 'J5', pos: 'P', neg: ';' },
-  { label: 'J6', pos: '[', neg: "'" },
-]
+  ...(isMagician.value ? [] : [
+    { label: 'J5', pos: 'P', neg: ';' },
+    { label: 'J6', pos: '[', neg: "'" },
+  ]),
+])
 
 const cartesianShortcutHints = computed(() => {
   // WASD + 方向键提示随四向模式更新；Z（Space/Shift）固定
@@ -2561,20 +2635,23 @@ const cartesianShortcutHints = computed(() => {
     { label: 'X', pos: fmt('x', '+'), neg: fmt('x', '-') },
     { label: 'Y', pos: fmt('y', '+'), neg: fmt('y', '-') },
     { label: 'Z', pos: 'Space / = / +', neg: 'Shift / - / _' },
-    { label: 'RX', pos: 'O', neg: 'L' },
-    { label: 'RY', pos: 'P', neg: ';' },
-    { label: 'RZ', pos: '[', neg: "'" },
+    // Magician：R 使用 RX 的位置与快捷键（O/L）
+    { label: isMagician.value ? 'R' : 'RX', pos: 'O', neg: 'L' },
+    ...(isMagician.value ? [] : [
+      { label: 'RY', pos: 'P', neg: ';' },
+      { label: 'RZ', pos: '[', neg: "'" },
+    ]),
   ]
 })
 
 /** 关节模式下也提示飞行键（XYZ） */
 const jointWithFlightHints = computed(() => [
   ...cartesianShortcutHints.value.slice(0, 3),
-  ...jointShortcutHints,
+  ...jointShortcutHints.value,
 ])
 
 const activeKeyMap = computed(() =>
-  jogCoordinate.value === 'joint' ? jointKeyMap : cartesianKeyMap
+  jogCoordinate.value === 'joint' ? jointKeyMap.value : cartesianKeyMap.value
 )
 const activeShortcutHints = computed(() =>
   jogCoordinate.value === 'joint' ? jointWithFlightHints.value : cartesianShortcutHints.value
@@ -2583,7 +2660,7 @@ const activeShortcutHints = computed(() =>
 const keysDown = new Set<string>()
 
 function isJogHotkey(key: string): boolean {
-  return Boolean(FLIGHT_KEY_BASE[key] || jointKeyMap[key] || cartesianKeyMap[key])
+  return Boolean(FLIGHT_KEY_BASE[key] || jointKeyMap.value[key] || cartesianKeyMap.value[key])
 }
 
 /** 把焦点拉回设备页，避免 F7 光标/数字框吃掉方向键 */
@@ -2700,8 +2777,8 @@ function onKeyDown(e: KeyboardEvent) {
   const target = e.target as HTMLElement
   const key = normalizeJogKey(e)
 
-  // Ctrl+E：使能 / 下使能（切换，等同使能开关；编辑框聚焦时也可用）
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
+  // Ctrl+E：使能 / 下使能（切换，等同使能开关；编辑框聚焦时也可用；Magician 无使能概念）
+  if (!isMagician.value && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
     e.preventDefault()
     if (!e.repeat) void toggleEnable()
     return
@@ -2732,13 +2809,15 @@ function onKeyDown(e: KeyboardEvent) {
   // 组合键（Ctrl/Cmd/Alt）不放行，避免 Ctrl+A/Ctrl+C 等被热键劫持
   if (e.ctrlKey || e.metaKey || e.altKey) return
 
-  const panelShortcutKey = key === 'b' || key === 'n' || key === 'm'
-  // 编辑框聚焦时按键交给浏览器；仅 移动/预设 坐标框内放行 B/N/M 聚焦快捷键、WASD 点动键、=/+ 与 _ 调 Z、ZXC 吸盘键
+  // Magician：B 被夹爪占用，仅保留 N/M 作为聚焦快捷键
+  const panelShortcutKey = key === 'n' || key === 'm' || (key === 'b' && !isMagician.value)
+  // 编辑框聚焦时按键交给浏览器；仅 移动/预设 坐标框内放行 B/N/M 聚焦快捷键、WASD 点动键、=/+ 与 _ 调 Z、ZXC 吸盘键、ZVXB 末端键
   // 普通 - 不点动：负数坐标输入要用
   const editable = isEditableTarget(e.target)
   const es01EditKey = hasDobotES01.value ? ES01_KEY_MAP[key] : undefined
+  const magicianEditKey = isMagician.value ? MAGICIAN_EE_KEY_MAP[key] : undefined
   const jogInEdit = JOG_IN_EDIT_KEYS.has(key) || (key === 'minus' && e.shiftKey)
-  if (editable && !(isMoveCoordInput(target) && (panelShortcutKey || jogInEdit || Boolean(es01EditKey)))) return
+  if (editable && !(isMoveCoordInput(target) && (panelShortcutKey || jogInEdit || Boolean(es01EditKey) || Boolean(magicianEditKey)))) return
 
   // B/N/M 只聚焦、不读取：B（左）→ 手动点动板块；N → J1；M → X（Shift 组合不触发）
   if (panelShortcutKey && !e.shiftKey) {
@@ -2755,6 +2834,13 @@ function onKeyDown(e: KeyboardEvent) {
   if (hasDobotES01.value && ES01_KEY_MAP[key]) {
     e.preventDefault()
     if (!e.repeat) void doES01(ES01_KEY_MAP[key])
+    return
+  }
+
+  // Magician 末端快捷键：Z/X 吸盘，V/B 夹爪
+  if (isMagician.value && MAGICIAN_EE_KEY_MAP[key]) {
+    e.preventDefault()
+    if (!e.repeat) handleMagicianEEKey(key)
     return
   }
 
@@ -2828,19 +2914,26 @@ function fillMoveTargetsFromState(silent = true): boolean {
   let hasJoints = false
   let hasPose = false
   if (joints) {
-    for (let j = 1; j <= 6; j++) {
+    for (let j = 1; j <= jointCount.value; j++) {
       moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
     }
     hasJoints = true
   }
   const pt = getCurrentCartesian()
   if (pt) {
-    targetPose.x = Math.round(pt.x * 10) / 10
-    targetPose.y = Math.round(pt.y * 10) / 10
-    targetPose.z = Math.round(pt.z * 10) / 10
-    targetPose.rx = Math.round(pt.rx * 10) / 10
-    targetPose.ry = Math.round(pt.ry * 10) / 10
-    targetPose.rz = Math.round(pt.rz * 10) / 10
+    if (isMagician.value) {
+      targetPose.x = Math.round(pt.x * 10) / 10
+      targetPose.y = Math.round(pt.y * 10) / 10
+      targetPose.z = Math.round(pt.z * 10) / 10
+      targetPose.r = Math.round((pt.r ?? pt.rx ?? 0) * 10) / 10
+    } else {
+      targetPose.x = Math.round(pt.x * 10) / 10
+      targetPose.y = Math.round(pt.y * 10) / 10
+      targetPose.z = Math.round(pt.z * 10) / 10
+      targetPose.rx = Math.round(pt.rx * 10) / 10
+      targetPose.ry = Math.round(pt.ry * 10) / 10
+      targetPose.rz = Math.round(pt.rz * 10) / 10
+    }
     hasPose = true
   }
   const complete = hasJoints && hasPose
@@ -2856,12 +2949,19 @@ function readCurrentPoseToTarget() {
     toastRef.value?.error('暂无位姿数据')
     return
   }
-  targetPose.x = Math.round(pt.x * 10) / 10
-  targetPose.y = Math.round(pt.y * 10) / 10
-  targetPose.z = Math.round(pt.z * 10) / 10
-  targetPose.rx = Math.round(pt.rx * 10) / 10
-  targetPose.ry = Math.round(pt.ry * 10) / 10
-  targetPose.rz = Math.round(pt.rz * 10) / 10
+  if (isMagician.value) {
+    targetPose.x = Math.round(pt.x * 10) / 10
+    targetPose.y = Math.round(pt.y * 10) / 10
+    targetPose.z = Math.round(pt.z * 10) / 10
+    targetPose.r = Math.round((pt.r ?? pt.rx ?? 0) * 10) / 10
+  } else {
+    targetPose.x = Math.round(pt.x * 10) / 10
+    targetPose.y = Math.round(pt.y * 10) / 10
+    targetPose.z = Math.round(pt.z * 10) / 10
+    targetPose.rx = Math.round(pt.rx * 10) / 10
+    targetPose.ry = Math.round(pt.ry * 10) / 10
+    targetPose.rz = Math.round(pt.rz * 10) / 10
+  }
   toastRef.value?.info('当前位姿已读取')
 }
 
@@ -2885,14 +2985,23 @@ function focusJogPanel() {
 async function moveToPose() {
   if (!checkEnabled()) return
   if (moving.value || poseMoving.value) return
-  const pt: TrajPoint = {
-    x: Number(targetPose.x || 0),
-    y: Number(targetPose.y || 0),
-    z: Number(targetPose.z || 0),
-    rx: Number(targetPose.rx || 0),
-    ry: Number(targetPose.ry || 0),
-    rz: Number(targetPose.rz || 0),
-  }
+  const pt: TrajPoint = isMagician.value
+    ? {
+        x: Number(targetPose.x || 0),
+        y: Number(targetPose.y || 0),
+        z: Number(targetPose.z || 0),
+        rx: Number(targetPose.r || 0),
+        ry: 0,
+        rz: Number(targetPose.r || 0),
+      }
+    : {
+        x: Number(targetPose.x || 0),
+        y: Number(targetPose.y || 0),
+        z: Number(targetPose.z || 0),
+        rx: Number(targetPose.rx || 0),
+        ry: Number(targetPose.ry || 0),
+        rz: Number(targetPose.rz || 0),
+      }
   const check = checkPoseLegal(pt)
   if (!check.legal) {
     toastRef.value?.error(`安全校验失败: ${check.reason}`)
@@ -2915,11 +3024,14 @@ async function moveToPose() {
       else toastRef.value?.info('运动已停止')
       return
     }
-    // 真机：当前关节作就近选解；同时带 pose 目标
+    // 真机：当前关节作就近选解；同时带 pose 目标（Magician 为 XYZR 四值）
     const joints = getMoveTargetJoints()
+    const pose = isMagician.value
+      ? [pt.x, pt.y, pt.z, pt.rx]
+      : [pt.x, pt.y, pt.z, pt.rx, pt.ry, pt.rz]
     const res = await api.movePoint(deviceId, {
       path: movePath.value,
-      pose: [pt.x, pt.y, pt.z, pt.rx, pt.ry, pt.rz],
+      pose,
       joint: joints,
     })
     if (res.success) {
@@ -2988,6 +3100,8 @@ function getAxisValue(): number {
 
 const CALIB_STORAGE_KEY = `docat:calib:${deviceId}`
 const calibMode = ref(false)
+/** 标定面板是否激活：Magician 强制显示标定辅助（无 3D 模型） */
+const calibPanelActive = computed(() => isMagician.value || calibMode.value)
 const calibModel = ref<CalibModel>('affine')
 const calibWeightFn = ref<WeightFn>('lsq')
 const calibRansacThresh = ref(1)
@@ -3694,6 +3808,8 @@ async function toggleEnable() {
 }
 
 function checkEnabled(): boolean {
+  // Magician 无使能概念，始终放行
+  if (isMagician.value) return true
   if (!enabled.value) {
     toastRef.value?.error('请先使能设备')
     return false
@@ -3889,7 +4005,7 @@ function syncJogCoordinateFromController(raw: unknown) {
     jogCoordinate.value = next
   }
   // 无论是否刚切换，都保证当前轴属于当前坐标系
-  const axes = next === 'joint' ? JOINT_AXES : CARTESIAN_AXES
+  const axes = next === 'joint' ? JOINT_AXES.value : CARTESIAN_AXES.value
   if (!(axes as readonly string[]).includes(jogAxis.value)) {
     jogAxis.value = next === 'joint' ? 'j1' : 'x'
   }
@@ -4118,13 +4234,13 @@ function checkAmplitude() {
 // ─── Motion Actions ─────────────────────────────
 
 function setMoveTargetJoints(joints: number[]) {
-  for (let j = 1; j <= 6; j++) {
+  for (let j = 1; j <= jointCount.value; j++) {
     moveTarget['j' + j] = joints[j - 1] || 0
   }
 }
 
 function getMoveTargetJoints() {
-  return [1,2,3,4,5,6].map(j => Number(moveTarget['j'+j] || 0))
+  return Array.from({ length: jointCount.value }, (_, i) => Number(moveTarget['j' + (i + 1)] || 0))
 }
 
 /** 读取当前关节值到编辑框 */
@@ -4134,7 +4250,7 @@ function readCurrentJoints() {
     toastRef.value?.error('暂无关节数据')
     return
   }
-  for (let j = 1; j <= 6; j++) {
+  for (let j = 1; j <= jointCount.value; j++) {
     moveTarget['j' + j] = Math.round((joints['j' + j] ?? 0) * 10) / 10
   }
   // 顶部「读取」同时刷新笛卡尔，避免位姿仍是 0
@@ -4143,9 +4259,13 @@ function readCurrentJoints() {
     targetPose.x = Math.round(pt.x * 10) / 10
     targetPose.y = Math.round(pt.y * 10) / 10
     targetPose.z = Math.round(pt.z * 10) / 10
-    targetPose.rx = Math.round(pt.rx * 10) / 10
-    targetPose.ry = Math.round(pt.ry * 10) / 10
-    targetPose.rz = Math.round(pt.rz * 10) / 10
+    if (isMagician.value) {
+      targetPose.r = Math.round((pt.r ?? pt.rx ?? 0) * 10) / 10
+    } else {
+      targetPose.rx = Math.round(pt.rx * 10) / 10
+      targetPose.ry = Math.round(pt.ry * 10) / 10
+      targetPose.rz = Math.round(pt.rz * 10) / 10
+    }
   }
   toastRef.value?.info(pt ? '当前关节与位姿已读取' : '当前关节值已读取')
 }
@@ -4772,8 +4892,9 @@ function emptyPose(): api.CustomPosturePose {
 
 function normalizePostureItem(p: api.CustomPostureItem, index = 0): api.CustomPostureItem {
   const type: api.CustomPostureType = p.type === 'cartesian' ? 'cartesian' : 'joint'
-  const joint = (p.joint || []).slice(0, 6).map(j => Number(j) || 0)
-  while (joint.length < 6) joint.push(0)
+  const axisN = jointCount.value
+  const joint = (p.joint || []).slice(0, axisN).map(j => Number(j) || 0)
+  while (joint.length < axisN) joint.push(0)
   const item: api.CustomPostureItem = {
     name: String(p.name || '').trim() || `P${index + 1}`,
     type,
@@ -4796,11 +4917,20 @@ function normalizePostureItem(p: api.CustomPostureItem, index = 0): api.CustomPo
 const customPostures = ref<api.CustomPostureItem[]>([])
 
 // System postures (always present, not stored on controller)
-const systemPostures: Array<{ name: string; type: 'joint'; joint: number[]; system: true }> = [
-  { name: '零点', type: 'joint', joint: [0, 0, 0, 0, 0, 0], system: true },
-  { name: '打包', type: 'joint', joint: [-90, 0, -140, -40, 0, 0], system: true },
-  { name: '研究', type: 'joint', joint: [-90, 0, -90, 0, 90, 0], system: true },
-]
+const systemPostures = computed<Array<{ name: string; type: 'joint'; joint: number[]; system: true }>>(() => {
+  if (isMagician.value) {
+    // Magician 四轴：仅 零点/回零姿态
+    return [
+      { name: '零点', type: 'joint', joint: [0, 0, 0, 0], system: true },
+      { name: '研究', type: 'joint', joint: [-90, 0, -90, 0], system: true },
+    ]
+  }
+  return [
+    { name: '零点', type: 'joint', joint: [0, 0, 0, 0, 0, 0], system: true },
+    { name: '打包', type: 'joint', joint: [-90, 0, -140, -40, 0, 0], system: true },
+    { name: '研究', type: 'joint', joint: [-90, 0, -90, 0, 90, 0], system: true },
+  ]
+})
 
 interface PostureItem {
   _key: string
@@ -4813,7 +4943,7 @@ interface PostureItem {
 }
 
 const allPostures = computed<PostureItem[]>(() => [
-  ...systemPostures.map((s, i) => ({
+  ...systemPostures.value.map((s, i) => ({
     ...s,
     _key: `sys-${i}`,
     joint: [...s.joint],
@@ -4845,6 +4975,9 @@ const editPostureForm = reactive<api.CustomPostureItem>({
 function formatPostureSummary(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose }): string {
   if (p.type === 'cartesian' && p.pose) {
     const { x, y, z, rx, ry, rz } = p.pose
+    if (isMagician.value) {
+      return `X${x.toFixed(1)} Y${y.toFixed(1)} Z${z.toFixed(1)}  R${rx.toFixed(1)}`
+    }
     return `X${x.toFixed(1)} Y${y.toFixed(1)} Z${z.toFixed(1)}  RX${rx.toFixed(1)} RY${ry.toFixed(1)} RZ${rz.toFixed(1)}`
   }
   const j = p.joint || []
@@ -4854,6 +4987,9 @@ function formatPostureSummary(p: { type?: api.CustomPostureType; joint?: number[
 function formatPostureDetail(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose; name?: string }): string {
   if (p.type === 'cartesian' && p.pose) {
     const { x, y, z, rx, ry, rz } = p.pose
+    if (isMagician.value) {
+      return `${p.name || ''}  XYZ[${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}] R[${rx.toFixed(1)}]`
+    }
     return `${p.name || ''}  XYZ[${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}] RXYZ[${rx.toFixed(1)}, ${ry.toFixed(1)}, ${rz.toFixed(1)}]`
   }
   return `${p.name || ''}  J[${(p.joint || []).map(v => Number(v).toFixed(1)).join(', ')}]`
@@ -5051,15 +5187,24 @@ async function saveCurrentAsPosture() {
   let item: api.CustomPostureItem
 
   if (type === 'cartesian') {
-    // 优先用位姿编辑框；若全为 0 则回退到当前实时位姿
-    const fromForm = {
-      x: Number(targetPose.x || 0),
-      y: Number(targetPose.y || 0),
-      z: Number(targetPose.z || 0),
-      rx: Number(targetPose.rx || 0),
-      ry: Number(targetPose.ry || 0),
-      rz: Number(targetPose.rz || 0),
-    }
+    // 优先用位姿编辑框；若全为 0 则回退到当前实时位姿（Magician：R 存于 rx 槽位）
+    const fromForm = isMagician.value
+      ? {
+          x: Number(targetPose.x || 0),
+          y: Number(targetPose.y || 0),
+          z: Number(targetPose.z || 0),
+          rx: Number(targetPose.r || 0),
+          ry: 0,
+          rz: Number(targetPose.r || 0),
+        }
+      : {
+          x: Number(targetPose.x || 0),
+          y: Number(targetPose.y || 0),
+          z: Number(targetPose.z || 0),
+          rx: Number(targetPose.rx || 0),
+          ry: Number(targetPose.ry || 0),
+          rz: Number(targetPose.rz || 0),
+        }
     const formIsZero = Object.values(fromForm).every(v => v === 0)
     const live = getCurrentCartesian()
     const pt = formIsZero && live ? live : fromForm
@@ -5123,12 +5268,19 @@ function confirmRenamePosture(p: PostureItem) {
  */
 function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?: api.CustomPosturePose; name?: string }) {
   if (p.type === 'cartesian' && p.pose) {
-    targetPose.x = p.pose.x
-    targetPose.y = p.pose.y
-    targetPose.z = p.pose.z
-    targetPose.rx = p.pose.rx
-    targetPose.ry = p.pose.ry
-    targetPose.rz = p.pose.rz
+    if (isMagician.value) {
+      targetPose.x = p.pose.x
+      targetPose.y = p.pose.y
+      targetPose.z = p.pose.z
+      targetPose.r = p.pose.rx
+    } else {
+      targetPose.x = p.pose.x
+      targetPose.y = p.pose.y
+      targetPose.z = p.pose.z
+      targetPose.rx = p.pose.rx
+      targetPose.ry = p.pose.ry
+      targetPose.rz = p.pose.rz
+    }
     if (isMock) {
       const near = jointsFromObject(state.value.joints as Record<string, number>)
       const ik = inverseKinematics(
@@ -5136,14 +5288,14 @@ function fillPosture(p: { type?: api.CustomPostureType; joint?: number[]; pose?:
         near,
       )
       if (ik.ok && ik.joint) setMoveTargetJoints(ik.joint)
-    } else if (p.joint && p.joint.length >= 6) {
+    } else if (p.joint && p.joint.length >= jointCount.value) {
       setMoveTargetJoints(p.joint)
     }
     toastRef.value?.info(`已填充位姿预设${p.name ? ` "${p.name}"` : ''}`)
     return
   }
   const joint = p.joint || []
-  for (let j = 1; j <= 6; j++) moveTarget['j' + j] = joint[j - 1] ?? 0
+  for (let j = 1; j <= jointCount.value; j++) moveTarget['j' + j] = joint[j - 1] ?? 0
   if (isMock && joint.length >= 6) {
     try {
       const fk = forwardKinematics(joint)
@@ -5827,6 +5979,58 @@ async function doES01(action: 'grip' | 'release' | 'clearAlarm') {
     es01Busy.value = false
   }
 }
+
+// ─── Magician 末端执行器：吸盘 / 夹爪（状态本地缓存，协议无状态查询）───
+
+const magicianSuction = ref(false)
+const magicianGripper = ref(false)
+
+/** Magician 末端快捷键：Z/X 吸盘吸取/释放，V/B 夹爪抓紧/松开 */
+const MAGICIAN_EE_KEY_MAP: Record<string, { kind: 'suction' | 'gripper'; on: boolean }> = {
+  z: { kind: 'suction', on: true },
+  x: { kind: 'suction', on: false },
+  v: { kind: 'gripper', on: true },
+  b: { kind: 'gripper', on: false },
+}
+
+async function setMagicianSuction(on: boolean) {
+  if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
+  magicianSuction.value = on
+  await api.setEndEffector(deviceId, 'suction', on).then((res) => {
+    if (res.success) toastRef.value?.success(`吸盘${on ? '吸取' : '释放'}成功`)
+    else {
+      magicianSuction.value = !on
+      toastRef.value?.error(`吸盘操作失败：${res.error?.message}`)
+    }
+  }).catch((err) => {
+    magicianSuction.value = !on
+    toastRef.value?.error(`吸盘操作出错：${(err as Error).message}`)
+  })
+}
+
+async function setMagicianGripper(on: boolean) {
+  if (!isConnected.value) { toastRef.value?.error('设备未连接'); return }
+  magicianGripper.value = on
+  await api.setEndEffector(deviceId, 'gripper', on).then((res) => {
+    if (res.success) toastRef.value?.success(`夹爪${on ? '抓紧' : '松开'}成功`)
+    else {
+      magicianGripper.value = !on
+      toastRef.value?.error(`夹爪操作失败：${res.error?.message}`)
+    }
+  }).catch((err) => {
+    magicianGripper.value = !on
+    toastRef.value?.error(`夹爪操作出错：${(err as Error).message}`)
+  })
+}
+
+function handleMagicianEEKey(key: string): boolean {
+  if (!isMagician.value || !isConnected.value) return false
+  const map = MAGICIAN_EE_KEY_MAP[key]
+  if (!map) return false
+  if (map.kind === 'suction') void setMagicianSuction(map.on)
+  else void setMagicianGripper(map.on)
+  return true
+}
 async function loadDobotPlusCatalog() {
   loadingDobotPlusCatalog.value = true
   try {
@@ -6045,6 +6249,12 @@ const WORKSPACE_LIMITS = {
   rx: { min: -180, max: 180 }, ry: { min: -180, max: 180 }, rz: { min: -180, max: 180 },
 }
 
+/** Magician 工作空间（对称范围，可达半径 ~320mm；R 为绕 Z 旋转） */
+const MAGICIAN_WORKSPACE_LIMITS = {
+  x: { min: -300, max: 300 }, y: { min: -300, max: 300 }, z: { min: -300, max: 300 },
+  r: { min: -180, max: 180 },
+}
+
 function getCurrentCartesian() {
   const s = state.value as Record<string, unknown>
   const pose = s?.pose as Record<string, number> | undefined
@@ -6057,17 +6267,31 @@ function getCurrentCartesian() {
     rx: normalizeEulerDeg(pose.rx ?? pose.r ?? 0),
     ry: normalizeEulerDeg(pose.ry ?? 0),
     rz: normalizeEulerDeg(pose.rz ?? 0),
+    r: pose.r ?? 0,
   }
 }
 
 function checkPoseLegal(pt: TrajPoint): { legal: boolean; reason?: string } {
-  const limits: Array<{ key: keyof typeof WORKSPACE_LIMITS; value: number }> = [
-    { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
-    { key: 'rx', value: pt.rx }, { key: 'ry', value: pt.ry }, { key: 'rz', value: pt.rz },
-  ]
-  for (const { key, value } of limits) {
-    const lim = WORKSPACE_LIMITS[key]
-    if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+  if (isMagician.value) {
+    // Magician 只校验 XYZR（R 由调用方写入 rz 槽位）
+    const r = pt.rz ?? pt.rx ?? 0
+    const limits: Array<{ key: keyof typeof MAGICIAN_WORKSPACE_LIMITS; value: number }> = [
+      { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
+      { key: 'r', value: r },
+    ]
+    for (const { key, value } of limits) {
+      const lim = MAGICIAN_WORKSPACE_LIMITS[key]
+      if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+    }
+  } else {
+    const limits: Array<{ key: keyof typeof WORKSPACE_LIMITS; value: number }> = [
+      { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
+      { key: 'rx', value: pt.rx }, { key: 'ry', value: pt.ry }, { key: 'rz', value: pt.rz },
+    ]
+    for (const { key, value } of limits) {
+      const lim = WORKSPACE_LIMITS[key]
+      if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+    }
   }
   if (emergencyStop.value) return { legal: false, reason: '急停中' }
   if (isCollision.value) return { legal: false, reason: '碰撞检测触发' }
@@ -6472,9 +6696,9 @@ onMounted(async () => {
       isCollision.value = (ext.isCollision as boolean) || false
       protectiveStop.value = (ext.protectiveStop as boolean) || false
       emergencyStop.value = (ext.emergencyStop as boolean) || false
-      // TCP 状态（exclusive 模式）
+      // TCP 状态（exclusive 模式；串口设备无 TCP，视为正常）
       if (ext.mode === 'exclusive') {
-        tcpDown.value = !(ext.tcpConnected as boolean)
+        tcpDown.value = ext.serial ? false : !(ext.tcpConnected as boolean)
       } else {
         tcpDown.value = false
       }

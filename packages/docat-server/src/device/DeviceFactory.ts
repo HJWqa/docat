@@ -5,6 +5,7 @@
 import { DeviceDriver } from './DeviceDriver.js'
 import { StubDriver } from './StubDriver.js'
 import { MG6Driver } from './drivers/MG6Driver.js'
+import { MagicianDriver } from './drivers/MagicianDriver.js'
 
 /** 从 controllerTypeExt 判断设备系列 */
 function detectDeviceSeries(controllerTypeExt: string): string {
@@ -31,11 +32,17 @@ export interface DeviceFactoryResult {
   series: string
 }
 
+export interface DriverSerialConfig {
+  serialPort?: string
+  baudRate?: number
+}
+
 export function createDriver(
   id: string,
   ip: string,
   name: string = 'Unknown',
-  controllerTypeExt: string = ''
+  controllerTypeExt: string = '',
+  serial: DriverSerialConfig = {},
 ): DeviceFactoryResult {
   let series = 'Unknown'
 
@@ -59,8 +66,10 @@ export function createDriver(
       return { driver: new StubDriver(id, ip, name), series: 'CR' }
 
     case 'Magician':
-      // TODO: MagicianDriver
-      return { driver: new StubDriver(id, ip, name), series: 'Magician' }
+      return {
+        driver: new MagicianDriver(id, ip, name, serial.serialPort ?? '', serial.baudRate ?? 115200),
+        series: 'Magician',
+      }
 
     default:
       return { driver: new StubDriver(id, ip, name), series: 'Unknown' }

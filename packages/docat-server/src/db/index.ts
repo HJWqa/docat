@@ -267,6 +267,17 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 010_device_alias applied')
   }
 
+  // ─── 011: 串口设备（Magician 等通过串口控制，ip 可空）────
+  if (!applied.has('011_device_serial')) {
+    db.exec(`
+      ALTER TABLE devices ADD COLUMN serialPort TEXT NOT NULL DEFAULT '';
+      ALTER TABLE devices ADD COLUMN baudRate INTEGER NOT NULL DEFAULT 115200;
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('011_device_serial')").run()
+    console.log('[DB] Migration 011_device_serial applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 

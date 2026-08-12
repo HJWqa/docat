@@ -19,7 +19,7 @@
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
           {{ scanning ? '扫描中...' : '扫描网络' }}
         </button>
-        <button class="btn btn-primary" @click="showAdd = true">
+        <button class="btn btn-primary" @click="openAddModal">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" stroke-width="2"/><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="2"/></svg>
           添加设备
         </button>
@@ -126,7 +126,7 @@
               <h3 class="device-card-name">{{ d.name }}</h3>
               <div class="device-card-ip">
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="4" r="1.5" fill="currentColor"/><circle cx="10" cy="12" r="1.5" fill="currentColor"/><path d="M2 8l4-4 4 4 4-4" stroke="currentColor" stroke-width="1" fill="none"/></svg>
-                {{ d.ip }}
+                {{ d.serialPort || d.ip || '串口设备' }}
               </div>
               <div class="device-card-actions">
                 <template v-if="!deviceStore.isConnected(d.id)">
@@ -201,13 +201,30 @@
             </button>
           </div>
           <form @submit.prevent="addDevice" class="modal-form mt-1">
-            <div class="field-group"><label class="field-label">IP 地址</label><input v-model="newIp" class="input" placeholder="192.168.5.1" /></div>
+            <div v-if="!isSerialAdd" class="field-group"><label class="field-label">IP 地址</label><input v-model="newIp" class="input" placeholder="192.168.5.1" /></div>
             <div class="field-group mt-1"><label class="field-label">设备名称</label><input v-model="newName" class="input" placeholder="产线 A — CR5" /></div>
-            <div class="field-group mt-1"><label class="field-label">型号 <span class="field-hint">（自动检测）</span></label><input v-model="newType" class="input" placeholder="留空则自动检测" /></div>
+            <div v-if="!isSerialAdd" class="field-group mt-1"><label class="field-label">型号 <span class="field-hint">（自动检测）</span></label><input v-model="newType" class="input" placeholder="留空则自动检测" /></div>
+            <label class="checkbox-row mt-2"><input v-model="isSerialAdd" type="checkbox" class="checkbox" /><span class="checkbox-label">串口设备（Magician）</span></label>
+            <template v-if="isSerialAdd">
+              <!-- 连接方式：当前仅支持串口；服务器（DobotServer 中转）预留 -->
+              <div class="field-group mt-1"><label class="field-label">连接方式</label>
+                <select v-model="serialConnectMode" class="input">
+                  <option value="serial">串口</option>
+                  <option value="server" disabled>服务器（预留）</option>
+                </select>
+              </div>
+              <div class="field-group mt-1"><label class="field-label">串口</label>
+                <select v-model="newSerialPort" class="input" @focus="refreshSerialPorts">
+                  <option value="" disabled>选择串口</option>
+                  <option v-for="p in serialPorts" :key="p" :value="p">{{ p }}</option>
+                </select>
+              </div>
+              <div class="field-group mt-1"><label class="field-label">波特率</label><input v-model.number="newBaudRate" type="number" class="input" min="9600" step="1" /></div>
+            </template>
             <label class="checkbox-row mt-2"><input v-model="newAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">服务启动时自动连接</span></label>
             <div class="modal-actions mt-2">
               <button type="button" class="btn btn-secondary flex-1" @click="showAdd = false">取消</button>
-              <button type="submit" class="btn btn-primary flex-1" :disabled="!newIp || !newName">注册</button>
+              <button type="submit" class="btn btn-primary flex-1" :disabled="(isSerialAdd ? !newSerialPort : !newIp) || !newName">注册</button>
             </div>
           </form>
         </div>
@@ -224,12 +241,17 @@
             </button>
           </div>
           <form @submit.prevent="saveEdit" class="modal-form mt-1">
-            <div class="field-group"><label class="field-label">IP 地址</label><input v-model="editIp" class="input" placeholder="192.168.5.1" /></div>
+            <div v-if="!editIsSerial" class="field-group"><label class="field-label">IP 地址</label><input v-model="editIp" class="input" placeholder="192.168.5.1" /></div>
+            <template v-if="editIsSerial">
+              <div class="field-group mt-1"><label class="field-label">串口</label><input v-model="editSerialPort" class="input" placeholder="/dev/ttyUSB0" /></div>
+              <div class="field-group mt-1"><label class="field-label">波特率</label><input v-model.number="editBaudRate" type="number" class="input" min="9600" step="1" /></div>
+            </template>
             <div class="field-group mt-1"><label class="field-label">设备名称</label><input v-model="editName" class="input" placeholder="产线 A — CR5" /></div>
+            <div v-if="!editIsSerial" class="field-group mt-1"><label class="field-label">型号</label><input v-model="editType" class="input" placeholder="Magician" /></div>
             <label class="checkbox-row mt-2"><input v-model="editAutoConnect" type="checkbox" class="checkbox" /><span class="checkbox-label">服务启动时自动连接</span></label>
             <div class="modal-actions mt-2">
               <button type="button" class="btn btn-secondary flex-1" @click="editingDevice = null">取消</button>
-              <button type="submit" class="btn btn-primary flex-1" :disabled="!editIp || !editName">保存</button>
+              <button type="submit" class="btn btn-primary flex-1" :disabled="(!editIsSerial && !editIp) || !editName">保存</button>
             </div>
           </form>
         </div>
@@ -293,6 +315,12 @@ const newIp = ref('')
 const newName = ref('')
 const newType = ref('')
 const newAutoConnect = ref(false)
+const isSerialAdd = ref(false)
+/** 串口设备连接方式：当前仅 serial；server（DobotServer 中转）预留 */
+const serialConnectMode = ref<'serial' | 'server'>('serial')
+const newSerialPort = ref('')
+const newBaudRate = ref(115200)
+const serialPorts = ref<string[]>([])
 const showUserDropdown = ref(false)
 const showChangePassword = ref(false)
 const showSwitchUser = ref(false)
@@ -302,6 +330,10 @@ const editingDevice = ref<DeviceConfig | null>(null)
 const editIp = ref('')
 const editName = ref('')
 const editAutoConnect = ref(true)
+const editType = ref('')
+const editSerialPort = ref('')
+const editBaudRate = ref(115200)
+const editIsSerial = computed(() => !!editingDevice.value?.serialPort)
 
 // Duplicate device confirm state
 const showDup = ref(false)
@@ -380,6 +412,11 @@ async function scan() {
 }
 
 async function addDevice() {
+  if (isSerialAdd.value) {
+    if (!newSerialPort.value || !newName.value) return
+    await doAddSerial(newName.value.trim())
+    return
+  }
   if (!newIp.value || !newName.value) return
   const ip = newIp.value.trim()
   const name = newName.value.trim()
@@ -392,9 +429,30 @@ async function addDevice() {
 }
 
 async function doAdd(name: string, ip: string) {
-  await api.registerDevice(ip, name, newAutoConnect.value)
-  showAdd.value = false; newIp.value = ''; newName.value = ''
+  await api.registerDevice(ip, name, newAutoConnect.value, { type: newType.value.trim() || undefined })
+  showAdd.value = false; newIp.value = ''; newName.value = ''; newType.value = ''
   await load()
+}
+
+async function doAddSerial(name: string) {
+  await api.registerDevice('', name, newAutoConnect.value, {
+    type: newType.value.trim() || 'Magician',
+    serialPort: newSerialPort.value,
+    baudRate: newBaudRate.value,
+  })
+  showAdd.value = false
+  newIp.value = ''; newName.value = ''; newType.value = ''; newSerialPort.value = ''; isSerialAdd.value = false
+  await load()
+}
+
+async function refreshSerialPorts() {
+  const res = await api.listSerialPorts()
+  if (res.success && res.data) serialPorts.value = res.data
+}
+
+function openAddModal() {
+  showAdd.value = true
+  void refreshSerialPorts()
 }
 
 async function addFromScan(d: DeviceInfo) {
@@ -485,14 +543,21 @@ function doEdit(device: DeviceConfig) {
   editIp.value = device.ip
   editName.value = device.name
   editAutoConnect.value = !!device.autoConnect
+  editType.value = device.type
+  editSerialPort.value = device.serialPort ?? ''
+  editBaudRate.value = device.baudRate ?? 115200
 }
 
 async function saveEdit() {
-  if (!editingDevice.value || !editIp.value || !editName.value) return
+  if (!editingDevice.value || !editName.value) return
+  if (!editIsSerial.value && !editIp.value) return
   const res = await api.updateDevice(editingDevice.value.id, {
     ip: editIp.value,
     name: editName.value,
+    type: editType.value,
     autoConnect: editAutoConnect.value,
+    serialPort: editIsSerial.value ? editSerialPort.value : undefined,
+    baudRate: editIsSerial.value ? editBaudRate.value : undefined,
   })
   if (res.success) {
     editingDevice.value = null

@@ -175,6 +175,9 @@ export interface DeviceConfig {
   type: string
   autoConnect: boolean
   createdAt: string
+  /** 串口设备（如 Magician）的串口路径，如 /dev/ttyUSB0；非空时走串口连接 */
+  serialPort?: string
+  baudRate?: number
 }
 
 // ─── 用户与鉴权 ──────────────────────────────

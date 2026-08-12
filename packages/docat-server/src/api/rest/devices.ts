@@ -12,6 +12,7 @@ import { authMiddleware, requireOperator } from '../../auth/auth.js'
 import type { DevicePool, ConnectionMode, DeviceEntry } from '../../device/DevicePool.js'
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
+import { listSerialPorts } from '../../device/transport/MagicianSerialTransport.js'
 import { createStoredZip, type ZipEntryInput } from '../../utils/zip.js'
 import { getSetting, SETTING_CALIB_EXPORT_DIR, DEFAULT_EXPORT_DIR, resolveExportDir } from './system.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
@@ -329,7 +330,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
   })
 
   /** 注册新设备 */
-  app.post<{ Body: { ip: string; name: string; type?: string; autoConnect?: boolean } }>(
+  app.post<{ Body: { ip: string; name: string; type?: string; autoConnect?: boolean; serialPort?: string; baudRate?: number } }>(
     '/api/devices',
     async (request, reply): Promise<ApiResponse<DeviceConfig>> => {
       try {
@@ -337,17 +338,20 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
         if (reply.sent) return reply
         requireOperator(request, reply)
 
-        const { ip, name, type = '', autoConnect = false } = request.body
-        if (!ip || !name) {
-          return { success: false, error: { code: 42200, message: '缺少 ip 或 name' } }
+        const { ip, name, type = '', autoConnect = false, serialPort = '', baudRate = 115200 } = request.body
+        if (!ip && !serialPort) {
+          return { success: false, error: { code: 42200, message: '缺少 ip 或 serialPort' } }
+        }
+        if (!name) {
+          return { success: false, error: { code: 42200, message: '缺少 name' } }
         }
 
         const db = getDb()
         const id = uuidv4()
 
         db.prepare(
-          'INSERT INTO devices (id, ip, name, type, autoConnect) VALUES (?, ?, ?, ?, ?)'
-        ).run(id, ip, name, type, autoConnect ? 1 : 0)
+          'INSERT INTO devices (id, ip, name, type, autoConnect, serialPort, baudRate) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(id, ip, name, type, autoConnect ? 1 : 0, serialPort, baudRate)
 
         const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id) as DeviceConfig
         return { success: true, data: device }
@@ -374,10 +378,12 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
           return { success: false, error: { code: 40401, message: '设备不存在' } }
         }
 
-        const { ip, name, type, autoConnect } = request.body
-        if (ip) db.prepare('UPDATE devices SET ip = ? WHERE id = ?').run(ip, id)
-        if (name) db.prepare('UPDATE devices SET name = ? WHERE id = ?').run(name, id)
-        if (type) db.prepare('UPDATE devices SET type = ? WHERE id = ?').run(type, id)
+        const { ip, name, type, autoConnect, serialPort, baudRate } = request.body
+        if (ip !== undefined) db.prepare('UPDATE devices SET ip = ? WHERE id = ?').run(ip, id)
+        if (name !== undefined) db.prepare('UPDATE devices SET name = ? WHERE id = ?').run(name, id)
+        if (type !== undefined) db.prepare('UPDATE devices SET type = ? WHERE id = ?').run(type, id)
+        if (serialPort !== undefined) db.prepare('UPDATE devices SET serialPort = ? WHERE id = ?').run(serialPort, id)
+        if (baudRate !== undefined) db.prepare('UPDATE devices SET baudRate = ? WHERE id = ?').run(baudRate, id)
         if (autoConnect !== undefined) {
           db.prepare('UPDATE devices SET autoConnect = ? WHERE id = ?').run(autoConnect ? 1 : 0, id)
         }
@@ -427,6 +433,19 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
     }
   })
 
+  /** 枚举可用串口（Magician 等串口设备连接用） */
+  app.get('/api/devices/serial-ports', async (request, reply) => {
+    try {
+      await authMiddleware(request, reply)
+      if (reply.sent) return reply
+
+      const ports = await listSerialPorts()
+      return { success: true, data: ports }
+    } catch (err) {
+      return { success: false, error: { code: 50000, message: (err as Error).message } }
+    }
+  })
+
   /** 连接设备 */
   app.post<{ Params: { id: string }; Body: { mode?: ConnectionMode } }>(
     '/api/devices/:id/connect',
@@ -439,10 +458,22 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
         const { id } = request.params
         const mode: ConnectionMode = request.body?.mode === 'virtual' ? 'virtual' : 'exclusive'
         const db = getDb()
-        const device = db.prepare('SELECT ip FROM devices WHERE id = ?').get(id) as { ip: string } | undefined
+        const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id) as
+          | { ip: string; type: string; serialPort: string; baudRate: number }
+          | undefined
 
         if (!device) {
           return { success: false, error: { code: 40401, message: '设备不存在' } }
+        }
+
+        // 串口设备（Magician）：无 HTTP/TCP，走串口连接
+        if (device.serialPort) {
+          const result = await pool.connectSerial(id, device.serialPort, device.baudRate, device.type)
+          return {
+            success: result.status,
+            data: result.data,
+            error: result.status ? undefined : { code: result.code, message: result.message ?? '' },
+          }
         }
 
         // 传递 mode 让 pool 用这个模式连接
@@ -497,7 +528,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
           data: {
             connected: entry.driver.status.connected,
             mode: entry.mode,
-            tcpConnected: entry.mode === 'exclusive' ? entry.tcp.isAllConnected : true,
+            tcpConnected: entry.tcp ? (entry.mode === 'exclusive' ? entry.tcp.isAllConnected : true) : true,
             status: entry.driver.status,
             state: entry.driver.state,
             alarms: entry.driver.state.alarm,
@@ -567,6 +598,12 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
           return { success: false, error: { code: 40401, message: '设备未连接' } }
         }
 
+        // 串口设备：返回驱动缓存的速度比例
+        if (!entry.http) {
+          const ratio = await (entry.driver as { getSpeed?: () => Promise<number> }).getSpeed?.()
+          return { success: true, data: { ratio: ratio ?? 100 } }
+        }
+
         const res = await entry.http.main.send({
           method: 'get',
           url: '/settings/common',
@@ -602,6 +639,12 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
         const { ratio } = request.body
         if (typeof ratio !== 'number' || ratio < 1 || ratio > 100) {
           return { success: false, error: { code: 40001, message: 'ratio 必须是 1~100 的数字' } }
+        }
+
+        // 串口设备：JOG/PTP Common 速度比例
+        if (!entry.http) {
+          await (entry.driver as { setSpeed?: (r: number) => Promise<void> }).setSpeed?.(ratio)
+          return { success: true, data: { ratio } }
         }
 
         const res = await entry.http.main.send({
@@ -1888,6 +1931,35 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
     }
   )
 
+  /** Magician 末端执行器：吸盘 / 夹爪 */
+  app.post<{ Params: { id: string }; Body: { kind: 'suction' | 'gripper'; on: boolean } }>(
+    '/api/devices/:id/end-effector',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+
+        const entry = pool.getDevice(request.params.id)
+        if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+
+        const { kind, on } = request.body
+        if (kind !== 'suction' && kind !== 'gripper') {
+          return { success: false, error: { code: 40001, message: 'kind 必须是 suction 或 gripper' } }
+        }
+        const driver = entry.driver as unknown as {
+          suction?: (on: boolean) => Promise<void>
+          gripper?: (on: boolean) => Promise<void>
+        }
+        if (kind === 'suction') await driver.suction?.(Boolean(on))
+        else await driver.gripper?.(Boolean(on))
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   // ─── CR TCP Dashboard (29999) + Feedback (30004) ──
 
   const crTcpCache = new Map<string, CRApiTcpTransport>()
@@ -3064,7 +3136,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
 
         // 触发控制器更新变量文件
         try {
-          await entry.http.main.send({
+          await entry.http?.main.send({
             method: 'post',
             url: '/project/teachFileUpdate',
             portName: ip,
@@ -3113,7 +3185,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
         await sftp.writeText(`${projectPath}/point.json`, JSON.stringify(filtered))
 
         try {
-          await entry.http.main.send({
+          await entry.http?.main.send({
             method: 'post',
             url: '/project/teachFileUpdate',
             portName: ip,
@@ -3164,7 +3236,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
         if (body.user !== undefined) current.user = body.user
 
         await sftp.writeText(`${projectPath}/point.json`, JSON.stringify(points))
-        try { await entry.http.main.send({ method: 'post', url: '/project/teachFileUpdate', portName: ip, params: { file: 'point.json' }, timeout: 5000 }) }
+        try { await entry.http?.main.send({ method: 'post', url: '/project/teachFileUpdate', portName: ip, params: { file: 'point.json' }, timeout: 5000 }) }
         catch { /* 非关键 */ }
 
         return { success: true, data: current }
@@ -3185,6 +3257,7 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
 
         const entry = pool.getDevice(request.params.id)
         if (!entry) return { success: false, error: { code: 40401, message: '设备未连接' } }
+        if (!entry.http) return { success: false, error: { code: 40001, message: '串口设备不支持工程点文件' } }
 
         await entry.http.main.send({
           method: 'post',

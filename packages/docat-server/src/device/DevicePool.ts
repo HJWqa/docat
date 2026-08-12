@@ -18,8 +18,8 @@ export type ConnectionMode = 'exclusive' | 'virtual'
 export interface DeviceEntry {
   id: string
   driver: DeviceDriver
-  http: ReturnType<typeof createDeviceTransports>
-  tcp: TcpManager
+  http: ReturnType<typeof createDeviceTransports> | null
+  tcp: TcpManager | null
   pollTimer: ReturnType<typeof setInterval> | null
   /** exclusive = 完整占用（POST claim + TCP）；virtual = 不占用但仍能发 HTTP 指令 */
   mode: ConnectionMode
@@ -338,7 +338,7 @@ export class DevicePool {
 
     if (entry.pollTimer) clearInterval(entry.pollTimer)
     // TCP 断连后控制器会自动检测并释放占用状态
-    entry.tcp.disconnectAll()
+    entry.tcp?.disconnectAll()
     await entry.driver.disconnect()
     this.devices.delete(driverId)
 
@@ -432,17 +432,100 @@ export class DevicePool {
   /** 该设备是否已由池持有有效 TCP（用于避免独立运行监听重复连接） */
   hasActiveTcp(deviceId: string): boolean {
     const entry = this.devices.get(deviceId)
-    return !!entry && entry.tcp.connectedCount > 0
+    return !!entry && !!entry.tcp && entry.tcp.connectedCount > 0
   }
 
   /** 从数据库加载自动连接的设备列表 */
-  loadAutoConnectDevices(): Array<{ id: string; ip: string; name: string }> {
+  loadAutoConnectDevices(): Array<{ id: string; ip: string; name: string; type: string; serialPort: string; baudRate: number }> {
     const db = getDb()
-    const rows = db.prepare('SELECT id, ip, name FROM devices WHERE autoConnect = 1').all() as Array<{
+    const rows = db.prepare('SELECT id, ip, name, type, serialPort, baudRate FROM devices WHERE autoConnect = 1').all() as Array<{
       id: string
       ip: string
       name: string
+      type: string
+      serialPort: string
+      baudRate: number
     }>
     return rows
+  }
+
+  /**
+   * 连接串口设备（Magician）— 无 HTTP/TCP，仅串口指令 + 状态轮询
+   * TODO(预留)：后续支持「服务器」模式（DobotServer 中转，UDP JSON-RPC 127.0.0.1:6600）——
+   *   串口被官方软件独占时经 DobotServer.exe 转发，见 transport/DobotServerTransport.ts
+   *   （参考 find-docs/magician-controller/transport.py DobotServerClient）
+   */
+  async connectSerial(
+    dbDeviceId: string,
+    serialPort: string,
+    baudRate: number,
+    deviceType: string,
+    /** TODO(预留)：'serial' | 'server'（DobotServer 中转），当前仅 serial */
+    _mode: 'serial' | 'server' = 'serial',
+  ): Promise<TransportReply> {
+    // TODO(预留)：if (mode === 'server') → DobotServerTransport 连接路径
+    for (const [, entry] of this.devices) {
+      if (entry.driver.ip === serialPort && entry.driver.status.connected) {
+        return { status: false, code: 40902, message: '设备已连接' }
+      }
+    }
+
+    try {
+      const { driver, series } = createDriver(dbDeviceId, serialPort, deviceType || 'Magician', '', {
+        serialPort,
+        baudRate,
+      })
+      if (series !== 'Magician') {
+        return { status: false, code: 1000, message: `串口设备仅支持 Magician（当前型号识别为 ${series}）` }
+      }
+
+      console.log(`[DevicePool] Creating ${series} serial driver for ${serialPort} (${deviceType})`)
+      await driver.connect()
+
+      const pollTimer = setInterval(async () => {
+        try {
+          const state = await driver.pollState()
+          if (driver.status.connected) {
+            eventBus.emit('device:state', {
+              deviceId: dbDeviceId,
+              state: { ...state, _ext: { mode: 'exclusive', serial: true, tcpConnected: true } },
+            })
+          }
+        } catch {
+          // 轮询异常忽略，pollState 内部维护连接状态
+        }
+      }, POLL_INTERVAL_REAL)
+
+      const entry: DeviceEntry = {
+        id: dbDeviceId,
+        driver,
+        http: null,
+        tcp: null,
+        pollTimer,
+        mode: 'exclusive',
+      }
+      this.devices.set(dbDeviceId, entry)
+
+      eventBus.emit('device:connected', { id: dbDeviceId, ip: serialPort, mode: 'exclusive' })
+
+      return {
+        status: true,
+        code: 0,
+        data: {
+          driverId: dbDeviceId,
+          ip: serialPort,
+          type: driver.type,
+          mode: 'exclusive',
+          status: driver.status,
+          pose: driver.state.pose,
+        },
+      }
+    } catch (error) {
+      return {
+        status: false,
+        code: 1000,
+        message: (error as Error).message,
+      }
+    }
   }
 }

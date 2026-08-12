@@ -128,14 +128,16 @@ async function main(): Promise<void> {
 
       for (const device of autoDevices) {
         try {
-          const result = await pool.connect(device.ip, device.id)
+          const result = device.serialPort
+            ? await pool.connectSerial(device.id, device.serialPort, device.baudRate, device.type)
+            : await pool.connect(device.ip, device.id)
           if (result.status) {
-            console.log(`  ✓ Connected: ${device.name} (${device.ip})`)
+            console.log(`  ✓ Connected: ${device.name} (${device.serialPort || device.ip})`)
           } else {
-            console.log(`  ✗ Failed: ${device.name} (${device.ip}) - ${result.message}`)
+            console.log(`  ✗ Failed: ${device.name} (${device.serialPort || device.ip}) - ${result.message}`)
           }
         } catch (err) {
-          console.log(`  ✗ Error: ${device.name} (${device.ip}) - ${(err as Error).message}`)
+          console.log(`  ✗ Error: ${device.name} (${device.serialPort || device.ip}) - ${(err as Error).message}`)
         }
       }
     }
