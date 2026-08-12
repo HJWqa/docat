@@ -3195,6 +3195,10 @@ function applyClipboardText(text: string, mode: 'image' | 'full') {
     toastRef.value?.error(`数据数量不符：期望 ${cols * n} 个（${cols} 列 × 当前行数 ${n}），实际 ${tokens.length} 个`)
     return
   }
+  if (calibRows.value.length !== n) {
+    calibRowCount.value = n
+    syncCalibRows()
+  }
   calibRows.value.forEach((row, i) => {
     row.imgX = tokens[i]
     row.imgY = tokens[n + i]
@@ -3438,21 +3442,22 @@ function persistCalib() {
 function loadCalib() {
   try {
     const raw = localStorage.getItem(CALIB_STORAGE_KEY)
-    if (!raw) return
-    const data = JSON.parse(raw) as {
-      rows?: CalibPoint[]
-      rowCount?: number
-      model?: CalibModel
-      weightFn?: WeightFn
-      ransacThresh?: number
+    if (raw) {
+      const data = JSON.parse(raw) as {
+        rows?: CalibPoint[]
+        rowCount?: number
+        model?: CalibModel
+        weightFn?: WeightFn
+        ransacThresh?: number
+      }
+      if (Array.isArray(data.rows)) {
+        calibRows.value = data.rows.map(r => ({ imgX: r.imgX, imgY: r.imgY, physX: r.physX, physY: r.physY, angle: r.angle ?? 0 }))
+        calibRowCount.value = Math.max(1, calibRows.value.length)
+      }
+      if (data.model === 'affine' || data.model === 'homography') calibModel.value = data.model
+      if (data.weightFn === 'lsq' || data.weightFn === 'huber' || data.weightFn === 'tukey' || data.weightFn === 'ransac') calibWeightFn.value = data.weightFn
+      if (typeof data.ransacThresh === 'number' && Number.isFinite(data.ransacThresh) && data.ransacThresh > 0) calibRansacThresh.value = data.ransacThresh
     }
-    if (Array.isArray(data.rows)) {
-      calibRows.value = data.rows.map(r => ({ imgX: r.imgX, imgY: r.imgY, physX: r.physX, physY: r.physY, angle: r.angle ?? 0 }))
-      calibRowCount.value = Math.max(1, calibRows.value.length)
-    }
-    if (data.model === 'affine' || data.model === 'homography') calibModel.value = data.model
-    if (data.weightFn === 'lsq' || data.weightFn === 'huber' || data.weightFn === 'tukey' || data.weightFn === 'ransac') calibWeightFn.value = data.weightFn
-    if (typeof data.ransacThresh === 'number' && Number.isFinite(data.ransacThresh) && data.ransacThresh > 0) calibRansacThresh.value = data.ransacThresh
   } catch {
     // 解析失败时使用默认值
   }
