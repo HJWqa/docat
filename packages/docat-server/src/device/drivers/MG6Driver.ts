@@ -1654,6 +1654,10 @@ export class MG6Driver extends DeviceDriver {
 
         this.status = this.state.status
         this.status.connected = true
+      } else {
+        // HttpTransport.send 失败不抛错（返回 status:false），必须显式标记离线，
+        // 否则 connected 会停留在上次的 true，UI 一直显示已连接/已使能
+        this.status.connected = false
       }
     } catch {
       this.status.connected = false

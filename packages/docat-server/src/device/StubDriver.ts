@@ -833,6 +833,10 @@ export class StubDriver extends DeviceDriver {
           status: { ...this.status },
           timestamp: Date.now(),
         }
+        this.status.connected = true
+      } else {
+        // HttpTransport.send 失败不抛错（返回 status:false），必须显式标记离线
+        this.status.connected = false
       }
     } catch {
       // 设备离线，标记断开
