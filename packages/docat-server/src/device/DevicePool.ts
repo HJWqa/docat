@@ -214,7 +214,27 @@ export class DevicePool {
       // ─── TCP 连接状态追踪（exclusive 模式）──────────
       let tcpConnected = mode !== 'exclusive' // virtual 模式视为"TCP已连接"
       let tcpDownSince = 0 // TCP 断开起始时间
+      let tcpStopped = false // TCP 已停止重连（设备确认离线）
       const TCP_DISCONNECT_THRESHOLD = 5000 // 5s 无 TCP 视为断开
+
+      /** 停止 TCP 重连（设备已离线，避免无限重连打空转） */
+      const stopTcp = () => {
+        if (tcpStopped) return
+        tcpStopped = true
+        tcpConnected = false
+        // disconnectAll 会标记 isManual 并清掉重连定时器，彻底终止重连循环
+        tcp.disconnectAll()
+        console.warn(`[DevicePool] TCP stopped for ${driverId} (device offline)`)
+      }
+
+      /** 恢复 TCP 重连（HTTP 轮询确认设备重新在线时调用） */
+      const resumeTcp = () => {
+        if (!tcpStopped) return
+        tcpStopped = false
+        tcpDownSince = 0
+        console.log(`[DevicePool] TCP resuming for ${driverId}`)
+        tcp.connectAll()
+      }
 
       if (mode === 'exclusive') {
         tcp.on('client-connected', () => {
@@ -228,18 +248,19 @@ export class DevicePool {
           }
         })
         tcp.on('client-disconnected', () => {
-          if (tcp.isAllDisconnected) {
+          if (tcp.connectedCount === 0) {
             if (tcpConnected) {
               tcpConnected = false
               tcpDownSince = Date.now()
               console.warn(`[DevicePool] TCP all disconnected for ${driverId}`)
             }
-            // 超过阈值则标记设备断开
+            // 超过阈值则标记设备断开并停止重连
             if (tcpDownSince && Date.now() - tcpDownSince > TCP_DISCONNECT_THRESHOLD) {
               if (driver.status.connected) {
                 console.warn(`[DevicePool] Device ${driverId} TCP down > ${TCP_DISCONNECT_THRESHOLD}ms, marking disconnected`)
                 eventBus.emit('device:disconnected', { id: driverId })
               }
+              stopTcp()
             }
           }
         })
@@ -254,6 +275,11 @@ export class DevicePool {
           const state = await driver.pollState()
           const nowConnected = driver.status.connected
 
+          // 设备经 HTTP 确认重新在线 → 恢复 TCP 连接
+          if (mode === 'exclusive' && tcpStopped && nowConnected) {
+            resumeTcp()
+          }
+
           // exclusive 模式：额外检查 TCP 状态
           const effectivelyConnected = mode === 'exclusive'
             ? (nowConnected && (tcpConnected || Date.now() - tcpDownSince < TCP_DISCONNECT_THRESHOLD))
@@ -265,6 +291,8 @@ export class DevicePool {
           } else if (wasConnected && !effectivelyConnected) {
             console.warn(`[DevicePool] Device ${driverId} went offline (pollState or TCP failed)`)
             eventBus.emit('device:disconnected', { id: driverId })
+            // 确认离线后停止 TCP 无限重连，等 HTTP 轮询检测到恢复再重建
+            if (mode === 'exclusive' && !tcpStopped) stopTcp()
           }
           wasConnected = effectivelyConnected
 
@@ -298,6 +326,7 @@ export class DevicePool {
             console.warn(`[DevicePool] Device ${driverId} poll error, marking offline`)
             eventBus.emit('device:disconnected', { id: driverId })
           }
+          if (mode === 'exclusive' && !tcpStopped) stopTcp()
         }
       }, pollInterval)
 

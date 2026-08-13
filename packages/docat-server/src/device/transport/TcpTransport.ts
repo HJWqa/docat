@@ -20,6 +20,7 @@ export class TcpClient extends EventEmitter {
   private _isConnected = false
   private isManual = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempts = 0
 
   constructor(host: string, port: number) {
     super()
@@ -29,6 +30,12 @@ export class TcpClient extends EventEmitter {
 
   get isConnected(): boolean {
     return this._isConnected
+  }
+
+  /** 重连退避：3s → 6s → 12s … 封顶 30s，避免对离线设备空转打点 */
+  private nextReconnectDelay(): number {
+    const delay = 3000 * Math.pow(2, this.reconnectAttempts)
+    return Math.min(delay, 30000)
   }
 
   connect(): void {
@@ -45,6 +52,7 @@ export class TcpClient extends EventEmitter {
     socket.on('connect', () => {
       console.log(`[TCP] Connected to ${this.host}:${this.port}`)
       this._isConnected = true
+      this.reconnectAttempts = 0
       socket.setKeepAlive(true)
       this.emit('connected')
     })
@@ -59,12 +67,14 @@ export class TcpClient extends EventEmitter {
       this._isConnected = false
       this.emit('disconnected')
 
-      // 自动重连（非手动断开时）
+      // 自动重连（非手动断开时），指数退避
       if (!this.isManual) {
+        this.reconnectAttempts++
+        const delay = this.nextReconnectDelay()
         this.reconnectTimer = setTimeout(() => {
           this.reconnectTimer = null
           this.connect()
-        }, 3000) // 3s 重连间隔，避免频繁重连
+        }, delay)
       }
     })
 
