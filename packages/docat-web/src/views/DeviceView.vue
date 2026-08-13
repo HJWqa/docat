@@ -78,7 +78,12 @@
     <!-- Pose HUD -->
     <div class="status-grid mt-2">
       <div class="card pose-card">
-        <div class="hud-label">位姿</div>
+        <div class="hud-label pose-hud-label">
+          <span>位姿</span>
+          <button class="btn-icon btn-icon--copy" :disabled="!poseAvailable" @click="copyCurrentPose" title="复制当前位姿（逗号分隔）">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="5.5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 2.5h-7a1 1 0 00-1 1v7" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+        </div>
         <div class="pose-readout">
           <div v-for="axis in poseAxes" :key="axis" class="pose-axis-row">
             <span class="pose-axis-label">{{ axis.toUpperCase() }}</span>
@@ -3093,6 +3098,37 @@ function getPoseVal(axis: string): string {
     return normalizeEulerDeg(val).toFixed(2)
   }
   return val.toFixed(2)
+}
+
+// ─── 位姿复制（逗号分隔）────────────────────────────
+
+/** 当前位姿是否可读（各轴均有值） */
+const poseAvailable = computed(() => poseAxes.value.every(a => getPoseVal(a) !== '--.--'))
+
+async function copyCurrentPose() {
+  if (!poseAvailable.value) {
+    toastRef.value?.error('暂无位姿数据')
+    return
+  }
+  const text = poseAxes.value.map(a => getPoseVal(a)).join(', ')
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // 剪贴板 API 不可用（非安全上下文等）时降级用 execCommand
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    if (!ok) {
+      toastRef.value?.error('复制失败')
+      return
+    }
+  }
+  toastRef.value?.success(`已复制：${text}`)
 }
 function getJoint(n: number): string {
   const joints = state.value.joints as Record<string, number> | undefined
@@ -6886,6 +6922,8 @@ onUnmounted(() => {
   .model-panel { grid-column: auto; }
 }
 .hud-label { font-family: var(--font-body); font-size: 0.72rem; font-weight: 600; color: var(--text-muted); margin-bottom: 16px; }
+.pose-hud-label { display: flex; align-items: center; justify-content: space-between; }
+.btn-icon--copy { width: 24px; height: 24px; font-size: 0; }
 .pose-readout { display: flex; flex-direction: column; gap: 6px; }
 .pose-axis-row { display: flex; align-items: baseline; gap: 12px; padding: 8px 12px; background: var(--surface-1); border-radius: var(--radius); }
 .pose-axis-label { font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; color: var(--text-muted); width: 20px; }

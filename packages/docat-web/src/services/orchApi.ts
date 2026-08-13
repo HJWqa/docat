@@ -94,6 +94,10 @@ export function orchListScripts(): Promise<ApiResponse<OrchScriptFileInfo[]>> {
   return request('GET', '/api/orchestration/scripts')
 }
 
+export function orchCreateScript(name: string): Promise<ApiResponse<{ name: string; mtime: number }>> {
+  return request('POST', '/api/orchestration/scripts', { name })
+}
+
 export function orchGetScript(name: string): Promise<ApiResponse<{ name: string; content: string; mtime: number }>> {
   return request('GET', `/api/orchestration/scripts/${encodeURIComponent(name)}`)
 }

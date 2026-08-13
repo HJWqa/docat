@@ -6,7 +6,7 @@
  * 通知前端刷新文件列表。
  */
 import type { FastifyInstance } from 'fastify'
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
@@ -145,6 +145,15 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
   const persisted = getSetting(SETTING_SCRIPTS_DIR)
   currentScriptsDir = persisted || scriptsDir
   ensureWatch(currentScriptsDir)
+
+  // 每次启动把编排手册覆盖拷贝到脚本目录（手册随版本更新，以最新为准）
+  try {
+    const manualSrc = join(SERVER_PKG_ROOT, '..', '..', 'docs', 'orchestration-script.md')
+    const manualDest = join(currentScriptsDir, 'orchestration-script.md')
+    if (existsSync(manualSrc)) copyFileSync(manualSrc, manualDest)
+  } catch {
+    // 手册缺失/拷贝失败不影响启动
+  }
 
   // ─── 编排设置（含脚本目录）─────────────────────────
   app.get('/api/orchestration/settings', async (request, reply): Promise<ApiResponse<OrchSettingsPayload>> => {
@@ -339,6 +348,29 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
       return { success: false, error: { code: 50000, message: (err as Error).message } }
     }
   })
+
+  // ─── 新建脚本文件 ──────────────────────────────────
+  app.post<{ Body: { name?: string } }>(
+    '/api/orchestration/scripts',
+    async (request, reply): Promise<ApiResponse<{ name: string; mtime: number }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        if (reply.sent) return reply
+        const name = assertScriptName(String(request.body?.name ?? '').trim())
+        const path = join(currentScriptsDir, name)
+        if (existsSync(path)) {
+          return { success: false, error: { code: 42200, message: '文件已存在' } }
+        }
+        writeFileSync(path, '', 'utf-8')
+        const mtime = statSync(path).mtimeMs
+        return { success: true, data: { name, mtime } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
 
   // ─── 脚本文件列表 ──────────────────────────────────
   app.get('/api/orchestration/scripts', async (request, reply): Promise<ApiResponse<OrchScriptFileInfo[]>> => {

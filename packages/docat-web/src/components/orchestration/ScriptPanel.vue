@@ -36,6 +36,9 @@
           <option value="">选择服务端脚本文件</option>
           <option v-for="f in fileList" :key="f.name" :value="f.name">{{ f.name }}</option>
         </select>
+        <button class="btn btn-secondary btn-sm" @click="startNewFile" title="在服务端脚本目录新建文件">
+          📄 新建
+        </button>
         <button class="btn btn-secondary btn-sm" :disabled="loadingFiles" @click="refreshFileList" title="刷新服务端文件列表">
           {{ loadingFiles ? '…' : '↻ 列表' }}
         </button>
@@ -45,6 +48,23 @@
         </button>
       </template>
     </div>
+
+    <Transition name="fade">
+      <div v-if="newFileOpen" class="new-file-bar">
+        <input ref="newFileInputRef" v-model="newFileName" class="file-select new-file-input" placeholder="文件名" spellcheck="false"
+          @keyup.enter="confirmNewFile" @keyup.esc="newFileOpen = false" />
+        <select v-model="newFileExt" class="file-select new-file-ext" title="扩展名">
+          <option value=".js">.js</option>
+          <option value=".py">.py</option>
+          <option value=".mjs">.mjs</option>
+          <option value=".cjs">.cjs</option>
+        </select>
+        <button class="btn btn-primary btn-sm" :disabled="creatingFile" @click="confirmNewFile" title="创建文件 (Enter)">
+          {{ creatingFile ? '创建中...' : '创建' }}
+        </button>
+        <button class="btn btn-secondary btn-sm" @click="newFileOpen = false" title="取消 (Esc)">取消</button>
+      </div>
+    </Transition>
 
     <div class="file-bar">
       <span class="file-name">{{ fileName || '未选择脚本文件' }}</span>
@@ -100,7 +120,7 @@ import * as jsMonarch from 'monaco-editor/languages/definitions/javascript/javas
 import * as pyMonarch from 'monaco-editor/languages/definitions/python/python'
 import { addLog, isOrchMockMode, onOrchScriptChange, onOrchScriptsDirChange, orchStore, orchTypeLabel } from '../../stores/orchestrationStore'
 import { pickScriptFile, runScript, watchScriptFile, type ScriptRunHandle } from '../../services/orchestration'
-import { orchGetScript, orchListModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
+import { orchCreateScript, orchGetScript, orchListModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
 import Toast from '../Toast.vue'
 
 type ScriptLanguage = 'javascript' | 'python'
@@ -127,6 +147,49 @@ const fileList = ref<OrchScriptFileInfo[]>([])
 const loadingFiles = ref(false)
 const saving = ref(false)
 const openingEditor = ref(false)
+
+// ─── 新建文件 ────────────────────────────────────────
+
+const newFileOpen = ref(false)
+const newFileName = ref('')
+const newFileExt = ref('.js')
+const creatingFile = ref(false)
+const newFileInputRef = ref<HTMLInputElement | null>(null)
+
+const SCRIPT_EXT_RE = /\.(js|mjs|cjs|py)$/i
+
+function startNewFile() {
+  newFileOpen.value = true
+  newFileName.value = ''
+  newFileExt.value = fileLanguage.value === 'python' ? '.py' : '.js'
+  nextTick(() => newFileInputRef.value?.focus())
+}
+
+async function confirmNewFile() {
+  const raw = newFileName.value.trim()
+  if (!raw) {
+    toastRef.value?.info('请输入文件名')
+    newFileInputRef.value?.focus()
+    return
+  }
+  const name = SCRIPT_EXT_RE.test(raw) ? raw : `${raw}${newFileExt.value}`
+  if (creatingFile.value) return
+  creatingFile.value = true
+  try {
+    const res = await orchCreateScript(name)
+    if (!res.success) {
+      toastRef.value?.error(`新建失败：${res.error?.message}`)
+      return
+    }
+    newFileOpen.value = false
+    addLog('脚本', 'system', `已新建 ${name}`)
+    await refreshFileList()
+    fileName.value = name
+    await loadServerFile(name)
+  } finally {
+    creatingFile.value = false
+  }
+}
 
 // ─── 记住上次打开的脚本 ──────────────────────────────
 
@@ -954,6 +1017,13 @@ onBeforeUnmount(() => {
   color: var(--text-primary); outline: none;
 }
 .file-select:focus { border-color: var(--accent); }
+
+.new-file-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; background: var(--surface-1); border: 1px solid var(--border-bright); border-radius: var(--radius);
+}
+.new-file-input { flex: 1; min-width: 0; }
+.new-file-ext { min-width: 84px; }
 
 .follow-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .follow-toggle input { display: none; }
