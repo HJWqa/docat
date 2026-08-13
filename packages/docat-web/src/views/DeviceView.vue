@@ -27,6 +27,8 @@
         </div>
       </div>
       <div class="workspace-header-actions">
+        <!-- Magician：清除告警常驻右上角（已连接左侧），F9 同样触发 -->
+        <button v-if="isMagician" class="btn btn-danger btn-sm" @click="doClearAlarm" title="清除告警 (F9)">清除告警</button>
         <span :class="['connection-badge', isVirtualMode ? 'connection-badge--virtual' : isConnected ? (tcpDown ? 'connection-badge--warning' : 'connection-badge--online') : 'connection-badge--offline']">
           <span class="status-dot" :class="`status-dot--${isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
           {{ isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
@@ -235,7 +237,7 @@
       <div class="alarm-panel-header">
         <span class="hud-label" style="margin-bottom:0;color:var(--status-danger)">⚠ 告警与警告</span>
         <div class="alarm-actions">
-          <button v-if="hasAlarms" class="btn btn-danger btn-sm" @click="doClearAlarm" title="清除告警 (F9)">清除告警</button>
+          <button v-if="hasAlarms && !isMagician" class="btn btn-danger btn-sm" @click="doClearAlarm" title="清除告警 (F9)">清除告警</button>
           <button v-if="hasWarnings" class="btn btn-warning btn-sm" @click="dismissWarnings" title="清除警告（F9）">清除警告</button>
           <button v-if="isCollision" class="btn btn-warning btn-sm" @click="doResetCollision" title="复位碰撞 (F9)">复位碰撞</button>
         </div>
@@ -392,7 +394,11 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M5 12l6-6M5 12l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
               <div class="wasd-dir-center" :title="`当前方向：W 指向 ${wasdDirArrow}`">
-                <svg width="26" height="14.3" viewBox="0 0 800 440">
+                <svg v-if="isMagician" width="16" height="24" viewBox="0 0 200 300">
+                  <circle cx="100" cy="100" r="90" fill="currentColor" />
+                  <polygon points="30,110 170,110 100,255" fill="currentColor" />
+                </svg>
+                <svg v-else width="26" height="14.3" viewBox="0 0 800 440">
                   <path
                     d="M 200 20 H 600 C 710 20, 780 110, 780 220 C 780 330, 710 420, 600 420 H 570 C 560 420, 554 423, 549 429 C 544 435, 537 438, 528 438 H 465 C 456 438, 449 435, 444 429 C 439 423, 433 416, 423 412 H 350 C 340 412, 334 415, 329 421 C 324 427, 317 438, 308 438 H 280 C 271 438, 264 435, 259 429 C 254 423, 248 416, 238 412 H 200 C 90 420, 20 330, 20 220 C 20 110, 90 20, 200 20 Z"
                     fill="currentColor"
@@ -456,7 +462,7 @@
           </div>
         </div>
         <div class="move-grid">
-          <div v-for="j in jointCount" :key="j" class="move-field">
+          <div v-for="j in 6" :key="j" class="move-field" :class="{ 'move-field--hidden': j > jointCount }">
             <label class="move-label">J{{ j }}</label>
             <input v-model.number="moveTarget['j'+j]" type="number" step="0.1" class="move-input"
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('joint', $event)" ref="jointInputRefs" />
@@ -472,7 +478,7 @@
         </div>
         <!-- Pose targets -->
         <div class="move-grid" style="margin-top:10px">
-          <div v-for="axis in poseAxes" :key="axis" class="move-field">
+          <div v-for="axis in fullPoseAxes" :key="axis" class="move-field" :class="{ 'move-field--hidden': hiddenPoseAxes.includes(axis) }">
             <label class="move-label">{{ axis.toUpperCase() }}</label>
             <input v-model.number="targetPose[axis]" type="number" step="0.1" class="move-input"
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('pose', $event)" ref="poseInputRefs" />
@@ -719,7 +725,7 @@
             <span class="hud-label" style="margin-bottom:0">📋 设备日志</span>
             <div class="log-tabs">
               <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'alarms' }]" @click="switchLogTab('alarms')">告警</button>
-              <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'history' }]" @click="switchLogTab('history')">历史</button>
+              <button v-if="!isMagician" :class="['log-tab', { 'log-tab--active': logPanelTab === 'history' }]" @click="switchLogTab('history')">历史</button>
             </div>
           </div>
           <div class="log-panel-actions">
@@ -1989,6 +1995,10 @@ const robotModelType = computed(() => normalizeRobotModelType(device.value?.type
 
 /** 是否 Magician（4 轴串口机）：控制 UI 显示与轴数 */
 const isMagician = computed(() => robotModelType.value === 'Magician')
+/** Magician 无历史日志功能：切到 Magician 时强制回到告警页（组件跨设备复用时会残留 history） */
+watch(isMagician, (m) => {
+  if (m) logPanelTab.value = 'alarms'
+})
 /** 关节轴数：Magician=4，其余 6 */
 const jointCount = computed(() => (isMagician.value ? 4 : 6))
 /** 位姿显示轴：Magician 用 XYZR（R 占 RX 位置），其余 XYZ+RXRYRZ */
@@ -1997,6 +2007,14 @@ const poseAxes = computed(() =>
     ? (['x', 'y', 'z', 'r'] as const)
     : (['x', 'y', 'z', 'rx', 'ry', 'rz'] as const),
 )
+/** 移动/预设板块固定渲染 6 个位姿框（与 6 轴机型布局一致），超出机型轴数者隐藏占位 */
+const fullPoseAxes = computed(() =>
+  isMagician.value
+    ? (['x', 'y', 'z', 'r', 'ry', 'rz'] as const)
+    : (['x', 'y', 'z', 'rx', 'ry', 'rz'] as const),
+)
+/** Magician 上隐藏占位的多余位姿轴 */
+const hiddenPoseAxes = computed<string[]>(() => (isMagician.value ? ['ry', 'rz'] : []))
 
 function normalizeRobotModelType(raw: string): string {
   const value = String(raw || '').toUpperCase().replace(/\s+/g, '')
@@ -2559,6 +2577,9 @@ try {
     wasdDir.value = saved
   } else if (localStorage.getItem(LEGACY_WASD_INVERT_STORAGE_KEY) === '1') {
     wasdDir.value = 'b'
+  } else {
+    // 机型默认朝向：Magician 朝下（下箭头按钮），E6/MG6 朝右（右箭头按钮）；用户可调节并记住
+    wasdDir.value = isMagician.value ? 'd' : 'b'
   }
 } catch { /* ignore */ }
 
@@ -3024,7 +3045,7 @@ async function moveToPose() {
       else toastRef.value?.info('运动已停止')
       return
     }
-    // 真机：当前关节作就近选解；同时带 pose 目标（Magician 为 XYZR 四值）
+    // 真机：带 pose 目标（Magician 为 XYZR 四值，直接走串口 PTP；其余机型用当前关节就近选解）
     const joints = getMoveTargetJoints()
     const pose = isMagician.value
       ? [pt.x, pt.y, pt.z, pt.rx]
@@ -3032,7 +3053,7 @@ async function moveToPose() {
     const res = await api.movePoint(deviceId, {
       path: movePath.value,
       pose,
-      joint: joints,
+      joint: isMagician.value ? undefined : joints,
     })
     if (res.success) {
       const data = res.data as Record<string, unknown> | undefined
@@ -3874,7 +3895,15 @@ async function doClearAlarm() {
       currentAlarms.value = []
       // 清除后立即刷新完整列表，同步主界面与日志面板
       await fetchDeviceLogs()
-      toastRef.value?.success('告警已清除')
+      if (isMagician.value) {
+        // Magician：告警后串口链路可能异常，清除后自动重连恢复（E6 不重连）
+        toastRef.value?.info('告警已清除，正在重新连接设备…')
+        await api.disconnectDevice(deviceId).catch(() => {})
+        await new Promise((r) => setTimeout(r, 300))
+        await doConnect()
+      } else {
+        toastRef.value?.success('告警已清除')
+      }
     } else {
       toastRef.value?.error(`清除告警失败：${res.error?.message}`)
     }
@@ -3894,24 +3923,15 @@ function dismissWarnings() {
   toastRef.value?.success('警告已清除')
 }
 
-/** F9：一键处理告警面板——清除告警、复位碰撞（设备动作），最后清本地警告显示 */
+/** F9：清除告警（按钮常显，始终下发）——最后清本地警告显示、复位碰撞 */
 async function handleAlarmPanelShortcut() {
-  let acted = false
-  if (currentAlarms.value.length > 0) {
-    acted = true
-    await doClearAlarm()
-  }
+  await doClearAlarm()
   if (isCollision.value) {
-    acted = true
     await doResetCollision()
   }
   // 警告只清本地显示，放在最后，避免被上面的设备刷新重新带回来
   if (currentWarnings.value.length > 0) {
-    acted = true
     dismissWarnings()
-  }
-  if (!acted) {
-    toastRef.value?.info('当前没有告警/警告/碰撞需要处理')
   }
 }
 
@@ -4919,11 +4939,8 @@ const customPostures = ref<api.CustomPostureItem[]>([])
 // System postures (always present, not stored on controller)
 const systemPostures = computed<Array<{ name: string; type: 'joint'; joint: number[]; system: true }>>(() => {
   if (isMagician.value) {
-    // Magician 四轴：仅 零点/回零姿态
-    return [
-      { name: '零点', type: 'joint', joint: [0, 0, 0, 0], system: true },
-      { name: '研究', type: 'joint', joint: [-90, 0, -90, 0], system: true },
-    ]
+    // Magician 四轴：无系统预设
+    return []
   }
   return [
     { name: '零点', type: 'joint', joint: [0, 0, 0, 0, 0, 0], system: true },
@@ -7131,6 +7148,7 @@ onUnmounted(() => {
 .preset-name-input:focus { border-color: var(--accent); }
 .move-grid { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .move-field { display: flex; flex-direction: column; gap: 3px; min-width: 80px; }
+.move-field--hidden { visibility: hidden; }
 .move-label { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); }
 .move-input {
   padding: 6px 8px; font-family: var(--font-mono); font-size: 0.82rem;

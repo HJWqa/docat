@@ -461,8 +461,8 @@ export async function addOrchDevice(input: NewOrchDeviceInput): Promise<{ ok: bo
   const name = input.name.trim()
   const err = identifierError(name, orchStore.devices.map(d => d.name))
   if (err) return { ok: false, error: err }
-  if (input.type !== 'docat-motion' && !input.ip.trim()) return { ok: false, error: 'IP 不能为空' }
-  if (input.type !== 'docat-motion' && !(input.port > 0 && input.port <= 65535)) return { ok: false, error: '端口需为 1-65535' }
+  if (input.type !== 'serial' && input.type !== 'docat-motion' && !input.ip.trim()) return { ok: false, error: 'IP 不能为空' }
+  if (input.type !== 'serial' && input.type !== 'docat-motion' && !(input.port > 0 && input.port <= 65535)) return { ok: false, error: '端口需为 1-65535' }
   if (input.type === 'serial' && !input.serialPort.trim()) return { ok: false, error: '串口号不能为空' }
 
   if (!orchMock) {
@@ -503,8 +503,8 @@ export async function updateOrchDevice(
     const err = identifierError(next.name, orchStore.devices.filter(d => d.id !== id).map(d => d.name))
     if (err) return { ok: false, error: err }
   }
-  if (next.type !== 'docat-motion' && !next.ip.trim()) return { ok: false, error: 'IP 不能为空' }
-  if (next.type !== 'docat-motion' && !(next.port > 0 && next.port <= 65535)) return { ok: false, error: '端口需为 1-65535' }
+  if (next.type !== 'serial' && next.type !== 'docat-motion' && !next.ip.trim()) return { ok: false, error: 'IP 不能为空' }
+  if (next.type !== 'serial' && next.type !== 'docat-motion' && !(next.port > 0 && next.port <= 65535)) return { ok: false, error: '端口需为 1-65535' }
   if (next.type === 'serial' && !next.serialPort.trim()) return { ok: false, error: '串口号不能为空' }
   if (next.connected && (next.type !== cur.type || next.ip !== cur.ip || next.port !== cur.port)) {
     void disconnectDevice(id)

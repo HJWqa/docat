@@ -142,7 +142,8 @@
               </div>
               <div class="field-col">
                 <label class="field-label">{{ editForm.type === 'serial' ? '波特率' : '端口' }}</label>
-                <input :value="editForm.type === 'serial' ? editForm.baudRate : editForm.port" type="number" min="1" max="65535"
+                <input :value="editForm.type === 'serial' ? editForm.baudRate : editForm.port" type="number"
+                  :min="editForm.type === 'serial' ? 1200 : 1" :max="editForm.type === 'serial' ? 4000000 : 65535"
                   :list="editForm.type === 'serial' ? 'orch-baud-edit' : undefined"
                   @input="(e) => { const v = Number((e.target as HTMLInputElement).value) || 0; if (editForm.type === 'serial') editForm.baudRate = v; else editForm.port = v }"
                   class="field-input" />

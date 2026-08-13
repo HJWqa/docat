@@ -134,13 +134,13 @@ export class MagicianSerialTransport {
   }
 }
 
-/** 枚举可用串口（ttyUSB/ttyACM/ttyS/ttyAMA/ttyTHS/ttyXRUSB/ttySC/cu.*） */
+/** 枚举可用串口（Linux: ttyUSB/ttyACM/ttyS/ttyAMA/ttyTHS/ttyXRUSB/ttySC/cu.*；Windows: COM*） */
 export async function listSerialPorts(): Promise<string[]> {
   try {
     const ports = await SerialPort.list()
     return ports
       .map((p) => p.path)
-      .filter((p) => /(ttyUSB|ttyACM|ttyS\d|ttyAMA|ttyTHS|ttyXRUSB|ttySC|cu\.)/.test(p))
+      .filter((p) => /(ttyUSB|ttyACM|ttyS\d|ttyAMA|ttyTHS|ttyXRUSB|ttySC|cu\.|COM\d)/.test(p))
   } catch {
     return []
   }

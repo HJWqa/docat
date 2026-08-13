@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
+import { listSerialPorts } from '../../device/transport/MagicianSerialTransport.js'
 import { getSetting, setSetting } from './system.js'
 import { eventBus } from '../../event/EventBus.js'
 import type { OrchDeviceManager } from '../../orchestration/OrchDeviceManager.js'
@@ -280,19 +281,22 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
     }
   })
 
-  // ─── 可用串口列表（/dev 下的串口设备）───────────────
+  // ─── 可用串口列表 ──────────────────────────────────
   app.get('/api/orchestration/serial-ports', async (request, reply): Promise<ApiResponse<string[]>> => {
     try {
       await authMiddleware(request, reply)
       if (reply.sent) return reply
-      const ports: string[] = []
-      try {
-        const entries = readdirSync('/dev')
-        for (const name of entries) {
-          if (/^(tty(USB|ACM|S|AMA|THS|XRUSB|SC)|cu\.)/.test(name)) ports.push(`/dev/${name}`)
+      let ports = await listSerialPorts()
+      if (process.platform === 'linux') {
+        try {
+          const entries = readdirSync('/dev')
+          const devPorts = entries
+            .filter((name) => /^(tty(USB|ACM|S|AMA|THS|XRUSB|SC)|cu\.)/.test(name))
+            .map((name) => `/dev/${name}`)
+          ports = Array.from(new Set([...ports, ...devPorts]))
+        } catch {
+          // /dev 不可读（如非 Linux）→ 忽略
         }
-      } catch {
-        // /dev 不可读（如非 Linux）→ 返回空列表
       }
       return { success: true, data: ports.sort((a, b) => a.localeCompare(b)) }
     } catch (err) {

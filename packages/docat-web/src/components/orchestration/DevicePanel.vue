@@ -71,7 +71,8 @@
               <input :value="form.type === 'serial' ? form.baudRate : form.port" type="number"
                 :list="form.type === 'serial' ? 'orch-baud-device' : undefined"
                 @input="(e) => { const v = Number((e.target as HTMLInputElement).value) || 0; if (form.type === 'serial') form.baudRate = v; else form.port = v }"
-                class="form-input" :placeholder="form.type === 'serial' ? '115200' : '7920'" min="1" max="65535" />
+                class="form-input" :placeholder="form.type === 'serial' ? '115200' : '7920'"
+                :min="form.type === 'serial' ? 1200 : 1" :max="form.type === 'serial' ? 4000000 : 65535" />
               <datalist v-if="form.type === 'serial'" id="orch-baud-device">
                 <option v-for="b in BAUD_RATES" :key="b" :value="b" />
               </datalist>

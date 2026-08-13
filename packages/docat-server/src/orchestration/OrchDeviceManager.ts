@@ -177,8 +177,8 @@ export class OrchDeviceManager {
         if (e.config.id !== id && e.config.name === patch.name.trim()) return { ok: false, error: '名称已存在' }
       }
     }
-    if (next.type !== 'docat-motion' && !next.ip.trim()) return { ok: false, error: 'IP 不能为空' }
-    if (next.type !== 'docat-motion' && !(next.port > 0 && next.port <= 65535)) return { ok: false, error: '端口需为 1-65535' }
+    if (next.type !== 'serial' && next.type !== 'docat-motion' && !next.ip.trim()) return { ok: false, error: 'IP 不能为空' }
+    if (next.type !== 'serial' && next.type !== 'docat-motion' && !(next.port > 0 && next.port <= 65535)) return { ok: false, error: '端口需为 1-65535' }
     if (next.type === 'serial' && !next.serialPort.trim()) return { ok: false, error: '串口号不能为空' }
 
     // 连接参数变化 → 断开

@@ -13,6 +13,7 @@ import type { DevicePool, ConnectionMode, DeviceEntry } from '../../device/Devic
 import { SftpTransport, type SftpFileEntry } from '../../device/transport/SftpTransport.js'
 import { CRApiTcpTransport, type CRFeedBackData } from '../../device/transport/CRApiTcpTransport.js'
 import { listSerialPorts } from '../../device/transport/MagicianSerialTransport.js'
+import { MagicianDriver } from '../../device/drivers/MagicianDriver.js'
 import { createStoredZip, type ZipEntryInput } from '../../utils/zip.js'
 import { getSetting, SETTING_CALIB_EXPORT_DIR, DEFAULT_EXPORT_DIR, resolveExportDir } from './system.js'
 import type { ApiResponse, DeviceConfig } from 'docat-shared/types'
@@ -2914,15 +2915,19 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
         const b = request.body ?? {}
         const path = b.path === 'MovJ' ? 'MovJ' : 'MovL'
 
+        // 四轴 Magician 走串口协议，joint/pose 均为 4 值；其余机型（MG6/E6 等）为 6 值
+        const isMagician = entry.driver instanceof MagicianDriver
+        const targetLen = isMagician ? 4 : 6
+
         let poseArr: number[] | undefined
-        if (Array.isArray(b.pose) && b.pose.length >= 6) {
+        if (Array.isArray(b.pose) && b.pose.length >= targetLen) {
           poseArr = b.pose.slice(0, 6).map(Number)
-        } else if (b.pose && typeof b.pose === 'object') {
+        } else if (b.pose && !Array.isArray(b.pose) && typeof b.pose === 'object') {
           const p = b.pose as Record<string, number>
           poseArr = [Number(p.x ?? 0), Number(p.y ?? 0), Number(p.z ?? 0), Number(p.rx ?? p.r ?? 0), Number(p.ry ?? 0), Number(p.rz ?? 0)]
         }
 
-        const joint = Array.isArray(b.joint) && b.joint.length >= 6
+        const joint = Array.isArray(b.joint) && b.joint.length >= targetLen
           ? b.joint.slice(0, 6).map(Number)
           : undefined
 
