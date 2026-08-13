@@ -473,7 +473,7 @@
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('joint', $event)" ref="jointInputRefs" />
             <span class="move-unit">°</span>
           </div>
-          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readJointsAndFocus" title="读取当前关节角与笛卡尔位姿，并聚焦 J1 (Alt+N)；N 仅聚焦 J1">读取当前关节</button>
+          <div class="move-read-row"><button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readJointsAndFocus" title="读取当前关节角与笛卡尔位姿，并聚焦 J1 (Alt+N)；N 仅聚焦 J1">读取当前关节</button></div>
           <button class="btn btn-primary move-btn" :disabled="!isConnected || moving || poseMoving" @click="doMove">
             {{ moving ? '移动中...' : (movePath + ' 关节目标') }}
           </button>
@@ -489,7 +489,7 @@
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('pose', $event)" ref="poseInputRefs" />
             <span class="move-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
           </div>
-          <button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readPoseAndFocus" title="读取当前位姿并聚焦 X (Alt+M)；M 仅聚焦 X">读取当前位姿</button>
+          <div class="move-read-row"><button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readPoseAndFocus" title="读取当前位姿并聚焦 X (Alt+M)；M 仅聚焦 X">读取当前位姿</button></div>
           <button class="btn btn-primary move-btn" :disabled="!isConnected || poseMoving || moving" @click="moveToPose">
             {{ poseMoving ? '移动中...' : (movePath + ' 位姿目标') }}
           </button>
@@ -7185,6 +7185,7 @@ onUnmounted(() => {
 }
 .preset-name-input:focus { border-color: var(--accent); }
 .move-grid { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.move-read-row { flex-basis: 100%; display: flex; }
 .move-field { display: flex; flex-direction: column; gap: 3px; min-width: 80px; }
 .move-field--hidden { visibility: hidden; }
 .move-label { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--text-muted); }
