@@ -7,7 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { authMiddleware, requireOperator } from '../../auth/auth.js'
@@ -26,6 +26,33 @@ const SERVER_PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..'
 
 const SETTING_PREFIX = 'orch.'
 const SETTING_SCRIPTS_DIR = 'orch.scriptsDir'
+
+/**
+ * 解析 code 命令（Windows）：
+ * cmd 按 PATHEXT 会把 `code` 解析成 Code.exe（GUI 主进程，裸路径参数不会打开目录），
+ * 必须显式走 `...\bin\code.cmd`（CLI 包装）；找不到时回退到其他命中项。
+ * 非 Windows 直接返回 'code'。返回 null 表示未找到。
+ */
+function resolveCodeCommand(): string | null {
+  if (process.platform !== 'win32') return 'code'
+  try {
+    const r = spawnSync('where', ['code'], { encoding: 'utf8', timeout: 5000 })
+    if (r.error || r.status !== 0 || !r.stdout) return null
+    const lines = r.stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    const cli = lines.find(l => /\\bin\\code\.cmd$/i.test(l))
+    if (cli) return cli
+    return lines.length > 0 ? lines[0] : null
+  } catch {
+    return null
+  }
+}
+
+/** Windows 下 .cmd 不能直接 spawn（EINVAL），统一经 cmd.exe 执行 */
+function codeArgs(codeCmd: string, args: string[]): string[] {
+  return process.platform === 'win32'
+    ? ['/d', '/c', codeCmd, ...args]
+    : args
+}
 
 function assertScriptName(name: string): string {
   const value = String(name ?? '').trim()
@@ -265,17 +292,26 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
       requireOperator(request, reply)
       if (reply.sent) return reply
 
-      // 先确认 code 命令可用（避免异步 spawn 后才报错）
-      const probe = spawnSync('code', ['--version'], { timeout: 3000, stdio: 'ignore' })
-      if (probe.error || probe.status !== 0) {
+      const codeCmd = resolveCodeCommand()
+      if (!codeCmd) {
         return { success: false, error: { code: 50000, message: '未找到 code 命令，请确认服务端已安装 VSCode 并加入 PATH' } }
       }
+      // Windows 上 .cmd 经 cmd.exe 执行；非 Windows 直接跑 code
+      const shellCmd = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : codeCmd
 
-      const child = spawn('code', [currentScriptsDir], { detached: true, stdio: 'ignore' })
+      // 先确认 code 命令可用（避免异步 spawn 后才报错）
+      const probe = spawnSync(shellCmd, codeArgs(codeCmd, ['--version']), { timeout: 3000, stdio: 'ignore' })
+      if (probe.error || probe.status !== 0) {
+        return { success: false, error: { code: 50000, message: 'code 命令不可用，请确认服务端已安装 VSCode 并加入 PATH' } }
+      }
+
+      // 目录统一转绝对路径（VSCode CLI 对相对路径解析不可靠）
+      const targetDir = resolve(currentScriptsDir)
+      const child = spawn(shellCmd, codeArgs(codeCmd, [targetDir]), { detached: true, stdio: 'ignore' })
       child.on('error', (err) => console.error('[Orchestration] code 启动失败:', err.message))
       child.unref()
 
-      return { success: true, data: { dir: currentScriptsDir } }
+      return { success: true, data: { dir: targetDir } }
     } catch (err) {
       return { success: false, error: { code: 50000, message: (err as Error).message } }
     }

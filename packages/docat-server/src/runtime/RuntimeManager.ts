@@ -5,7 +5,7 @@
  * Python：python3 runtime-py.py（stdlib 顺序事件循环）
  * 单实例：运行中再次 run 会先终止旧脚本
  */
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { eventBus } from '../event/EventBus.js'
 import type { OrchDeviceManager } from '../orchestration/OrchDeviceManager.js'
@@ -22,6 +22,24 @@ interface OutgoingMessage {
   type: string
   [key: string]: unknown
 }
+
+/** Python 解释器候选（Windows 上 python3 常为商店空壳/缺失，需逐级回退） */
+interface PyCandidate {
+  cmd: string
+  /** 探测用参数（--version 等） */
+  versionArgs: string[]
+  /** 运行脚本时附加的参数（如 py -3 的 -3） */
+  runArgs: string[]
+}
+
+const PY_CANDIDATES: PyCandidate[] = [
+  { cmd: 'python3', versionArgs: ['--version'], runArgs: [] },
+  { cmd: 'python', versionArgs: ['--version'], runArgs: [] },
+  { cmd: 'py', versionArgs: ['-3', '--version'], runArgs: ['-3'] },
+]
+
+/** 已探测可用的 Python 解释器（缓存，避免每次运行都探测） */
+let pyAvailable: PyCandidate | null | undefined
 
 export class RuntimeManager {
   private manager: OrchDeviceManager
@@ -62,6 +80,25 @@ export class RuntimeManager {
     return `${base}runtime-${language === 'python' ? 'py.py' : 'js.mjs'}`
   }
 
+  /** 探测可用的 Python 解释器（平台自适应，结果缓存） */
+  private resolvePython(): PyCandidate | null {
+    if (pyAvailable !== undefined) return pyAvailable
+    pyAvailable = null
+    const candidates = process.platform === 'win32' ? PY_CANDIDATES : PY_CANDIDATES.slice(0, 1)
+    for (const c of candidates) {
+      try {
+        const r = spawnSync(c.cmd, c.versionArgs, { stdio: 'ignore', timeout: 5000 })
+        if (!r.error && r.status === 0) {
+          pyAvailable = c
+          break
+        }
+      } catch {
+        // 继续下一个候选
+      }
+    }
+    return pyAvailable
+  }
+
   private sendToChild(msg: OutgoingMessage) {
     if (!this.child) return
     try {
@@ -88,7 +125,11 @@ export class RuntimeManager {
     let child: ChildProcessWithoutNullStreams
     try {
       if (req.language === 'python') {
-        child = spawn('python3', [this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true })
+        const py = this.resolvePython()
+        if (!py) {
+          return { ok: false, error: '未找到 Python 解释器（python3 / python / py -3 均不可用），请安装 Python 并加入 PATH 后重试' }
+        }
+        child = spawn(py.cmd, [...py.runArgs, this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true })
       } else {
         child = spawn(process.execPath, [this.shimPath('javascript')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true })
       }
@@ -199,10 +240,21 @@ export class RuntimeManager {
     const child = this.child
     this.child = null
     if (!child || child.exitCode !== null) return
+    let done = false
     try {
-      // 杀掉整个进程组（含 setInterval 等子进程）
-      process.kill(-child.pid!, 'SIGKILL')
+      if (process.platform === 'win32') {
+        // Windows 无进程组：taskkill /T 杀整棵进程树（含脚本再派生的子进程）
+        const r = spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+        done = !r.error && r.status === 0
+      } else {
+        // POSIX：杀掉整个进程组（含 setInterval 等子进程）
+        process.kill(-child.pid!, 'SIGKILL')
+        done = true
+      }
     } catch {
+      done = false
+    }
+    if (!done) {
       try {
         child.kill('SIGKILL')
       } catch {

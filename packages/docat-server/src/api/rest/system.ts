@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
+import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { getDb } from '../../db/index.js'
 import { authMiddleware, requireAdmin } from '../../auth/auth.js'
@@ -86,7 +87,8 @@ export async function openDirectory(dir: string): Promise<string | null> {
 
   try {
     if (process.platform === 'win32') {
-      spawnDetached('explorer.exe', [dir])
+      // explorer.exe 对相对路径的解析依赖自身 CWD，统一传绝对路径
+      spawnDetached('explorer.exe', [resolve(dir)])
       return 'Windows 资源管理器'
     }
 

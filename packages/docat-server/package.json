@@ -10,7 +10,7 @@
     "start": "node --experimental-transform-types dist/server.js",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

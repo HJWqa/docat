@@ -1,6 +1,8 @@
 # 编排脚本 API 文档
 
-编排（Orchestration）脚本运行在 **docat-server 端**：JS 由 Node 子进程（vm 沙箱）执行，Python 由 python3 子进程执行（服务端需安装 python3）。脚本**不负责**设备连接/重连/心跳——这些由编排引擎处理，脚本只写逻辑。
+编排（Orchestration）脚本运行在 **docat-server 端**：JS 由 Node 子进程（vm 沙箱）执行，Python 由 Python 子进程执行（服务端需安装 Python）。脚本**不负责**设备连接/重连/心跳——这些由编排引擎处理，脚本只写逻辑。
+
+Python 解释器自动探测：Windows 依次尝试 `python3` → `python` → `py -3`（取第一个可用的并缓存），Linux/macOS 使用 `python3`。全失败时运行会报「未找到 Python 解释器」，请安装 Python 并加入 PATH。
 
 ## 运行方式
 

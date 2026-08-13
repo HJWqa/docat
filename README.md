@@ -28,8 +28,8 @@ docat 是一个用于设备编排与自动化的开源工具集，采用 Client�
 
 先决条件：
 
-- Node.js：>= 20.0.0（建议使用最新 20.x LTS），检查：`node -v`。
-- pnpm：>= 11.1.2（根目录 `package.json` 声明 `packageManager: "pnpm@11.1.2"`），检查：`pnpm -v`。
+- Node.js：>= 22.7.0（`package.json` 声明 `engines.node`），检查：`node -v`。
+- pnpm：>= 9.0.0（根目录 `package.json` 声明 `packageManager: "pnpm@11.17.0"`），检查：`pnpm -v`。
 - Turbo（用于 monorepo 任务运行）：项目依赖 `turbo`，推荐使用与 `package.json` 中匹配的版本，检查：`pnpx turbo -v` 或 `pnpm dlx turbo -v`。
 
 安装/启用 pnpm（示例）：
@@ -37,7 +37,7 @@ docat 是一个用于设备编排与自动化的开源工具集，采用 Client�
 ```bash
 # 使用 corepack（Node 16+ 自带）启用并激活 pnpm
 corepack enable
-corepack prepare pnpm@11.1.2 --activate
+corepack prepare pnpm@11.17.0 --activate
 # 或使用 npm 全局安装（替代）
 npm i -g pnpm@11
 ```
