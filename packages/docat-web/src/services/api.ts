@@ -471,6 +471,10 @@ export async function deleteDeviceProject(id: string, projectName: string): Prom
   return request('DELETE', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}`)
 }
 
+export async function clearProjectCache(id: string, projectName: string): Promise<ApiResponse<null>> {
+  return request('DELETE', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/cache`)
+}
+
 export async function renameDeviceProject(id: string, projectName: string, name: string): Promise<ApiResponse<ControllerProjectDetail>> {
   return request('POST', `/api/devices/${id}/projects/${encodeURIComponent(projectName)}/rename`, { name })
 }

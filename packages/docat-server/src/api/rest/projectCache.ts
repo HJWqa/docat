@@ -136,3 +136,16 @@ export function writeCachedProjectList<T>(deviceId: string, entries: T[]): void 
     // ignore
   }
 }
+
+/** 从项目列表快照中剔除指定项目（无快照/项目不存在时忽略） */
+export function removeCachedProjectListEntry(deviceId: string, projectName: string): void {
+  try {
+    const list = readCachedProjectList<{ name: string }>(deviceId)
+    if (!list) return
+    const entries = list.entries.filter(entry => entry.name !== projectName)
+    if (entries.length === list.entries.length) return
+    writeCachedProjectList(deviceId, entries)
+  } catch {
+    // ignore
+  }
+}

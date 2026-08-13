@@ -292,6 +292,8 @@ export interface ApiResponse<T = unknown> {
   cached?: boolean
   /** 缓存内容为陈旧回退（控制器不可达时的兜底） */
   stale?: boolean
+  /** stale 回退时带出同步失败的具体原因（如控制器无该工程/不可达） */
+  refreshError?: string
   /** 缓存写入时间 */
   cachedAt?: string
 }

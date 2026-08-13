@@ -17,6 +17,7 @@ import {
   trimCachedProjects,
   readCachedProjectList,
   writeCachedProjectList,
+  removeCachedProjectListEntry,
 } from './projectCache.js'
 import type { DevicePool } from '../../device/DevicePool.js'
 import type { ApiResponse, Script, ScriptLanguage } from 'docat-shared/types'
@@ -573,7 +574,7 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
           const cached = readCachedProject<ControllerProjectDetail>(deviceId, projectName)
           if (cached) {
             rememberRecentProject(request.auth!.userId, deviceId, cached.detail)
-            return { success: true, data: cached.detail, cached: true, stale: true, cachedAt: cached.cachedAt }
+            return { success: true, data: cached.detail, cached: true, stale: true, cachedAt: cached.cachedAt, refreshError: (err as Error).message }
           }
           throw err
         }
@@ -597,6 +598,27 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         const db = getDb()
         db.prepare('DELETE FROM recent_projects WHERE deviceId = ? AND projectName = ?')
           .run(request.params.id, request.params.projectName)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  /** 清除项目的本地缓存（详情 + 列表快照条目 + 最近记录），不动控制器上的工程 */
+  app.delete<{ Params: { id: string; projectName: string } }>(
+    '/api/devices/:id/projects/:projectName/cache',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const deviceId = request.params.id
+        const projectName = assertProjectName(request.params.projectName)
+        deleteCachedProject(deviceId, projectName)
+        removeCachedProjectListEntry(deviceId, projectName)
+        const db = getDb()
+        db.prepare('DELETE FROM recent_projects WHERE deviceId = ? AND projectName = ?')
+          .run(deviceId, projectName)
         return { success: true, data: null }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }

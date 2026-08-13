@@ -1115,7 +1115,14 @@ async function refreshProjectContent(deviceId: string, projectName: string, pref
       updateActiveProject(res.data, preferredFile || activeFileName.value)
       loadPoints()
       await loadProjects()
-      toastRef.value?.success('已同步控制器最新内容')
+      if (res.stale) {
+        toastRef.value?.info(`同步失败：${res.refreshError ?? '控制器不可达或工程不存在'}，已显示本地缓存内容`, {
+          action: { label: '清除缓存', variant: 'danger', handler: () => { void clearProjectCache(deviceId, projectName) } },
+          duration: 8000,
+        })
+      } else {
+        toastRef.value?.success('已同步控制器最新内容')
+      }
     } else {
       toastRef.value?.info(`同步失败：${res.error?.message || '控制器不可达'}，已显示本地缓存内容`)
     }
@@ -1125,6 +1132,26 @@ async function refreshProjectContent(deviceId: string, projectName: string, pref
       editor?.updateOptions({ readOnly: !activeFile.value?.editable })
     }
   }
+}
+
+/** 清除项目的本地缓存（详情 + 列表快照 + 最近记录），用于控制器上已无该工程的情况 */
+async function clearProjectCache(deviceId: string, projectName: string) {
+  const name = projectName
+  const res = await api.clearProjectCache(deviceId, name)
+  if (!res.success) {
+    toastRef.value?.error(`清除缓存失败：${res.error?.message}`)
+    return
+  }
+  dirtyFiles.value = dirtyFiles.value.filter(key => !key.includes(`/${name}/`))
+  if (activeProject.value?.name === name) {
+    activeProject.value = null
+    activeFileName.value = ''
+    runtimeStore.reset(selectedDeviceId.value)
+    clearExecutionLine()
+    syncEditor()
+  }
+  await loadProjects({ refresh: true })
+  toastRef.value?.success('已清除本地缓存')
 }
 
 async function openProject(projectName: string, preferredFile?: string) {
