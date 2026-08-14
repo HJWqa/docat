@@ -57,6 +57,16 @@ function splitFields(text, sep = ';') {
   return parts
 }
 
+/** 日志多参数格式化：对象 JSON 化，其余 String()，空格拼接（类似 console.log） */
+function toLogText(v) {
+  if (v === null) return 'null'
+  if (v === undefined) return 'undefined'
+  if (typeof v === 'object') {
+    try { return JSON.stringify(v) } catch { return String(v) }
+  }
+  return String(v)
+}
+
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n')
 }
@@ -160,9 +170,9 @@ const docat = {
     },
   },
   log: {
-    info(text) { send({ type: 'log', level: 'info', text: String(text) }) },
-    warn(text) { send({ type: 'log', level: 'warn', text: String(text) }) },
-    error(text) { send({ type: 'log', level: 'error', text: String(text) }) },
+    info(...args) { send({ type: 'log', level: 'info', text: args.map(toLogText).join(' ') }) },
+    warn(...args) { send({ type: 'log', level: 'warn', text: args.map(toLogText).join(' ') }) },
+    error(...args) { send({ type: 'log', level: 'error', text: args.map(toLogText).join(' ') }) },
   },
 }
 

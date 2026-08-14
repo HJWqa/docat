@@ -250,14 +250,17 @@ class _Utils:
 
 
 class _Log:
-    def info(self, text):
-        _send({"type": "log", "level": "info", "text": str(text)})
+    def _fmt(self, *args):
+        return " ".join(str(a) for a in args)
 
-    def warn(self, text):
-        _send({"type": "log", "level": "warn", "text": str(text)})
+    def info(self, *text):
+        _send({"type": "log", "level": "info", "text": self._fmt(*text)})
 
-    def error(self, text):
-        _send({"type": "log", "level": "error", "text": str(text)})
+    def warn(self, *text):
+        _send({"type": "log", "level": "warn", "text": self._fmt(*text)})
+
+    def error(self, *text):
+        _send({"type": "log", "level": "error", "text": self._fmt(*text)})
 
 
 docat = type("docat", (), {

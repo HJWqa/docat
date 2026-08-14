@@ -383,11 +383,12 @@ const DOCAT_API_JS: DocatCompletionItem[] = [
   { label: 'utils.calib.parseXml', detail: '解析 .xml 标定文件', documentation: 'utils.calib.parseXml(路径) → 矩阵对象（附 precision）；路径错误自动转换重试', insert: 'utils.calib.parseXml(\'${1:路径}\')' },
   { label: 'utils.calib.imageToWorld', detail: '图像坐标 → 物理坐标', documentation: 'utils.calib.imageToWorld(m, x, y[, 分隔符]) → [wx, wy] 或文本', insert: 'utils.calib.imageToWorld(${1:m}, ${2:x}, ${3:y})' },
   { label: 'utils.calib.worldToImage', detail: '物理坐标 → 图像坐标', documentation: 'utils.calib.worldToImage(m, wx, wy[, 分隔符]) → [ix, iy]（矩阵求逆）', insert: 'utils.calib.worldToImage(${1:m}, ${2:wx}, ${3:wy})' },
-  { label: 'log', detail: '日志', documentation: '日志对象：info / warn / error（进编排日志面板）', insert: 'log' },
-  { label: 'log.info', detail: '记录 info 日志', documentation: 'log.info(文本)', insert: 'log.info(\'${1:文本}\')' },
-  { label: 'log.warn', detail: '记录 warn 日志', documentation: 'log.warn(文本)', insert: 'log.warn(\'${1:文本}\')' },
-  { label: 'log.error', detail: '记录 error 日志', documentation: 'log.error(文本)', insert: 'log.error(\'${1:文本}\')' },
-  { label: 'math', detail: '内置 mathjs（全局，无需 require）', documentation: 'mathjs 全局对象：add / multiply / sqrt / pi 等', insert: 'math' },
+  { label: 'log', detail: '日志', documentation: '日志对象：info / warn / error（进编排日志面板），支持多参数（空格拼接，同 console.log）', insert: 'log' },
+  { label: 'log.info', detail: '记录 info 日志', documentation: 'log.info(文本, ...)，多参数空格拼接，对象自动 JSON', insert: 'log.info(\'${1:文本}\')' },
+  { label: 'log.warn', detail: '记录 warn 日志', documentation: 'log.warn(文本, ...)，多参数空格拼接，对象自动 JSON', insert: 'log.warn(\'${1:文本}\')' },
+  { label: 'log.error', detail: '记录 error 日志', documentation: 'log.error(文本, ...)，多参数空格拼接，对象自动 JSON', insert: 'log.error(\'${1:文本}\')' },
+  { label: 'math', detail: '内置 mathjs（全局，无需 require）', documentation: 'mathjs 全局对象：add / evaluate / sqrt / pi 等', insert: 'math' },
+  { label: 'math.evaluate', detail: '解析并计算表达式', documentation: "math.evaluate('2 * (3 + 4)') → 14；也支持变量赋值：math.evaluate('a = 2; a^2')", insert: "math.evaluate('${1:表达式}')" },
   { label: 'math.add', detail: '加法', documentation: 'math.add(1, 2) → 3', insert: 'math.add(${1:a}, ${2:b})' },
   { label: 'math.subtract', detail: '减法', documentation: 'math.subtract(5, 2) → 3', insert: 'math.subtract(${1:a}, ${2:b})' },
   { label: 'math.multiply', detail: '乘法（支持数组/矩阵）', documentation: 'math.multiply([10,20], 0.5) → [5, 10]', insert: 'math.multiply(${1:a}, ${2:b})' },
@@ -425,10 +426,10 @@ const DOCAT_API_PY: DocatCompletionItem[] = [
   { label: 'docat.utils.calib.parse_xml', detail: '解析 .xml 标定文件', documentation: 'docat.utils.calib.parse_xml(路径) → 矩阵字典（附 precision）', insert: 'docat.utils.calib.parse_xml(\'${1:路径}\')' },
   { label: 'docat.utils.calib.image_to_world', detail: '图像坐标 → 物理坐标', documentation: 'docat.utils.calib.image_to_world(m, x, y, sep=None) → [wx, wy] 或文本', insert: 'docat.utils.calib.image_to_world(${1:m}, ${2:x}, ${3:y})' },
   { label: 'docat.utils.calib.world_to_image', detail: '物理坐标 → 图像坐标', documentation: 'docat.utils.calib.world_to_image(m, wx, wy, sep=None) → [ix, iy]', insert: 'docat.utils.calib.world_to_image(${1:m}, ${2:wx}, ${3:wy})' },
-  { label: 'docat.log', detail: '日志', documentation: 'docat.log.info / warn / error（进编排日志面板）', insert: 'docat.log' },
-  { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本)', insert: 'docat.log.info(\'${1:文本}\')' },
-  { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本)', insert: 'docat.log.warn(\'${1:文本}\')' },
-  { label: 'docat.log.error', detail: '记录 error 日志', documentation: 'docat.log.error(文本)', insert: 'docat.log.error(\'${1:文本}\')' },
+  { label: 'docat.log', detail: '日志', documentation: 'docat.log.info / warn / error（进编排日志面板），支持多参数（空格拼接）', insert: 'docat.log' },
+  { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.info(\'${1:文本}\')' },
+  { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.warn(\'${1:文本}\')' },
+  { label: 'docat.log.error', detail: '记录 error 日志', documentation: 'docat.log.error(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.error(\'${1:文本}\')' },
   { label: 'math', detail: 'Python 标准库 math', documentation: 'import math 后使用：sqrt / pi / sin 等', insert: 'math' },
 ]
 
@@ -530,7 +531,8 @@ function configureDocatCompletion() {
           const beforeCursor = lineText.slice(0, position.column - 1)
           const dotMatch = beforeCursor.match(/([A-Za-z_$][\w$]*)\.$/)
           if (dotMatch) {
-            const moduleName = requireVars.get(dotMatch[1])
+            // 全局 math 对应内置 mathjs（服务端包目录解析），与 require('mathjs') 同一对象
+            const moduleName = requireVars.get(dotMatch[1]) ?? (dotMatch[1] === 'math' ? 'mathjs' : null)
             if (moduleName) {
               return fetchModuleMembers(moduleName).then(members => {
                 if (members) {

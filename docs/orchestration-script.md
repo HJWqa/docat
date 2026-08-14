@@ -266,20 +266,29 @@ ix, iy = docat.utils.calib.world_to_image(m2, wx, wy)          # 逆变换
 
 | JS | Python |
 |---|---|
-| `log.info(text)` | `docat.log.info(text)` |
-| `log.warn(text)` | `docat.log.warn(text)` |
-| `log.error(text)` | `docat.log.error(text)` |
+| `log.info(...args)` | `docat.log.info(*args)` |
+| `log.warn(...args)` | `docat.log.warn(*args)` |
+| `log.error(...args)` | `docat.log.error(*args)` |
+
+多参数空格拼接：JS 中对象自动 JSON 化（同 `console.log`），Python 同 `print`。
 
 **JS 示例**：
 
 ```js
 log.info('脚本已启动')
 log.warn('参数缺失，使用默认值')
+log.info('坐标', { x: 1, y: 2 }, '速度', 100)   // 多参数：坐标 {"x":1,"y":2} 速度 100
 try {
   await devices.waitFor('B', 'POS;')
 } catch (e) {
   log.error('等待超时：' + e.message)
 }
+```
+
+**Python 示例**：
+
+```python
+docat.log.info("x", 1, "y", 2)   # x 1 y 2
 ```
 
 **Python 示例**：
