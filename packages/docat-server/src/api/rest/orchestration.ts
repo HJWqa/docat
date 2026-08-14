@@ -36,7 +36,7 @@ const SETTING_SCRIPTS_DIR = 'orch.scriptsDir'
 function resolveCodeCommand(): string | null {
   if (process.platform !== 'win32') return 'code'
   try {
-    const r = spawnSync('where', ['code'], { encoding: 'utf8', timeout: 5000 })
+    const r = spawnSync('where', ['code'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
     if (r.error || r.status !== 0 || !r.stdout) return null
     const lines = r.stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
     const cli = lines.find(l => /\\bin\\code\.cmd$/i.test(l))
@@ -312,6 +312,7 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
           timeout: 5000,
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
         })
 
         if (probe.error || probe.status !== 0 || !probe.stdout) {
@@ -370,6 +371,7 @@ print(json.dumps({"members": out}))
           encoding: 'utf-8',
           env: pythonEnv(),
           stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
         })
 
         if (probe.error || probe.status !== 0 || !probe.stdout) {
@@ -413,14 +415,14 @@ print(json.dumps({"members": out}))
       const shellCmd = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : codeCmd
 
       // 先确认 code 命令可用（避免异步 spawn 后才报错）
-      const probe = spawnSync(shellCmd, codeArgs(codeCmd, ['--version']), { timeout: 3000, stdio: 'ignore' })
+      const probe = spawnSync(shellCmd, codeArgs(codeCmd, ['--version']), { timeout: 3000, stdio: 'ignore', windowsHide: true })
       if (probe.error || probe.status !== 0) {
         return { success: false, error: { code: 50000, message: 'code 命令不可用，请确认服务端已安装 VSCode 并加入 PATH' } }
       }
 
       // 目录统一转绝对路径（VSCode CLI 对相对路径解析不可靠）
       const targetDir = resolve(currentScriptsDir)
-      const child = spawn(shellCmd, codeArgs(codeCmd, [targetDir]), { detached: true, stdio: 'ignore' })
+      const child = spawn(shellCmd, codeArgs(codeCmd, [targetDir]), { detached: true, stdio: 'ignore', windowsHide: true })
       child.on('error', (err) => console.error('[Orchestration] code 启动失败:', err.message))
       child.unref()
 

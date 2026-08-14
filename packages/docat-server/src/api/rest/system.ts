@@ -68,7 +68,7 @@ function hasDesktopEnv(): boolean {
 }
 
 function spawnDetached(cmd: string, args: string[]): void {
-  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref()
+  spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref()
 }
 
 /**

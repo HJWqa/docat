@@ -71,6 +71,7 @@ function probePythonShim(py: PyCandidate): { ok: boolean; reason: string } {
     timeout: 4000,
     encoding: 'utf-8',
     env: pythonEnv(),
+    windowsHide: true,
   })
   if (r.error) return { ok: false, reason: r.error.message }
   if (r.status !== 0) return { ok: false, reason: `退出码 ${r.status ?? r.signal ?? 'unknown'}` }
@@ -103,7 +104,7 @@ export function resolvePythonInterpreter(onFallbackWarn?: (msg: string) => void)
     const candidates = process.platform === 'win32' ? PY_CANDIDATES : PY_CANDIDATES.slice(0, 1)
     for (const c of candidates) {
       try {
-        const r = spawnSync(c.cmd, c.versionArgs, { stdio: 'ignore', timeout: 5000, env: pythonEnv() })
+        const r = spawnSync(c.cmd, c.versionArgs, { stdio: 'ignore', timeout: 5000, env: pythonEnv(), windowsHide: true })
         if (!r.error && r.status === 0) {
           pyAvailable = c
           break
@@ -198,10 +199,10 @@ export class RuntimeManager {
         if (!py) {
           return { ok: false, error: '未找到 Python 解释器（python3 / python / py -3 均不可用），请安装 Python 并加入 PATH 后重试' }
         }
-        // env 强制 UTF-8（避免 Windows GBK 管道编码导致日志乱码）
-        child = spawn(py.cmd, [...py.runArgs, this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, env: pythonEnv() })
+        // env 强制 UTF-8（避免 Windows GBK 管道编码导致日志乱码）；windowsHide 压掉无控制台启动时的弹窗
+        child = spawn(py.cmd, [...py.runArgs, this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, env: pythonEnv(), windowsHide: true })
       } else {
-        child = spawn(process.execPath, [this.shimPath('javascript')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true })
+        child = spawn(process.execPath, [this.shimPath('javascript')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: true })
       }
     } catch (err) {
       return { ok: false, error: `启动失败：${(err as Error).message}` }
@@ -329,7 +330,7 @@ export class RuntimeManager {
     try {
       if (process.platform === 'win32') {
         // Windows 无进程组：taskkill /T 杀整棵进程树（含脚本再派生的子进程）
-        const r = spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+        const r = spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
         done = !r.error && r.status === 0
       } else {
         // POSIX：杀掉整个进程组（含 setInterval 等子进程）
