@@ -667,6 +667,8 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
         const sftp = getProjectSftp(request.params.id)
         const summary = await summarizeProject(sftp, project)
         const debuggerResult = await startProject(request.params.id, project, summary.language, request.body.line ?? 0)
+        // 运行成功 = 设备可达 → 若此前因网络波动被标记断开，立即恢复连接状态
+        void pool.recoverConnection(request.params.id)
         return { success: true, data: { preCompile: null, debugger: debuggerResult } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
@@ -918,6 +920,8 @@ export function scriptRoutes(app: FastifyInstance, pool: DevicePool): void {
 
         const deployed = await deployScriptProject(script, request.body.deviceId, request.body.projectName)
         const debuggerResult = await startProject(request.body.deviceId, deployed.projectName, script.language, request.body.line ?? 0)
+        // 运行成功 = 设备可达 → 若此前因网络波动被标记断开，立即恢复连接状态
+        void pool.recoverConnection(request.body.deviceId)
         return { success: true, data: { deployed, preCompile: null, debugger: debuggerResult } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }

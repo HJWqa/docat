@@ -23,6 +23,8 @@ export interface DeviceEntry {
   pollTimer: ReturnType<typeof setInterval> | null
   /** exclusive = 完整占用（POST claim + TCP）；virtual = 不占用但仍能发 HTTP 指令 */
   mode: ConnectionMode
+  /** 恢复 TCP 重连（设备经 HTTP 确认重新在线时调用；已停止时生效，供 recoverConnection 使用） */
+  resumeTcp?: () => void
 }
 
 export class DevicePool {
@@ -331,7 +333,7 @@ export class DevicePool {
       }, pollInterval)
 
       // ⭐ 关键：存入池中
-      const entry: DeviceEntry = { id: driverId, driver, http: transports, tcp, pollTimer, mode }
+      const entry: DeviceEntry = { id: driverId, driver, http: transports, tcp, pollTimer, mode, resumeTcp }
       this.devices.set(driverId, entry)
 
       // 独占连接已接管 TCP，释放独立运行监听避免重复
@@ -462,6 +464,26 @@ export class DevicePool {
   hasActiveTcp(deviceId: string): boolean {
     const entry = this.devices.get(deviceId)
     return !!entry && !!entry.tcp && entry.tcp.connectedCount > 0
+  }
+
+  /**
+   * 运行成功 = 设备 HTTP（22000/SFTP）可达。
+   * 若设备因网络波动被标记为断开，立即恢复连接状态并推送上线，
+   * 不再等下一轮轮询（POLL_INTERVAL_REAL）+ TCP 重连完成。
+   * 设备不在池中 / 仍不可达时返回 false，不改动状态。
+   */
+  async recoverConnection(deviceId: string): Promise<boolean> {
+    const entry = this.devices.get(deviceId)
+    if (!entry || entry.driver.status.connected) return false
+
+    // pollState 内部捕获异常，失败时置 connected=false，不抛错
+    await entry.driver.pollState()
+    if (!entry.driver.status.connected) return false
+
+    // 恢复被 stopTcp 停掉的 TCP 重连（未停止时为 no-op）
+    entry.resumeTcp?.()
+    eventBus.emit('device:connected', { id: deviceId, ip: entry.driver.ip })
+    return true
   }
 
   /** 从数据库加载自动连接的设备列表 */
