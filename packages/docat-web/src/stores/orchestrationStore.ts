@@ -1210,7 +1210,7 @@ export function buildScriptContext() {
     },
     log: {
       info: (text: string) => addLog('脚本', 'script', String(text)),
-      warn: (text: string) => addLog('脚本', 'script', `⚠ ${String(text)}`),
+      warn: (text: string) => addLog('脚本', 'script', String(text)),
       error: (text: string) => addLog('脚本', 'error', String(text)),
     },
   }

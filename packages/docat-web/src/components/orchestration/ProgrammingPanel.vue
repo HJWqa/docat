@@ -33,7 +33,9 @@
           {{ starting ? '启动中...' : '▶ 运行' }}
         </button>
         <button class="btn btn-danger btn-sm flex-1" :disabled="!deviceId || stopping" @click="doStop" title="停止项目 (Ctrl+M)">
-          {{ stopping ? '停止中...' : '⏹ 停止' }}
+          <span class="bic">
+            <svg width="12" height="12" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor" /></svg>
+          </span>{{ stopping ? '停止中...' : '停止' }}
         </button>
       </div>
 
@@ -376,6 +378,8 @@ onBeforeUnmount(stopPoll)</script>
 .proj-row { display: flex; gap: 6px; align-items: center; }
 .proj-row .prog-input { flex: 1; min-width: 0; }
 .prog-actions { display: flex; gap: 8px; }
+.bic { display: inline-flex; align-items: center; margin-right: 5px; }
+.bic svg { display: block; }
 .prog-status { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); }
 .status-label { font-size: 0.64rem; color: var(--text-muted); }
 .run-badge { font-family: var(--font-mono); font-size: 0.64rem; font-weight: 600; }

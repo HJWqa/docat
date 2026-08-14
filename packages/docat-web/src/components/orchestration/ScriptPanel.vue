@@ -8,21 +8,43 @@
         ↻ 重新运行
       </button>
       <button class="btn btn-danger btn-sm" :disabled="!running" @click="stopScript" title="终止脚本 (Ctrl+Shift+Enter / F6)">
-        ⏹ 终止
+        <span class="bic">
+          <svg width="12" height="12" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor" /></svg>
+        </span>终止
       </button>
       <span class="toolbar-sep" />
       <button v-if="!isMock" class="btn btn-primary btn-sm" :disabled="!dirty || saving" @click="saveFile" title="保存到服务端 (Ctrl+S)">
-        {{ saving ? '保存中...' : '💾 保存' }}
+        <span class="bic">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.4" />
+            <path d="M5 2.5V6h6V2.5" stroke="currentColor" stroke-width="1.4" />
+            <rect x="5" y="9" width="6" height="4.5" stroke="currentColor" stroke-width="1.4" />
+          </svg>
+        </span>{{ saving ? '保存中...' : '保存' }}
       </button>
       <button class="btn btn-secondary btn-sm" :disabled="!fileName" @click="reloadFile" title="忽略当前修改，从文件重新读取">
-        🔄 重新读取文件
+        <span class="bic">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <path d="M13.5 2.5V5.7h-3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>重新读取文件
       </button>
       <template v-if="isMock">
         <button class="btn btn-secondary btn-sm" @click="pickFile" title="选择本地脚本文件">
-          📂 选择文件
+          <span class="bic">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 2h4A1.5 1.5 0 0 1 13.5 6.5V11A1.5 1.5 0 0 1 12 12.5H3.5A1.5 1.5 0 0 1 2 11V4.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+            </svg>
+          </span>选择文件
         </button>
         <button class="btn btn-secondary btn-sm" @click="loadExample" title="载入内置示例脚本">
-          📄 示例
+          <span class="bic">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path d="M4 2.5h5l3 3V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+              <path d="M9 2.5V6h3.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+            </svg>
+          </span>示例
         </button>
         <label class="follow-toggle" title="跟随本地文件变动实时刷新">
           <input v-model="followEnabled" type="checkbox" :disabled="!fileHandle" @change="onFollowChange" />
@@ -37,7 +59,12 @@
           <option v-for="f in fileList" :key="f.name" :value="f.name">{{ f.name }}</option>
         </select>
         <button class="btn btn-secondary btn-sm" @click="startNewFile" title="在服务端脚本目录新建文件">
-          📄 新建
+          <span class="bic">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path d="M4 2.5h5l3 3V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+              <path d="M9 2.5V6h3.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+            </svg>
+          </span>新建
         </button>
         <button class="btn btn-secondary btn-sm" :disabled="loadingFiles" @click="refreshFileList" title="刷新服务端文件列表">
           {{ loadingFiles ? '…' : '↻ 列表' }}
@@ -81,7 +108,15 @@
       </span>
       <span v-if="dirty" class="dirty-badge">● 未保存修改</span>
       <span v-if="running" class="run-badge">● 运行中 {{ runningSeconds }}s</span>
-      <span v-if="fileChangedWhileRunning" class="run-badge run-badge--warn">⚠ 文件已更新，请重新运行</span>
+      <span v-if="fileChangedWhileRunning" class="run-badge run-badge--warn">
+        <span class="bic">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path d="M8 2.5 14.5 13.5h-13L8 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+            <path d="M8 6.5v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <circle cx="8" cy="11.4" r="0.7" fill="currentColor" />
+          </svg>
+        </span>文件已更新，请重新运行
+      </span>
     </div>
 
     <Transition name="fade">
@@ -1125,6 +1160,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .script-panel { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .script-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bic { display: inline-flex; align-items: center; margin-right: 5px; }
+.bic svg { display: block; }
 .toolbar-sep { width: 1px; height: 18px; background: var(--border-bright); margin: 0 4px; }
 .toolbar-hints { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
 .kbd-hint { display: inline-flex; align-items: center; gap: 3px; font-size: 0.6rem; color: var(--text-muted); }

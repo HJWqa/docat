@@ -50,7 +50,13 @@
           </div>
 
           <div v-if="error" class="error-block mt-2">
-            <span class="error-icon">⚠</span>
+            <span class="error-icon">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M8 2.5 14.5 13.5h-13L8 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                <path d="M8 6.5v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                <circle cx="8" cy="11.4" r="0.7" fill="currentColor" />
+              </svg>
+            </span>
             <span>{{ error }}</span>
           </div>
 
@@ -266,7 +272,8 @@ async function handleLogin() {
   font-size: 12px;
   color: var(--status-danger);
 }
-.error-icon { flex-shrink: 0; margin-top: 1px; }
+.error-icon { flex-shrink: 0; margin-top: 1px; display: inline-flex; }
+.error-icon svg { display: block; }
 
 .login-btn {
   padding: 11px 20px;

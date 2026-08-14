@@ -22,7 +22,13 @@
       <div class="workspace-header-actions">
         <span :class="['connection-badge', connected ? 'connection-badge--online' : 'connection-badge--offline']">
           <span class="status-dot" :class="`status-dot--${connected ? 'connected' : 'disconnected'}`" />
-          {{ connected ? '🔗 TCP 在线' : '⚫ TCP 离线' }}
+          <span class="bic">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+          </span>
+          {{ connected ? 'TCP 在线' : 'TCP 离线' }}
         </span>
       </div>
     </header>
@@ -126,8 +132,13 @@
             </div>
           </div>
           <button class="btn btn-primary btn-sm move-go" :disabled="!connected" @click="moveToCoord">直线运动</button>
-          <span v-if="coordIkOk" class="check-label check-label--ok">✓</span>
-          <span v-if="coordIkFail" class="check-label check-label--fail">✗ {{ coordIkMsg }}</span>
+          <span v-if="coordIkOk" class="check-label check-label--ok">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </span>
+          <span v-if="coordIkFail" class="check-label check-label--fail">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+            {{ coordIkMsg }}
+          </span>
         </div>
       </div>
 
@@ -380,6 +391,8 @@ onUnmounted(() => {
 .workspace-switch-btn:active { transform: translateY(1px); }
 .workspace-switch-btn--active { border-color: var(--cyan-500); background: var(--cyan-900); color: var(--cyan-300); }
 .connection-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: var(--radius); font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; border: 1px solid; }
+.bic { display: inline-flex; align-items: center; }
+.bic svg { display: block; }
 .connection-badge--online { border-color: var(--status-online); color: var(--status-online); background: var(--status-online-dim); }
 .connection-badge--offline { border-color: var(--status-offline); color: var(--status-offline); background: var(--status-offline-dim); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }

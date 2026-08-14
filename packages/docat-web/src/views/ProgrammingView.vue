@@ -174,8 +174,12 @@
                 <span class="points-edit-row" @click.stop>
                   <input v-for="(v, j) in editingJoints" :key="j" v-model.number="editingJoints[j]"
                     type="number" step="0.1" class="points-edit-input" />
-                  <button class="btn btn-primary btn-sm" @click="doUpdatePoint(point)" :disabled="updatingPoint">✓</button>
-                  <button class="btn btn-secondary btn-sm" @click="editingPointId = ''">✕</button>
+                  <button class="btn btn-primary btn-sm points-btn-icon" @click="doUpdatePoint(point)" :disabled="updatingPoint">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  </button>
+                  <button class="btn btn-secondary btn-sm points-btn-icon" @click="editingPointId = ''">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+                  </button>
                 </span>
               </template>
             </span>
@@ -1911,6 +1915,8 @@ onBeforeUnmount(() => {
 .points-bar-chip { cursor: pointer; }
 .points-bar-chip--editing { border-color: var(--cyan-400); padding: 4px 8px; }
 .points-edit-row { display: flex; align-items: center; gap: 3px; }
+.points-btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 3px 6px; }
+.points-btn-icon svg { display: block; }
 .points-edit-input {
   width: 52px; padding: 2px 4px; font-family: var(--font-mono); font-size: 0.65rem;
   background: var(--void-deep); border: 1px solid var(--border); border-radius: 2px;

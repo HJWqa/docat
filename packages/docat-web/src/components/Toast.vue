@@ -8,7 +8,20 @@
         @mouseenter="pause(t)"
         @mouseleave="resume(t)"
       >
-        <span class="toast-icon">{{ iconMap[t.type] }}</span>
+        <span class="toast-icon">
+          <svg v-if="t.type === 'success'" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <svg v-else-if="t.type === 'error'" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <line x1="4.5" y1="4.5" x2="11.5" y2="11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <line x1="11.5" y1="4.5" x2="4.5" y2="11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" />
+            <path d="M8 7.2v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <circle cx="8" cy="5" r="0.8" fill="currentColor" />
+          </svg>
+        </span>
         <span class="toast-msg">{{ t.message }}</span>
         <div v-if="t.actions && t.actions.length" class="toast-actions">
           <button v-for="(a, i) in t.actions" :key="i" class="toast-action" :class="a.variant ? `toast-action--${a.variant}` : ''" @click="a.handler(); remove(t.id)">
@@ -48,7 +61,6 @@ const DEFAULTS: Record<ToastType, number> = { success: 3000, info: 4000, error: 
 
 const toasts = ref<ToastItem[]>([])
 let nextId = 0
-const iconMap: Record<ToastType, string> = { success: '✓', error: '✗', info: 'ℹ' }
 
 interface ToastOptions { actions?: ToastAction[]; duration?: number }
 
@@ -119,7 +131,8 @@ defineExpose({
 .toast--success { border-color: var(--status-online); }
 .toast--error   { border-color: var(--status-danger); }
 .toast--info    { border-color: var(--cyan-400); }
-.toast-icon { font-size: 16px; flex-shrink: 0; }
+.toast-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
+.toast-icon svg { display: block; }
 .toast--success .toast-icon { color: var(--status-online); }
 .toast--error   .toast-icon { color: var(--status-danger); }
 .toast--info    .toast-icon { color: var(--cyan-300); }

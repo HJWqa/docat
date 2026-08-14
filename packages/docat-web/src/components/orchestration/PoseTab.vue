@@ -112,15 +112,28 @@
         </div>
         <div class="pose-actions">
           <template v-if="editingName === p.name">
-            <button class="btn btn-primary btn-xs" @click="saveEditPose">✓ 保存</button>
-            <button class="btn btn-secondary btn-xs" @click="cancelEditPose">✕</button>
+            <button class="btn btn-primary btn-xs" @click="saveEditPose">
+              <span class="bic">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </span>保存
+            </button>
+            <button class="btn btn-secondary btn-xs pose-btn-icon" @click="cancelEditPose" title="取消">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+            </button>
           </template>
           <template v-else>
             <button class="btn btn-secondary btn-xs" :disabled="!canMove(p)" @click="moveToPose(p)" title="一键运动到该姿态">运动到</button>
             <button class="btn btn-secondary btn-xs" :disabled="!target || reading" @click="overwriteFromCurrent(p)" title="读取当前姿态覆盖保存（可撤销）">读取更新</button>
             <button class="btn btn-secondary btn-xs" @click="startEditPose(p)" title="修改已保存的坐标">编辑</button>
-            <button class="btn-icon" title="重命名" @click="startRename(p)">✎</button>
-            <button class="btn-icon btn-icon--danger" title="删除" @click="removePose(p.name)">✕</button>
+            <button class="btn-icon pose-btn-icon" title="重命名" @click="startRename(p)">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path d="M11.5 2.5 13.5 4.5 6.5 11.5 3.5 12.5 4.5 9.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                <path d="M10.5 3.5 12.5 5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button class="btn-icon btn-icon--danger pose-btn-icon" title="删除" @click="removePose(p.name)">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+            </button>
           </template>
         </div>
       </div>
@@ -598,6 +611,10 @@ function removePose(name: string) {
 .pose-edit-paste svg { display: block; }
 .pose-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .btn-xs { padding: 3px 7px; font-size: 10px; }
+.bic { display: inline-flex; align-items: center; margin-right: 4px; }
+.bic svg { display: block; }
+.pose-btn-icon { display: inline-flex; align-items: center; justify-content: center; }
+.pose-btn-icon svg { display: block; }
 .btn-icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border: none; background: none; color: var(--text-muted);

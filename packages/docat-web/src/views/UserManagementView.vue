@@ -123,7 +123,13 @@
               <input v-model="resetPasswordConfirm" class="input" type="password" placeholder="再次输入新密码" />
             </div>
             <div v-if="resetError" class="error-block mt-1">
-              <span class="error-icon">⚠</span>
+              <span class="error-icon">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2.5 14.5 13.5h-13L8 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                  <path d="M8 6.5v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  <circle cx="8" cy="11.4" r="0.7" fill="currentColor" />
+                </svg>
+              </span>
               <span>{{ resetError }}</span>
             </div>
             <div class="modal-actions mt-2">
@@ -339,7 +345,8 @@ onMounted(() => {
   border-radius: var(--radius);
   font-size: 12px; color: var(--status-danger);
 }
-.error-icon { flex-shrink: 0; margin-top: 1px; }
+.error-icon { flex-shrink: 0; margin-top: 1px; display: inline-flex; }
+.error-icon svg { display: block; }
 
 h2 { margin: 6px 0 0; font-family: var(--font-display); font-size: 1.4rem; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; }
 h3 { margin: 0; }

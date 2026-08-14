@@ -31,7 +31,33 @@
         <button v-if="isMagician" class="btn btn-danger btn-sm" @click="doClearAlarm" title="清除告警 (F9)">清除告警</button>
         <span :class="['connection-badge', isVirtualMode ? 'connection-badge--virtual' : isConnected ? (tcpDown ? 'connection-badge--warning' : 'connection-badge--online') : 'connection-badge--offline']">
           <span class="status-dot" :class="`status-dot--${isVirtualMode ? 'virtual' : isConnected ? (tcpDown ? 'warning' : 'connected') : 'disconnected'}`" />
-          {{ isVirtualMode ? '🔮 虚拟连接' : isConnected ? (tcpDown ? '⚠ TCP 异常' : '🔗 已连接') : '⚫ 离线' }}
+          <template v-if="isVirtualMode">
+            <span class="bic">
+              <svg width="12" height="12" viewBox="0 0 16 16"><path d="M8 2 9.5 6.5 14 8 9.5 9.5 8 14 6.5 9.5 2 8 6.5 6.5Z" fill="currentColor" /></svg>
+            </span>虚拟连接
+          </template>
+          <template v-else-if="isConnected && !tcpDown">
+            <span class="bic">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+            </span>已连接
+          </template>
+          <template v-else-if="isConnected">
+            <span class="bic">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path d="M8 2.5 14.5 13.5h-13L8 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                <path d="M8 6.5v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                <circle cx="8" cy="11.4" r="0.7" fill="currentColor" />
+              </svg>
+            </span>TCP 异常
+          </template>
+          <template v-else>
+            <span class="bic">
+              <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="currentColor" /></svg>
+            </span>离线
+          </template>
         </span>
         <!-- Enable Toggle Switch（Magician 无使能概念，隐藏） -->
         <label v-if="isConnected && !isMagician" class="toggle-switch" title="使能开关 (Ctrl+E)">
@@ -57,14 +83,14 @@
         </button>
         <div class="dobotplus-toolbar" v-if="dobotPlusList.length > 0">
           <button class="btn btn-sm btn-secondary" @click="showDobotPlusBar = !showDobotPlusBar" title="Dobot+ 插件">
-            🧩 DOBOT+
+            <span class="bic" v-html="svgIcons.puzzle"></span>DOBOT+
           </button>
           <Transition name="fade">
             <div v-if="showDobotPlusBar" class="dobotplus-dropdown">
               <button v-for="name in dobotPlusList" :key="name" class="dobotplus-dropdown-item"
                 @click="openDobotPlusPlugin(name); showDobotPlusBar = false"
                 :title="dobotPlusTooltip(name)">
-                <span>🧩</span> {{ name }}
+                <span class="bic" v-html="svgIcons.puzzle"></span> {{ name }}
               </button>
             </div>
           </Transition>
@@ -240,7 +266,7 @@
     <!-- Alarms & Warnings -->
     <div v-if="hasAlarms || hasWarnings || isCollision" class="card alarm-panel mt-2">
       <div class="alarm-panel-header">
-        <span class="hud-label" style="margin-bottom:0;color:var(--status-danger)">⚠ 告警与警告</span>
+        <span class="hud-label" style="margin-bottom:0;color:var(--status-danger)"><span class="bic" v-html="svgIcons.warn"></span>告警与警告</span>
         <div class="alarm-actions">
           <button v-if="hasAlarms && !isMagician" class="btn btn-danger btn-sm" @click="doClearAlarm" title="清除告警 (F9)">清除告警</button>
           <button v-if="hasWarnings" class="btn btn-warning btn-sm" @click="dismissWarnings" title="清除警告（F9）">清除警告</button>
@@ -251,7 +277,7 @@
         <!-- Alarms -->
         <div v-for="a in currentAlarms" :key="'a'+a.id" class="alarm-item alarm-item--error">
           <div class="alarm-item-main">
-            <span class="alarm-icon">✗</span>
+            <span class="alarm-icon" v-html="svgIcons.x"></span>
             <span class="alarm-code">告警 #{{ a.id }}</span>
             <span v-if="a.level !== ''" class="alarm-level">等级 {{ a.level }}</span>
             <span v-if="a.date || a.time" class="alarm-time">{{ a.date }} {{ a.time }}</span>
@@ -276,18 +302,18 @@
         </div>
         <!-- Collision -->
         <div v-if="isCollision" class="alarm-item alarm-item--error">
-          <span class="alarm-icon">⚠</span>
+          <span class="alarm-icon" v-html="svgIcons.warn"></span>
           <span class="alarm-code">碰撞</span>
           <span class="alarm-msg">碰撞检测触发 — 请确认安全后复位</span>
         </div>
         <!-- Protective Stop -->
         <div v-if="protectiveStop" class="alarm-item alarm-item--warn">
-          <span class="alarm-icon">⏸</span>
+          <span class="alarm-icon" v-html="svgIcons.pause"></span>
           <span class="alarm-code">保护停止</span>
         </div>
         <!-- Emergency Stop -->
         <div v-if="emergencyStop" class="alarm-item alarm-item--error">
-          <span class="alarm-icon">🛑</span>
+          <span class="alarm-icon" v-html="svgIcons.stop"></span>
           <span class="alarm-code">急停已触发</span>
         </div>
       </div>
@@ -447,7 +473,7 @@
             </div>
             <input v-model.trim="newPostureName" class="preset-name-input" type="text" placeholder="预设名称"
               @keyup.enter="saveCurrentAsPosture" style="width:100px" />
-            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture" :title="newPostureType === 'cartesian' ? '保存当前位姿 pose' : '保存当前关节角 joint'">💾 保存</button>
+            <button class="btn btn-primary btn-sm" :disabled="!isConnected || !newPostureName" @click="saveCurrentAsPosture" :title="newPostureType === 'cartesian' ? '保存当前位姿 pose' : '保存当前关节角 joint'"><span class="bic" v-html="svgIcons.save"></span>保存</button>
           </div>
         </div>
         <!-- 路径类型：与目标 joint/pose 正交（见 dobot-docs Motion.md） -->
@@ -573,8 +599,8 @@
                 <div class="preset-item-actions">
                   <span v-if="p.system" class="preset-item-badge">系统</span>
                   <template v-else>
-                    <button class="btn-icon" title="重命名" @click.stop="startRenamePosture(p)">✎</button>
-                    <button class="btn-icon btn-icon--danger" title="删除" @click="deletePostureItem(p._controllerIdx!)">✕</button>
+                    <button class="btn-icon" title="重命名" @click.stop="startRenamePosture(p)" v-html="svgIcons.pen"></button>
+                    <button class="btn-icon btn-icon--danger" title="删除" @click="deletePostureItem(p._controllerIdx!)" v-html="svgIcons.x"></button>
                   </template>
                 </div>
               </div>
@@ -588,11 +614,11 @@
     <div class="action-bar mt-2">
       <!-- Magician 无上电/下电命令 -->
       <template v-if="!isMagician">
-        <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn">⚡ 上电</button>
+        <button class="btn btn-primary" :disabled="!isConnected" @click="doPowerOn"><span class="bic" v-html="svgIcons.bolt"></span>上电</button>
         <button class="btn btn-secondary" :disabled="!isConnected" @click="doPowerOff">⏻ 下电</button>
       </template>
       <!-- 回零：Magician 支持（HOMECmd）；其余机型预留 -->
-      <button v-if="supportsHome" class="btn btn-secondary" :disabled="!isConnected" @click="doHome">🏠 回零</button>
+      <button v-if="supportsHome" class="btn btn-secondary" :disabled="!isConnected" @click="doHome"><span class="bic" v-html="svgIcons.home"></span>回零</button>
       <span class="action-sep" />
       <!-- Speed Slider -->
       <div class="speed-control" :class="{ 'speed-control--disabled': !isConnected }">
@@ -605,11 +631,11 @@
         <span class="speed-value">{{ speedRatio }}%</span>
       </div>
       <span class="action-sep" />
-      <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop" title="停止运动 (Alt+Enter)">⏹ 停止</button>
-      <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop">⚠ 急停</button>
+      <button class="btn btn-secondary" :disabled="!isConnected" @click="doStop" title="停止运动 (Alt+Enter)"><span class="bic" v-html="svgIcons.stop"></span>停止</button>
+      <button class="btn btn-danger estop-btn" :disabled="!isConnected" @click="doEstop"><span class="bic" v-html="svgIcons.warn"></span>急停</button>
       <!-- Magician 无轨迹录制 -->
       <button v-if="!isMagician" :class="['btn btn-sm', showTrajectory ? 'btn-primary' : 'btn-secondary']" @click="toggleTrajectory" :disabled="!isConnected">
-        📍 轨迹
+        <span class="bic" v-html="svgIcons.pin"></span>轨迹
       </button>
       <!-- DobotES01 吸盘快捷控制 -->
       <template v-if="hasDobotES01">
@@ -648,23 +674,23 @@
       <div v-if="showTrajectory" class="log-panel card" @click.stop>
         <div class="log-panel-header">
           <div class="log-panel-title">
-            <span class="hud-label" style="margin-bottom:0">📍 轨迹录制 (控制器存储)</span>
+            <span class="hud-label" style="margin-bottom:0"><span class="bic" v-html="svgIcons.pin"></span>轨迹录制 (控制器存储)</span>
             <span v-if="trajPoints.length > 0" class="preset-count-badge">{{ trajPoints.length }}</span>
           </div>
           <div class="log-panel-actions">
             <button
               v-if="trajPlayingName"
               class="btn btn-danger btn-sm"
-              @click="stopTrackPlayback(trajPlayingName)">⏹ 停止复现</button>
+              @click="stopTrackPlayback(trajPlayingName)"><span class="bic" v-html="svgIcons.stop"></span>停止复现</button>
             <template v-if="!trajRecording">
-              <button class="btn btn-primary btn-sm" :disabled="!isConnected" @click="startTrajRecord">⏺ 新建轨迹</button>
+              <button class="btn btn-primary btn-sm" :disabled="!isConnected" @click="startTrajRecord"><span class="bic" v-html="svgIcons.record"></span>新建轨迹</button>
             </template>
             <template v-else>
               <span class="recording-indicator">● 拖拽录制中</span>
-              <button class="btn btn-danger btn-sm" @click="stopTrajRecord">⏹ 保存</button>
+              <button class="btn btn-danger btn-sm" @click="stopTrajRecord"><span class="bic" v-html="svgIcons.stop"></span>保存</button>
             </template>
-            <button class="btn btn-secondary btn-sm" @click="loadTracksList">🔄 刷新</button>
-            <button class="btn btn-secondary btn-sm" @click="showTrajectory = false">✕</button>
+            <button class="btn btn-secondary btn-sm" @click="loadTracksList"><span class="bic" v-html="svgIcons.refresh"></span>刷新</button>
+            <button class="btn btn-secondary btn-sm btn-ic" @click="showTrajectory = false" title="关闭" v-html="svgIcons.x"></button>
           </div>
         </div>
         <!-- Saved tracks on controller -->
@@ -685,8 +711,8 @@
               v-else class="btn btn-secondary btn-xs" title="轨迹复现"
               :disabled="trajPlayingName !== ''"
               @click="startTrackPlayback(t.name)">▶</button>
-            <button class="track-item-action" title="重命名" @click="renameTrack(t.name)">✎</button>
-            <button class="track-item-action" title="删除" @click="deleteTrack(t.name)">🗑</button>
+            <button class="track-item-action" title="重命名" @click="renameTrack(t.name)" v-html="svgIcons.pen"></button>
+            <button class="track-item-action" title="删除" @click="deleteTrack(t.name)" v-html="svgIcons.trash"></button>
           </div>
         </div>
         <!-- Playback progress + params -->
@@ -694,7 +720,7 @@
           <span class="track-playback-text">
             ▶ 复现 {{ trajPlayingName }} · {{ trajPlaybackPercent }}% · 第 {{ trajPlaybackTimes }}/{{ retraceLoop }} 次
           </span>
-          <button class="btn btn-secondary btn-xs" @click="stopTrackPlayback(trajPlayingName)">⏹ 停止</button>
+          <button class="btn btn-secondary btn-xs" @click="stopTrackPlayback(trajPlayingName)"><span class="bic" v-html="svgIcons.stop"></span>停止</button>
         </div>
         <div v-else-if="savedTracks.length > 0" class="track-params-bar">
           <label class="track-param">倍率
@@ -743,7 +769,7 @@
       <div v-if="showLogs" class="log-panel card" @click.stop>
         <div class="log-panel-header">
           <div class="log-panel-title">
-            <span class="hud-label" style="margin-bottom:0">📋 设备日志</span>
+            <span class="hud-label" style="margin-bottom:0"><span class="bic" v-html="svgIcons.clipboard"></span>设备日志</span>
             <div class="log-tabs">
               <button :class="['log-tab', { 'log-tab--active': logPanelTab === 'alarms' }]" @click="switchLogTab('alarms')">告警</button>
               <button v-if="!isMagician" :class="['log-tab', { 'log-tab--active': logPanelTab === 'history' }]" @click="switchLogTab('history')">历史</button>
@@ -765,7 +791,7 @@
             <div v-if="deviceLogs.length === 0" class="log-empty">暂无设备日志 — 点击刷新</div>
             <div v-for="(entry, i) in deviceLogs" :key="i" :class="['log-entry', `log-entry--${entry.type}`]">
               <span class="log-time">{{ entry.date }} {{ entry.time }}</span>
-              <span class="log-icon">{{ entry.type === 'alarm' ? '✗' : entry.type === 'warning' ? '!' : 'ℹ' }}</span>
+              <span class="log-icon" v-html="entry.type === 'alarm' ? svgIcons.x : entry.type === 'warning' ? '!' : svgIcons.info"></span>
               <div class="log-body">
                 <span class="log-title">{{ entry.type === 'alarm' ? '告警' : '警告' }} #{{ entry.id }}</span>
                 <span v-if="entry.level !== ''" class="log-level">等级 {{ entry.level }}</span>
@@ -797,7 +823,7 @@
             <div v-if="historyLogEntries.length === 0" class="log-empty">暂无历史日志 — 点击刷新</div>
             <div v-for="entry in historyLogEntries" :key="`${entry.file}:${entry.line}`" :class="['log-entry', 'history-log-entry', `log-entry--${entry.level}`]">
               <span class="log-time">{{ entry.file }}:{{ entry.line }}</span>
-              <span class="log-icon">{{ historyLogIcon(entry.level) }}</span>
+              <span class="log-icon" v-html="historyLogIcon(entry.level)"></span>
               <div class="log-body">
                 <span class="log-title">{{ entry.level.toUpperCase() }}</span>
                 <span class="history-log-text">{{ entry.text }}</span>
@@ -816,7 +842,7 @@
       <div v-if="showSettings" class="settings-panel card" @click.stop>
         <div class="log-panel-header">
           <div class="log-panel-title">
-            <span class="hud-label" style="margin-bottom:0">⚙ 设备设置</span>
+            <span class="hud-label" style="margin-bottom:0"><span class="bic" v-html="svgIcons.gear"></span>设备设置</span>
           </div>
           <div class="log-panel-actions">
             <button class="btn btn-secondary btn-sm" @click="showSettings = false">
@@ -833,7 +859,7 @@
               :class="['settings-nav-item', { 'settings-nav-item--active': settingsTab === tab.key }]"
               @click="settingsTab = tab.key"
             >
-              <span class="settings-nav-icon">{{ tab.icon }}</span>
+              <span class="settings-nav-icon" v-html="svgIcons[tab.icon]"></span>
               <span class="settings-nav-label">{{ tab.label }}</span>
             </button>
           </nav>
@@ -904,8 +930,8 @@
                           <td><input v-model.number="editPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td><input v-model.number="editPresetForm.centerZ" type="number" class="input-xs" style="width:55px" step="0.1" /></td>
                           <td class="table-actions">
-                            <button class="btn btn-primary btn-xs" @click="saveEditPreset(i)">✓</button>
-                            <button class="btn btn-secondary btn-xs" @click="cancelEditPreset">✕</button>
+                            <button class="btn btn-primary btn-xs btn-ic" @click="saveEditPreset(i)" title="保存" v-html="svgIcons.check"></button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="cancelEditPreset" title="取消" v-html="svgIcons.x"></button>
                           </td>
                         </template>
                         <template v-else>
@@ -916,8 +942,8 @@
                           <td>{{ item.centerZ }}</td>
                           <td class="table-actions">
                             <button class="btn btn-secondary btn-xs" @click="applyPreset(item)">使用</button>
-                            <button class="btn btn-secondary btn-xs" @click="startEditPreset(i)">✎</button>
-                            <button class="btn btn-secondary btn-xs" @click="deletePreset(i)">✕</button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="startEditPreset(i)" title="编辑" v-html="svgIcons.pen"></button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="deletePreset(i)" title="删除" v-html="svgIcons.x"></button>
                           </td>
                         </template>
                       </tr>
@@ -928,8 +954,8 @@
                         <td><input v-model.number="addPresetForm.centerY" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
                         <td><input v-model.number="addPresetForm.centerZ" type="number" class="input-xs" style="width:55px" step="0.1" placeholder="0" /></td>
                         <td>
-                          <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddPreset">✓</button>
-                          <button class="btn btn-secondary btn-xs" @click="cancelAddPreset">✕</button></span>
+                          <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs btn-ic" @click="confirmAddPreset" title="确认" v-html="svgIcons.check"></button>
+                          <button class="btn btn-secondary btn-xs btn-ic" @click="cancelAddPreset" title="取消" v-html="svgIcons.x"></button></span>
                         </td>
                       </tr>
                     </tbody>
@@ -986,17 +1012,17 @@
                           <td><input v-model.trim="editUserForm.password" class="input-xs" style="width:80px" /></td>
                           <td><label class="checkbox-xs"><input v-model="editUserForm.enablePassword" type="checkbox" /><span>需密码</span></label></td>
                           <td class="table-actions">
-                            <button class="btn btn-primary btn-xs" @click="saveEditUser(i)">✓</button>
-                            <button class="btn btn-secondary btn-xs" @click="editingUserIdx = null">✕</button>
+                            <button class="btn btn-primary btn-xs btn-ic" @click="saveEditUser(i)" title="保存" v-html="svgIcons.check"></button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="editingUserIdx = null" title="取消" v-html="svgIcons.x"></button>
                           </td>
                         </template>
                         <template v-else>
                           <td class="preset-name">{{ isFixedLevel(u.level) ? levelName(u.level) : (u.name || ('等级' + u.level)) }}</td>
                           <td>{{ u.enablePassword ? '●●●●' : '(无)' }}</td>
-                          <td>{{ u.enablePassword ? '✓' : '—' }}</td>
+                          <td><span v-html="u.enablePassword ? svgIcons.check : '—'"></span></td>
                           <td class="table-actions">
-                            <button class="btn btn-secondary btn-xs" @click="startEditUser(i)">✎</button>
-                            <button class="btn btn-secondary btn-xs" @click="deleteUser(i)">✕</button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="startEditUser(i)" title="编辑" v-html="svgIcons.pen"></button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="deleteUser(i)" title="删除" v-html="svgIcons.x"></button>
                           </td>
                         </template>
                       </tr>
@@ -1005,8 +1031,8 @@
                         <td><input v-model.trim="addUserForm.password" class="input-xs" style="width:80px" placeholder="密码" /></td>
                         <td><label class="checkbox-xs"><input v-model="addUserForm.enablePassword" type="checkbox" /><span>需密码</span></label></td>
                         <td class="table-actions">
-                          <button class="btn btn-primary btn-xs" @click="confirmAddUser">✓</button>
-                          <button class="btn btn-secondary btn-xs" @click="addingUser = false">✕</button>
+                          <button class="btn btn-primary btn-xs btn-ic" @click="confirmAddUser" title="确认" v-html="svgIcons.check"></button>
+                          <button class="btn btn-secondary btn-xs btn-ic" @click="addingUser = false" title="取消" v-html="svgIcons.x"></button>
                         </td>
                       </tr>
                     </tbody>
@@ -1048,14 +1074,14 @@
                           <td><input v-model.number="editCoordForm.ry" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
                           <td><input v-model.number="editCoordForm.rz" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
                           <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /></label></td>
-                          <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
+                          <td class="table-actions"><button class="btn btn-primary btn-xs btn-ic" @click="saveEditCoord" title="保存" v-html="svgIcons.check"></button><button class="btn btn-secondary btn-xs btn-ic" @click="editingCoordIdx = -1" title="取消" v-html="svgIcons.x"></button></td>
                         </template>
                         <template v-else>
                           <td class="preset-name">{{ c.id }}</td><td class="preset-name">{{ c.alias }}</td>
                           <td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td>
                           <td>{{ c.rx }}</td><td>{{ c.ry }}</td><td>{{ c.rz }}</td>
-                          <td>{{ c.enable ? '✓' : '—' }}</td>
-                          <td class="table-actions"><button class="btn btn-secondary btn-xs" @click="startEditCoord('tool', i)">✎</button><button class="btn btn-secondary btn-xs" @click="deleteCoord('tool', i)">✕</button></td>
+                          <td><span v-html="c.enable ? svgIcons.check : '—'"></span></td>
+                          <td class="table-actions"><button class="btn btn-secondary btn-xs btn-ic" @click="startEditCoord('tool', i)" title="编辑" v-html="svgIcons.pen"></button><button class="btn btn-secondary btn-xs btn-ic" @click="deleteCoord('tool', i)" title="删除" v-html="svgIcons.x"></button></td>
                         </template>
                       </tr>
                     </tbody>
@@ -1070,8 +1096,8 @@
                     <input v-model.number="addCoordForm.rx" type="number" class="input-xs" style="width:55px" placeholder="rx" step="0.1" />
                     <input v-model.number="addCoordForm.ry" type="number" class="input-xs" style="width:55px" placeholder="ry" step="0.1" />
                     <input v-model.number="addCoordForm.rz" type="number" class="input-xs" style="width:55px" placeholder="rz" step="0.1" />
-                    <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddCoord">✓</button>
-                    <button class="btn btn-secondary btn-xs" @click="addingCoord = false">✕</button></span>
+                    <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs btn-ic" @click="confirmAddCoord" title="确认" v-html="svgIcons.check"></button>
+                    <button class="btn btn-secondary btn-xs btn-ic" @click="addingCoord = false" title="取消" v-html="svgIcons.x"></button></span>
                   </div>
                 </div>
                 <div class="settings-section">
@@ -1090,14 +1116,14 @@
                           <td><input v-model.number="editCoordForm.ry" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
                           <td><input v-model.number="editCoordForm.rz" type="number" class="input-xs" style="width:50px" step="0.1" /></td>
                           <td><label class="checkbox-xs"><input v-model="editCoordForm.enable" type="checkbox" /></label></td>
-                          <td class="table-actions"><button class="btn btn-primary btn-xs" @click="saveEditCoord">✓</button><button class="btn btn-secondary btn-xs" @click="editingCoordIdx = -1">✕</button></td>
+                          <td class="table-actions"><button class="btn btn-primary btn-xs btn-ic" @click="saveEditCoord" title="保存" v-html="svgIcons.check"></button><button class="btn btn-secondary btn-xs btn-ic" @click="editingCoordIdx = -1" title="取消" v-html="svgIcons.x"></button></td>
                         </template>
                         <template v-else>
                           <td class="preset-name">{{ c.id }}</td><td class="preset-name">{{ c.alias }}</td>
                           <td>{{ c.x }}</td><td>{{ c.y }}</td><td>{{ c.z }}</td>
                           <td>{{ c.rx }}</td><td>{{ c.ry }}</td><td>{{ c.rz }}</td>
-                          <td>{{ c.enable ? '✓' : '—' }}</td>
-                          <td class="table-actions"><button class="btn btn-secondary btn-xs" @click="startEditCoord('user', i)">✎</button><button class="btn btn-secondary btn-xs" @click="deleteCoord('user', i)">✕</button></td>
+                          <td><span v-html="c.enable ? svgIcons.check : '—'"></span></td>
+                          <td class="table-actions"><button class="btn btn-secondary btn-xs btn-ic" @click="startEditCoord('user', i)" title="编辑" v-html="svgIcons.pen"></button><button class="btn btn-secondary btn-xs btn-ic" @click="deleteCoord('user', i)" title="删除" v-html="svgIcons.x"></button></td>
                         </template>
                       </tr>
                     </tbody>
@@ -1112,8 +1138,8 @@
                     <input v-model.number="addCoordForm.rx" type="number" class="input-xs" style="width:55px" placeholder="rx" step="0.1" />
                     <input v-model.number="addCoordForm.ry" type="number" class="input-xs" style="width:55px" placeholder="ry" step="0.1" />
                     <input v-model.number="addCoordForm.rz" type="number" class="input-xs" style="width:55px" placeholder="rz" step="0.1" />
-                    <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs" @click="confirmAddCoord">✓</button>
-                    <button class="btn btn-secondary btn-xs" @click="addingCoord = false">✕</button></span>
+                    <span style="display:flex;gap:4px"><button class="btn btn-primary btn-xs btn-ic" @click="confirmAddCoord" title="确认" v-html="svgIcons.check"></button>
+                    <button class="btn btn-secondary btn-xs btn-ic" @click="addingCoord = false" title="取消" v-html="svgIcons.x"></button></span>
                   </div>
                 </div>
               </div>
@@ -1124,8 +1150,8 @@
                   <div class="settings-section-header">
                     <h4>自定义预设</h4>
                     <div style="display:flex;gap:6px;flex-wrap:wrap">
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected || !settingsWritable">📋 当前关节角</button>
-                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected || !settingsWritable">📋 当前位姿</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('joint')" :disabled="!isConnected || !settingsWritable"><span class="bic" v-html="svgIcons.clipboard"></span>当前关节角</button>
+                      <button class="btn btn-secondary btn-sm" @click="addPostureFromCurrent('cartesian')" :disabled="!isConnected || !settingsWritable"><span class="bic" v-html="svgIcons.clipboard"></span>当前位姿</button>
                       <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('joint')" :disabled="!settingsWritable">+ 关节角</button>
                       <button class="btn btn-secondary btn-sm" @click="addEmptyPosture('cartesian')" :disabled="!settingsWritable">+ 位姿</button>
                     </div>
@@ -1164,8 +1190,8 @@
                             </div>
                           </td>
                           <td class="table-actions">
-                            <button class="btn btn-primary btn-xs" @click="saveEditPosture(i)">✓</button>
-                            <button class="btn btn-secondary btn-xs" @click="editingPostureIdx = null">✕</button>
+                            <button class="btn btn-primary btn-xs btn-ic" @click="saveEditPosture(i)" title="保存" v-html="svgIcons.check"></button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="editingPostureIdx = null" title="取消" v-html="svgIcons.x"></button>
                           </td>
                         </template>
                         <template v-else>
@@ -1175,8 +1201,8 @@
                           <td style="font-size:0.66rem">{{ formatPostureSummary(p) }}</td>
                           <td class="table-actions">
                             <button class="btn btn-secondary btn-xs" @click="fillPosture(p)">填充</button>
-                            <button class="btn btn-secondary btn-xs" @click="startEditPosture(i)" :disabled="moving">✎</button>
-                            <button class="btn btn-secondary btn-xs" @click="deletePosture(i)" :disabled="moving">✕</button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="startEditPosture(i)" :disabled="moving" title="编辑" v-html="svgIcons.pen"></button>
+                            <button class="btn btn-secondary btn-xs btn-ic" @click="deletePosture(i)" :disabled="moving" title="删除" v-html="svgIcons.x"></button>
                           </td>
                         </template>
                       </tr>
@@ -1304,7 +1330,7 @@
                       <option value="" disabled>选择工程</option>
                       <option v-for="p in buttonProjects" :key="p" :value="p">{{ p }}</option>
                     </select>
-                    <button class="btn btn-secondary btn-sm" @click="loadButtonProjects" :disabled="loadingButtonProjects">🔄 工程列表</button>
+                    <button class="btn btn-secondary btn-sm" @click="loadButtonProjects" :disabled="loadingButtonProjects"><span class="bic" v-html="svgIcons.refresh"></span>工程列表</button>
                   </div>
                   <div class="text-muted" style="margin-top:8px;font-size:0.7rem;line-height:1.6">
                     E6 底座按键功能：按下底座按键时复现所选轨迹，或运行指定工程。
@@ -1498,7 +1524,7 @@
                 <div class="settings-section">
                   <div class="settings-section-header">
                     <h4>已安装插件</h4>
-                    <button class="btn btn-secondary btn-sm" @click="loadDobotPlusList" :disabled="loadingDobotPlus">🔄 刷新</button>
+                    <button class="btn btn-secondary btn-sm" @click="loadDobotPlusList" :disabled="loadingDobotPlus"><span class="bic" v-html="svgIcons.refresh"></span>刷新</button>
                   </div>
                   <div v-if="loadingDobotPlus" class="text-muted" style="padding:8px 0;font-size:0.7rem">加载中...</div>
                   <table v-else-if="dobotPlusList.length > 0" class="load-config-table">
@@ -1509,7 +1535,7 @@
                         <td>{{ dobotPlusPorts[name] || '—' }}</td>
                         <td class="table-actions">
                           <button v-if="dobotPlusPorts[name]" class="btn btn-secondary btn-xs" @click="selectDobotPlusPlugin(name)">打开</button>
-                          <button class="btn btn-secondary btn-xs" :disabled="!settingsWritable" @click="uninstallDobotPlusPlugin(name)">✕</button>
+                          <button class="btn btn-secondary btn-xs btn-ic" :disabled="!settingsWritable" @click="uninstallDobotPlusPlugin(name)" title="卸载" v-html="svgIcons.x"></button>
                         </td>
                       </tr>
                     </tbody>
@@ -1519,7 +1545,7 @@
                 <div class="settings-section">
                   <div class="settings-section-header">
                     <h4>可安装插件</h4>
-                    <button class="btn btn-secondary btn-sm" @click="refreshDobotPlusSources" :disabled="loadingDobotPlusCatalog || loadingDobotPlusLocal">🔄 刷新</button>
+                    <button class="btn btn-secondary btn-sm" @click="refreshDobotPlusSources" :disabled="loadingDobotPlusCatalog || loadingDobotPlusLocal"><span class="bic" v-html="svgIcons.refresh"></span>刷新</button>
                   </div>
                   <div v-if="loadingDobotPlusCatalog" class="text-muted" style="padding:8px 0;font-size:0.7rem">加载中...</div>
                   <table v-else-if="installableDobotPlus.length > 0" class="load-config-table">
@@ -1566,7 +1592,7 @@
                 <div v-if="activeDobotPlusIframe" class="settings-section">
                   <div class="settings-section-header">
                     <h4>{{ activeDobotPlusIframeName }} <span class="text-muted">本地界面</span></h4>
-                    <button class="btn btn-secondary btn-sm" @click="closeDobotPlusPanel">✕ 关闭</button>
+                    <button class="btn btn-secondary btn-sm" @click="closeDobotPlusPanel"><span class="bic" v-html="svgIcons.x"></span>关闭</button>
                   </div>
                   <iframe
                     ref="dobotPlusIframeRef"
@@ -1580,7 +1606,7 @@
                 <div v-else-if="activeDobotPlus" class="settings-section">
                   <div class="settings-section-header">
                     <h4>{{ activeDobotPlus }} <span class="text-muted">端口 {{ dobotPlusPorts[activeDobotPlus] || '—' }}</span></h4>
-                    <button class="btn btn-secondary btn-sm" @click="closeDobotPlusPanel">✕ 关闭</button>
+                    <button class="btn btn-secondary btn-sm" @click="closeDobotPlusPanel"><span class="bic" v-html="svgIcons.x"></span>关闭</button>
                   </div>
                   <div class="text-muted" style="margin-bottom:8px;font-size:0.7rem;line-height:1.6">
                     控制器只提供 HTTP API（POST /dobotPlus/&lt;插件名&gt;/&lt;方法&gt;），下方直接调用插件方法；ES01 吸盘可用上方按钮快捷操作。
@@ -1924,20 +1950,50 @@ let warningDetailSeq = 0
 let deviceLogSeq = 0
 const showDobotPlusBar = ref(false)
 const settingsTab = ref('system')
+/** SVG 图标库（内联字符串，v-html 渲染；stroke 风格与全站一致） */
+const svgIcons: Record<string, string> = {
+  check: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  x: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  pen: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5 13.5 4.5 6.5 11.5 3.5 12.5 4.5 9.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10.5 3.5 12.5 5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  trash: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2.5 4h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M6 4V2.5h4V4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 4l.8 9a1.5 1.5 0 0 0 1.5 1.5h3.4A1.5 1.5 0 0 0 11.2 13L12 4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  stop: '<svg width="12" height="12" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>',
+  record: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2.5" fill="currentColor"/></svg>',
+  save: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 2.5V6h6V2.5" stroke="currentColor" stroke-width="1.4"/><rect x="5" y="9" width="6" height="4.5" stroke="currentColor" stroke-width="1.4"/></svg>',
+  bolt: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8.5 1.5 3 9h3.5l-1 5.5L13 7H9l-.5-5.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  home: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2.5 7.5 8 2.5l5.5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 7v6.5h8V7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  refresh: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13.5 2.5V5.7h-3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  pin: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 14.5S3.5 10.3 3.5 7a4.5 4.5 0 0 1 9 0c0 3.3-4.5 7.5-4.5 7.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="8" cy="7" r="1.5" stroke="currentColor" stroke-width="1.4"/></svg>',
+  clipboard: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3" y="4" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M6 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 9.5h6M5 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  info: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.8" fill="currentColor"/></svg>',
+  warn: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2.5 14.5 13.5h-13L8 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.5v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.7" fill="currentColor"/></svg>',
+  pause: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3.5" y="3" width="3" height="10" rx="1" fill="currentColor"/><rect x="9.5" y="3" width="3" height="10" rx="1" fill="currentColor"/></svg>',
+  puzzle: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 2.5h7A1.5 1.5 0 0 1 11.5 4v1.5a1.5 1.5 0 0 1 0 3V12A1.5 1.5 0 0 1 10 13.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  gear: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.8v2M8 12.2v2M14.2 8h-2M3.8 8h-2M12.3 3.7l-1.4 1.4M5.1 10.9 3.7 12.3M12.3 12.3l-1.4-1.4M5.1 5.1 3.7 3.7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  user: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5.2" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 14a5.5 5.5 0 0 1 11 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  axes: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  weight: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 5.5V4.5A2 2 0 0 1 10 4.5v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 6.5h10l-1 6H4Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 8.5v1M10 8.5v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  move: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 4.5 8 1.5l3 3M5 11.5l3 3 3-3M4.5 5 1.5 8l3 3M11.5 5l3 3-3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  globe: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M2 8h12M8 2c2.4 2.4 2.4 9.6 0 12M8 2c-2.4 2.4-2.4 9.6 0 12" stroke="currentColor" stroke-width="1.4"/></svg>',
+  button: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="5.5" width="13" height="5" rx="2.5" stroke="currentColor" stroke-width="1.4"/><circle cx="11" cy="8" r="1.3" fill="currentColor"/></svg>',
+  battery: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4.5" width="11.5" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M14 6.5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="3" y="6.5" width="4" height="3" rx="0.5" fill="currentColor"/></svg>',
+  antenna: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 2.5a10 10 0 0 1 8 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5.8 5.2a6 6 0 0 1 4.4 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 7.5v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="13" r="1.3" stroke="currentColor" stroke-width="1.4"/></svg>',
+  grip: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/><circle cx="10.5" cy="5.5" r="1.2" fill="currentColor"/><circle cx="5.5" cy="10.5" r="1.2" fill="currentColor"/><circle cx="10.5" cy="10.5" r="1.2" fill="currentColor"/></svg>',
+  cat: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3.5 3 5 6.2A4.5 4.5 0 1 0 11 6.2L12.5 3 11 5.5H5L3.5 3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="6.4" cy="9" r="0.8" fill="currentColor"/><circle cx="9.6" cy="9" r="0.8" fill="currentColor"/><path d="M6.4 11c.5.4 1.3.5 2 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+}
 const ALL_SETTINGS_TABS = [
-  { key: 'system', icon: '⚙', label: '系统' },
-  { key: 'users', icon: '👤', label: '用户' },
-  { key: 'coordinates', icon: '📐', label: '坐标系' },
-  { key: 'load', icon: '⚖', label: '负载参数' },
-  { key: 'postures', icon: '📌', label: '姿态' },
-  { key: 'motion', icon: '🏃', label: '运动' },
-  { key: 'comm', icon: '🌐', label: '通讯' },
-  { key: 'key', icon: '🔘', label: '按键' },
-  { key: 'power', icon: '🔋', label: '电源' },
-  { key: 'remote', icon: '📡', label: '远程控制' },
-  { key: 'drag', icon: '🤲', label: '拖拽' },
-  { key: 'dobotplus', icon: '🧩', label: 'Dobot+' },
-  { key: 'docat', icon: '🐱', label: 'docat' },
+  { key: 'system', icon: 'gear', label: '系统' },
+  { key: 'users', icon: 'user', label: '用户' },
+  { key: 'coordinates', icon: 'axes', label: '坐标系' },
+  { key: 'load', icon: 'weight', label: '负载参数' },
+  { key: 'postures', icon: 'pin', label: '姿态' },
+  { key: 'motion', icon: 'move', label: '运动' },
+  { key: 'comm', icon: 'globe', label: '通讯' },
+  { key: 'key', icon: 'button', label: '按键' },
+  { key: 'power', icon: 'battery', label: '电源' },
+  { key: 'remote', icon: 'antenna', label: '远程控制' },
+  { key: 'drag', icon: 'grip', label: '拖拽' },
+  { key: 'dobotplus', icon: 'puzzle', label: 'Dobot+' },
+  { key: 'docat', icon: 'cat', label: 'docat' },
 ]
 /** Magician 只保留 姿态 与 docat 两个 tab */
 const settingsTabs = computed(() =>
@@ -2413,10 +2469,10 @@ async function fetchControlLogs() {
 }
 
 function historyLogIcon(level: string): string {
-  if (level === 'error') return '✗'
+  if (level === 'error') return svgIcons.x
   if (level === 'warning') return '!'
   if (level === 'user') return '*'
-  return 'ℹ'
+  return svgIcons.info
 }
 
 watch(state, () => sync3DPose(), { deep: true })
@@ -4532,7 +4588,7 @@ async function doStop() {
 async function doEstop() {
   try {
     const res = await api.estopDevice(deviceId)
-    if (res.success) { toastRef.value?.error('⚠ 急停已触发') }
+    if (res.success) { toastRef.value?.error('急停已触发') }
     else toastRef.value?.error(`急停失败：${res.error?.message}`)
   } catch (err) {
     toastRef.value?.error(`急停出错：${(err as Error).message}`)
@@ -6950,6 +7006,10 @@ onUnmounted(() => {
 .workspace-switch-btn:active { transform: translateY(1px); }
 .workspace-switch-btn--active { border-color: var(--cyan-500); background: var(--cyan-900); color: var(--cyan-300); }
 .connection-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: var(--radius); font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; border: 1px solid; }
+.bic { display: inline-flex; align-items: center; margin-right: 5px; }
+.bic svg { display: block; }
+.btn-ic { display: inline-flex; align-items: center; justify-content: center; padding: 3px 6px; }
+.btn-ic svg { display: block; }
 .connection-badge--online { border-color: var(--status-online); color: var(--status-online); background: var(--status-online-dim); }
 .connection-badge--virtual { border-color: var(--status-virtual); color: var(--status-virtual); background: var(--status-virtual-dim); }
 .connection-badge--warning { border-color: var(--status-warning); color: var(--status-warning); background: var(--status-warning-dim); }
@@ -7379,7 +7439,7 @@ onUnmounted(() => {
   color: var(--cyan-300); background: var(--cyan-900);
   border-left-color: var(--cyan-500);
 }
-.settings-nav-icon { font-size: 0.9rem; flex-shrink: 0; }
+.settings-nav-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
 .settings-nav-label { white-space: nowrap; }
 .settings-content { flex: 1; overflow-y: auto; padding: 12px 16px 20px; min-height: 0; }
 .settings-placeholder { display: flex; align-items: center; justify-content: center; height: 200px; }
@@ -7578,7 +7638,7 @@ onUnmounted(() => {
 .alarm-item--error { background: var(--status-danger-dim); border: 1px solid var(--status-danger); color: var(--status-danger); }
 .alarm-item--warn { background: var(--status-warning-dim); border: 1px solid var(--status-warning); color: var(--status-warning); }
 .alarm-item-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.alarm-icon { font-size: 0.85rem; flex-shrink: 0; }
+.alarm-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
 .alarm-code { font-weight: 700; font-family: var(--font-mono); font-size: 0.66rem; }
 .alarm-level { padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--radius-sm); font-size: 0.6rem; opacity: 0.9; }
 .alarm-time { color: var(--text-muted); font-size: 0.6rem; }
@@ -7653,7 +7713,7 @@ onUnmounted(() => {
 .log-entry--user { background: var(--status-online-dim); border: 1px solid var(--status-online); margin-bottom: 4px; }
 .log-entry--plain { background: var(--surface-1); border: 1px solid var(--border); margin-bottom: 4px; }
 .log-time { font-family: var(--font-mono); font-size: 0.56rem; color: var(--text-muted); flex-shrink: 0; min-width: 70px; white-space: nowrap; }
-.log-icon { flex-shrink: 0; width: 16px; text-align: center; font-size: 0.75rem; }
+.log-icon { flex-shrink: 0; width: 16px; display: inline-flex; justify-content: center; align-items: center; }
 .log-entry--alarm .log-icon { color: var(--status-danger); }
 .log-entry--warning .log-icon { color: var(--status-warning); }
 .log-entry--error .log-icon { color: var(--status-danger); }
