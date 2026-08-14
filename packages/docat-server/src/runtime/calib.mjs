@@ -113,7 +113,7 @@ function resolvePath(path, baseDir) {
 export function imageToWorld(m, x, y, sep) {
   const wx = m.m00 * x + m.m01 * y + m.m02
   const wy = m.m10 * x + m.m11 * y + m.m12
-  return sep !== undefined && sep !== null ? `${wx}${sep}${wy}` : [wx, wy]
+  return sep !== undefined && sep !== null ? `${fmtNumber(wx)}${sep}${fmtNumber(wy)}` : [wx, wy]
 }
 
 /**
@@ -125,5 +125,12 @@ export function worldToImage(m, wx, wy, sep) {
   if (Math.abs(det) < 1e-12) throw new Error('标定矩阵不可逆（行列式接近 0）')
   const ix = (m.m11 * (wx - m.m02) - m.m01 * (wy - m.m12)) / det
   const iy = (-m.m10 * (wx - m.m02) + m.m00 * (wy - m.m12)) / det
-  return sep !== undefined && sep !== null ? `${ix}${sep}${iy}` : [ix, iy]
+  return sep !== undefined && sep !== null ? `${fmtNumber(ix)}${sep}${fmtNumber(iy)}` : [ix, iy]
+}
+
+/** 浮点数固定 6 位小数（去尾零），避免科学计数法；非 number 原样字符串化 */
+function fmtNumber(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v)
+  const s = v.toFixed(6).replace(/\.?0+$/, '')
+  return s === '' || s === '-0' ? '0' : s
 }

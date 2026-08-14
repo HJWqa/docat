@@ -71,6 +71,17 @@ function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n')
 }
 
+/** 浮点数固定 6 位小数（去尾零），避免科学计数法（如 8.3e-17）；非 number 原样字符串化 */
+function fmtNumber(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v)
+  const s = v.toFixed(6).replace(/\.?0+$/, '')
+  return s === '' || s === '-0' ? '0' : s
+}
+
+function joinValues(arr, sep) {
+  return (Array.isArray(arr) ? arr : []).map(fmtNumber).join(String(sep))
+}
+
 // ─── 用户 API ────────────────────────────────────────
 
 const docat = {
@@ -115,7 +126,7 @@ const docat = {
       const arr = p.type === 'cartesian'
         ? [p.pose.x, p.pose.y, p.pose.z, p.pose.rx, p.pose.ry, p.pose.rz]
         : [...(p.joint || [])]
-      return sep !== undefined && sep !== null ? arr.join(String(sep)) : arr
+      return sep !== undefined && sep !== null ? joinValues(arr, sep) : arr
     },
     list() {
       return state.poses.map(p => p.name)
@@ -126,7 +137,7 @@ const docat = {
       return splitFields(text, sep)
     },
     toString(arr, sep = ';') {
-      return (Array.isArray(arr) ? arr : []).join(String(sep))
+      return joinValues(arr, sep)
     },
     sleep(ms) {
       return new Promise((resolve) => {

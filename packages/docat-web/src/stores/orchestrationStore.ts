@@ -284,10 +284,21 @@ export function poseArray(name: string): number[] | null {
   return [...(p.joint || [0, 0, 0, 0, 0, 0])]
 }
 
+/** 浮点数固定 6 位小数（去尾零），避免科学计数法（如 8.3e-17）；非 number 原样字符串化（与真实模式一致） */
+export function fmtNum(v: unknown): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v)
+  const s = v.toFixed(6).replace(/\.?0+$/, '')
+  return s === '' || s === '-0' ? '0' : s
+}
+
+export function joinNumValues(arr: unknown[], separator: string): string {
+  return (Array.isArray(arr) ? arr : []).map(fmtNum).join(separator)
+}
+
 /** 姿态 → 文本（默认分隔符 ;） */
 export function poseText(name: string, separator = ';'): string | null {
   const arr = poseArray(name)
-  return arr ? arr.join(separator) : null
+  return arr ? joinNumValues(arr, separator) : null
 }
 
 // ─── 真实模式 WS 事件 ─────────────────────────────────
@@ -1171,7 +1182,7 @@ export function buildScriptContext() {
     utils: {
       toArray: (text: string, separator = orchStore.settings.defaultSeparator || ';') => splitFields(String(text)),
       toString: (arr: Array<number | string>, separator = orchStore.settings.defaultSeparator || ';') =>
-        (Array.isArray(arr) ? arr : []).join(String(separator)),
+        joinNumValues(arr, String(separator)),
       sleep: (ms: number) => sleep(Math.max(0, Number(ms) || 0)),
       // WSL 路径转换（/mnt/d/... ⇄ D:\...）
       wslToWin: (path: string) => wslToWinPath(String(path)),
@@ -1228,7 +1239,7 @@ function calibUnavailable(call: string): never {
 function calibImageToWorld(m: CalibMatrixLike, x: number, y: number, sep?: string): number[] | string {
   const wx = m.m00 * x + m.m01 * y + m.m02
   const wy = m.m10 * x + m.m11 * y + m.m12
-  return sep !== undefined && sep !== null ? `${wx}${sep}${wy}` : [wx, wy]
+  return sep !== undefined && sep !== null ? `${fmtNum(wx)}${sep}${fmtNum(wy)}` : [wx, wy]
 }
 
 function calibWorldToImage(m: CalibMatrixLike, wx: number, wy: number, sep?: string): number[] | string {
@@ -1236,7 +1247,7 @@ function calibWorldToImage(m: CalibMatrixLike, wx: number, wy: number, sep?: str
   if (Math.abs(det) < 1e-12) throw new Error('标定矩阵不可逆（行列式接近 0）')
   const ix = (m.m11 * (wx - m.m02) - m.m01 * (wy - m.m12)) / det
   const iy = (-m.m10 * (wx - m.m02) + m.m00 * (wy - m.m12)) / det
-  return sep !== undefined && sep !== null ? `${ix}${sep}${iy}` : [ix, iy]
+  return sep !== undefined && sep !== null ? `${fmtNum(ix)}${sep}${fmtNum(iy)}` : [ix, iy]
 }
 
 export type ScriptContext = ReturnType<typeof buildScriptContext>

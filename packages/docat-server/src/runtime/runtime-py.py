@@ -67,6 +67,18 @@ def _split_fields(text, sep=";"):
     return parts
 
 
+def _fmt_num(v):
+    """浮点数固定 6 位小数（去尾零），避免科学计数法（如 8.3e-17）；非 float 原样字符串化。"""
+    if isinstance(v, float):
+        s = format(v, ".6f").rstrip("0").rstrip(".")
+        return "0" if s in ("", "-0") else s
+    return str(v)
+
+
+def _join_values(arr, sep):
+    return sep.join(_fmt_num(v) for v in arr)
+
+
 class _Devices:
     def send(self, name, text):
         _send({"type": "send", "device": str(name), "text": str(text)})
@@ -116,7 +128,7 @@ class _Poses:
                     arr = list(p.get("joint", []))
                 if sep is None:
                     return arr
-                return sep.join(str(v) for v in arr)
+                return _join_values(arr, sep)
         return None
 
     def list(self):
@@ -202,7 +214,7 @@ class _Calib:
     def image_to_world(self, m, x, y, sep=None):
         wx = m["m00"] * x + m["m01"] * y + m["m02"]
         wy = m["m10"] * x + m["m11"] * y + m["m12"]
-        return "%s%s%s" % (wx, sep, wy) if sep is not None else [wx, wy]
+        return _join_values([wx, wy], sep) if sep is not None else [wx, wy]
 
     def world_to_image(self, m, wx, wy, sep=None):
         det = m["m00"] * m["m11"] - m["m01"] * m["m10"]
@@ -210,7 +222,7 @@ class _Calib:
             raise ValueError("标定矩阵不可逆（行列式接近 0）")
         ix = (m["m11"] * (wx - m["m02"]) - m["m01"] * (wy - m["m12"])) / det
         iy = (-m["m10"] * (wx - m["m02"]) + m["m00"] * (wy - m["m12"])) / det
-        return "%s%s%s" % (ix, sep, iy) if sep is not None else [ix, iy]
+        return _join_values([ix, iy], sep) if sep is not None else [ix, iy]
 
 
 # ─── WSL 路径转换（/mnt/d/... ⇄ D:\...）─────────────
@@ -238,7 +250,7 @@ class _Utils:
         return _split_fields(text, sep)
 
     def to_string(self, arr, sep=";"):
-        return sep.join(str(v) for v in (arr if isinstance(arr, (list, tuple)) else []))
+        return _join_values(arr, sep) if isinstance(arr, (list, tuple)) else ""
 
     def sleep(self, ms):
         left = max(0, int(float(ms)))
