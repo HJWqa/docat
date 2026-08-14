@@ -221,10 +221,22 @@ export class RuntimeManager {
         if (!py) {
           return { ok: false, error: '未找到 Python 解释器（python3 / python / py -3 均不可用），请安装 Python 并加入 PATH 后重试' }
         }
-        // env 强制 UTF-8（避免 Windows GBK 管道编码导致日志乱码）；windowsHide 压掉无控制台启动时的弹窗
-        child = spawn(py.cmd, [...py.runArgs, this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, env: pythonEnv(), windowsHide: true })
+        // env 强制 UTF-8（避免 Windows GBK 管道编码导致日志乱码）
+        // Windows：detached=true 时 CREATE_NO_WINDOW 被忽略（MSDN 二者互斥），子进程无控制台，
+        // 其派生的孙进程（如 py.exe → python.exe）会新建可见控制台窗口弹窗；
+        // 去掉 detached 后子进程获得隐藏控制台，孙进程继承之不再弹窗；taskkill /T 不需要 detached
+        // POSIX：需 detached 以便 process.kill(-pid) 杀整个进程组
+        child = spawn(
+          py.cmd,
+          [...py.runArgs, this.shimPath('python')],
+          { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true, env: pythonEnv() },
+        )
       } else {
-        child = spawn(process.execPath, [this.shimPath('javascript')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: true })
+        child = spawn(process.execPath, [this.shimPath('javascript')], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          detached: process.platform !== 'win32',
+          windowsHide: true,
+        })
       }
     } catch (err) {
       return { ok: false, error: `启动失败：${(err as Error).message}` }
