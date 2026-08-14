@@ -473,6 +473,14 @@
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('joint', $event)" ref="jointInputRefs" />
             <span class="move-unit">°</span>
           </div>
+          <button class="btn btn-secondary btn-sm move-paste-btn" @click="pasteToMoveTarget"
+            title="从剪贴板粘贴坐标（空格/逗号分隔）">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="4" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4" />
+              <path d="M6 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.4" />
+              <path d="M5 7h6M5 9.5h6M5 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+          </button>
           <div class="move-read-row"><button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readJointsAndFocus" title="读取当前关节角与笛卡尔位姿，并聚焦 J1 (Alt+N)；N 仅聚焦 J1">读取当前关节</button></div>
           <button class="btn btn-primary move-btn" :disabled="!isConnected || moving || poseMoving" @click="doMove">
             {{ moving ? '移动中...' : (movePath + ' 关节目标') }}
@@ -489,6 +497,14 @@
               title="Shift/Ctrl+Enter 直接移动" @keydown="onMoveInputKeydown('pose', $event)" ref="poseInputRefs" />
             <span class="move-unit">{{ axis.startsWith('r') ? '°' : 'mm' }}</span>
           </div>
+          <button class="btn btn-secondary btn-sm move-paste-btn" @click="pasteToTargetPose"
+            title="从剪贴板粘贴坐标（空格/逗号分隔）">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="4" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4" />
+              <path d="M6 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.4" />
+              <path d="M5 7h6M5 9.5h6M5 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+          </button>
           <div class="move-read-row"><button class="btn btn-secondary btn-sm" :disabled="!isConnected" @click="readPoseAndFocus" title="读取当前位姿并聚焦 X (Alt+M)；M 仅聚焦 X">读取当前位姿</button></div>
           <button class="btn btn-primary move-btn" :disabled="!isConnected || poseMoving || moving" @click="moveToPose">
             {{ poseMoving ? '移动中...' : (movePath + ' 位姿目标') }}
@@ -4299,6 +4315,81 @@ function getMoveTargetJoints() {
   return Array.from({ length: jointCount.value }, (_, i) => Number(moveTarget['j' + (i + 1)] || 0))
 }
 
+/** 解析粘贴的坐标文本：空格/逗号/分号/回车分隔，可带首尾 [ ] 或 ( )，需恰好 count 个数值 */
+function parseCoordText(text: string, count: number): number[] | null {
+  const raw = String(text ?? '').trim()
+  if (!raw) return null
+  const cleaned = raw.replace(/^[[(]/, '').replace(/[\])]$/, '').trim()
+  if (!cleaned) return null
+  const parts = cleaned.split(/[;,\s]+/).filter(Boolean)
+  if (parts.length !== count) return null
+  const out: number[] = []
+  for (const part of parts) {
+    const v = Number(part)
+    if (!Number.isFinite(v)) return null
+    out.push(v)
+  }
+  return out
+}
+
+/** 读取剪贴板文本；权限受限/非安全上下文/空内容返回 null */
+async function readClipboardText(): Promise<string | null> {
+  try {
+    if (navigator.clipboard?.readText) {
+      const text = await navigator.clipboard.readText()
+      if (text && text.trim()) return text
+    }
+  } catch {
+    // 权限拒绝或非安全上下文，走手动粘贴回退
+  }
+  return null
+}
+
+/** 把剪贴板坐标填入「移动 / 预设」关节编辑框 */
+async function pasteToMoveTarget() {
+  let text = await readClipboardText()
+  if (text === null) {
+    text = window.prompt(`无法读取剪贴板，请粘贴关节坐标（${jointCount.value} 个数值，空格/逗号分隔）：`, '')
+    if (text === null || text.trim() === '') return
+  }
+  const values = parseCoordText(text, jointCount.value)
+  if (!values) {
+    toastRef.value?.error(`需恰好 ${jointCount.value} 个数值（空格/逗号分隔，可带 [ ]）`)
+    return
+  }
+  setMoveTargetJoints(values)
+  toastRef.value?.success(`已粘贴关节坐标（J1–J${jointCount.value}）`)
+}
+
+/** 把剪贴板坐标填入「移动 / 预设」位姿编辑框（Magician 4 个 XYZR，其余 6 个 XYZ+姿态角） */
+async function pasteToTargetPose() {
+  const count = isMagician.value ? 4 : 6
+  let text = await readClipboardText()
+  if (text === null) {
+    text = window.prompt(`无法读取剪贴板，请粘贴位姿坐标（${count} 个数值，空格/逗号分隔）：`, '')
+    if (text === null || text.trim() === '') return
+  }
+  const values = parseCoordText(text, count)
+  if (!values) {
+    toastRef.value?.error(`需恰好 ${count} 个数值（空格/逗号分隔，可带 [ ]）`)
+    return
+  }
+  if (isMagician.value) {
+    targetPose.x = values[0]
+    targetPose.y = values[1]
+    targetPose.z = values[2]
+    targetPose.r = values[3]
+  } else {
+    targetPose.x = values[0]
+    targetPose.y = values[1]
+    targetPose.z = values[2]
+    targetPose.rx = values[3]
+    targetPose.ry = values[4]
+    targetPose.rz = values[5]
+  }
+  toastRef.value?.success('已粘贴位姿坐标')
+}
+
 /** 读取当前关节值到编辑框 */
 function readCurrentJoints() {
   const joints = state.value.joints as Record<string, number> | undefined
@@ -7197,6 +7288,8 @@ onUnmounted(() => {
 .move-input:focus { border-color: var(--accent); }
 .move-unit { font-family: var(--font-body); font-size: 0.62rem; color: var(--text-muted); }
 .move-btn { align-self: flex-end; margin-left: auto; }
+.move-paste-btn { align-self: center; display: inline-flex; align-items: center; justify-content: center; }
+.move-paste-btn svg { display: block; }
 
 /* Preset Management */
 .preset-section { border-top: 1px solid var(--border); padding-top: 12px; }

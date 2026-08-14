@@ -649,6 +649,23 @@ print(json.dumps({"members": out}))
   )
 
   // ─── 编排姿态 ──────────────────────────────────────
+  app.get<{ Params: { id: string } }>(
+    '/api/orchestration/devices/:id/motion-pose',
+    async (request, reply): Promise<ApiResponse<{ pose: number[] }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const device = orchDevices.get(request.params.id)
+        if (!device) return { success: false, error: { code: 40402, message: '设备不存在' } }
+        const pose = orchDevices.getMotionPose(request.params.id)
+        if (!pose) return { success: false, error: { code: 50000, message: 'Docat Motion 未连接' } }
+        return { success: true, data: { pose } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   app.get('/api/orchestration/poses', async (request, reply): Promise<ApiResponse<OrchPose[]>> => {
     try {
       await authMiddleware(request, reply)

@@ -71,6 +71,35 @@
             <input v-model.trim="renamingNew" class="rename-input" spellcheck="false"
               @keyup.enter="confirmRename" @keyup.esc="renamingName = ''" @blur="confirmRename" />
           </template>
+          <template v-else-if="editingName === p.name">
+            <div class="pose-edit">
+              <div class="pose-edit-grid">
+                <template v-if="p.type === 'cartesian'">
+                  <label v-for="axis in cartesianEditAxes" :key="axis" class="pose-edit-field">
+                    <span>{{ axis.toUpperCase() }}</span>
+                    <input v-model.number="editPose[axis]" type="number" step="0.1" class="pose-edit-input" />
+                  </label>
+                </template>
+                <template v-else>
+                  <label v-for="j in 6" :key="j" class="pose-edit-field">
+                    <span>J{{ j }}</span>
+                    <input v-model.number="editJoint[j - 1]" type="number" step="0.1" class="pose-edit-input" />
+                  </label>
+                </template>
+              </div>
+              <div class="pose-edit-text-row">
+                <input v-model.trim="editText" class="pose-edit-text" spellcheck="false"
+                  placeholder="或粘贴坐标：空格/逗号分隔 6 个数值，回车应用" @keyup.enter="applyEditText" />
+                <button class="btn btn-secondary btn-xs pose-edit-paste" @click="pasteEditText" title="从剪贴板粘贴坐标">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                    <rect x="3" y="4" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4" />
+                    <path d="M6 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.4" />
+                    <path d="M5 7h6M5 9.5h6M5 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </template>
           <template v-else>
             <span class="pose-name">
               {{ p.name }}
@@ -82,10 +111,17 @@
           </template>
         </div>
         <div class="pose-actions">
-          <button class="btn btn-secondary btn-xs" :disabled="!canMove(p)" @click="moveToPose(p)" title="一键运动到该姿态">运动到</button>
-          <button class="btn btn-secondary btn-xs" :disabled="!target || reading" @click="overwriteFromCurrent(p)" title="读取当前姿态覆盖保存（可撤销）">读取更新</button>
-          <button class="btn-icon" title="重命名" @click="startRename(p)">✎</button>
-          <button class="btn-icon btn-icon--danger" title="删除" @click="removePose(p.name)">✕</button>
+          <template v-if="editingName === p.name">
+            <button class="btn btn-primary btn-xs" @click="saveEditPose">✓ 保存</button>
+            <button class="btn btn-secondary btn-xs" @click="cancelEditPose">✕</button>
+          </template>
+          <template v-else>
+            <button class="btn btn-secondary btn-xs" :disabled="!canMove(p)" @click="moveToPose(p)" title="一键运动到该姿态">运动到</button>
+            <button class="btn btn-secondary btn-xs" :disabled="!target || reading" @click="overwriteFromCurrent(p)" title="读取当前姿态覆盖保存（可撤销）">读取更新</button>
+            <button class="btn btn-secondary btn-xs" @click="startEditPose(p)" title="修改已保存的坐标">编辑</button>
+            <button class="btn-icon" title="重命名" @click="startRename(p)">✎</button>
+            <button class="btn-icon btn-icon--danger" title="删除" @click="removePose(p.name)">✕</button>
+          </template>
         </div>
       </div>
     </div>
@@ -95,11 +131,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as api from '../../services/api'
+import { wsClient } from '../../services/ws'
 import { deviceStore } from '../../stores/deviceStore'
 import {
   addLog,
+  fmtNum,
   getMotionPose,
   identifierError,
   manualMoveMotion,
@@ -168,6 +206,13 @@ const renamingName = ref('')
 const renamingNew = ref('')
 const manualInput = ref('')
 
+// ─── 修改已保存姿态坐标 ─────────────────────────────
+const editingName = ref('')
+const editJoint = ref<number[]>([0, 0, 0, 0, 0, 0])
+const editPose = ref({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 })
+const editText = ref('')
+const cartesianEditAxes = ['x', 'y', 'z', 'rx', 'ry', 'rz'] as const
+
 const manualParsed = computed(() => parsePoseText(manualInput.value))
 
 const motionDevices = computed(() => orchStore.devices.filter(d => d.type === 'docat-motion'))
@@ -181,6 +226,32 @@ const allRealDevices = computed(() => {
 
 // 记住的目标设备失效校验：列表变化时检查；先于 computeds 的立即校验在异步加载前为空表，等首次变化
 watch([motionDevices, allRealDevices], validateTarget)
+
+// ─── 真实设备连接状态保鲜 ─────────────────────────────
+// 编排页未订阅设备 WS，缓存状态可能陈旧：挂载时拉一次实时状态，
+// 并订阅 online/offline 广播（服务端向所有客户端广播，无需 subscribe）让 ●/○ 与运动判断保持准确
+const wsCleanups: Array<() => void> = []
+
+function refreshRealDeviceStatuses() {
+  for (const id of Object.keys(deviceStore.devices)) {
+    void api.getDeviceStatus(id).then(res => {
+      if (res.success && res.data) deviceStore.setConnected(id, !!res.data.connected, res.data.mode)
+    }).catch(() => { /* 保持原状态 */ })
+  }
+}
+
+onMounted(() => {
+  refreshRealDeviceStatuses()
+  wsCleanups.push(
+    wsClient.onOnline(id => { if (id in deviceStore.devices) deviceStore.setConnected(id, true) }),
+    wsClient.onOffline(id => { if (id in deviceStore.devices) deviceStore.setOffline(id) }),
+  )
+})
+
+onUnmounted(() => {
+  for (const un of wsCleanups) un()
+  wsCleanups.length = 0
+})
 
 function targetMotionId(): string | null {
   return target.value.startsWith('motion:') ? target.value.slice(7) : null
@@ -196,7 +267,7 @@ async function readCurrent(): Promise<boolean> {
   try {
     const motionId = targetMotionId()
     if (motionId) {
-      const pose = getMotionPose(motionId)
+      const pose = await getMotionPose(motionId)
       if (!pose) {
         toastRef.value?.error('Docat Motion 未连接，无法读取')
         return false
@@ -293,9 +364,79 @@ function saveCurrent() {
 function formatPose(p: OrchPose): string {
   if (p.type === 'cartesian') {
     const { x, y, z, rx, ry, rz } = p.pose
-    return `X${x.toFixed(1)} Y${y.toFixed(1)} Z${z.toFixed(1)} RX${rx.toFixed(1)} RY${ry.toFixed(1)} RZ${rz.toFixed(1)}`
+    return `X${fmtNum(x)} Y${fmtNum(y)} Z${fmtNum(z)} RX${fmtNum(rx)} RY${fmtNum(ry)} RZ${fmtNum(rz)}`
   }
-  return (p.joint || []).map(v => `${Number(v).toFixed(1)}°`).join(' ')
+  return (p.joint || []).map(v => `${fmtNum(v)}°`).join(' ')
+}
+
+function startEditPose(p: OrchPose) {
+  editingName.value = p.name
+  editJoint.value = [...(p.joint || [0, 0, 0, 0, 0, 0])]
+  editPose.value = { ...p.pose }
+  editText.value = ''
+}
+
+function cancelEditPose() {
+  editingName.value = ''
+  editText.value = ''
+}
+
+/** 把文本框坐标应用到编辑中的姿态（空格/逗号/分号/括号分隔，需恰好 6 个数值） */
+function applyEditText(): boolean {
+  const v = parsePoseText(editText.value)
+  if (!v) {
+    if (editText.value.trim()) toastRef.value?.error('需恰好 6 个数值（空格/逗号分隔，可带 [ ]）')
+    return false
+  }
+  const p = orchStore.poses.find(item => item.name === editingName.value)
+  if (p?.type === 'joint') {
+    editJoint.value = [...v]
+  } else {
+    editPose.value = { x: v[0], y: v[1], z: v[2], rx: v[3], ry: v[4], rz: v[5] }
+  }
+  return true
+}
+
+async function pasteEditText() {
+  try {
+    if (!navigator.clipboard?.readText) {
+      toastRef.value?.info('浏览器不支持读取剪贴板，请 Ctrl+V 粘贴到输入框')
+      return
+    }
+    const text = await navigator.clipboard.readText()
+    if (!text || !text.trim()) {
+      toastRef.value?.info('剪贴板没有文本内容')
+      return
+    }
+    editText.value = text
+    applyEditText()
+  } catch {
+    toastRef.value?.info('无法读取剪贴板（权限受限），请 Ctrl+V 粘贴到输入框')
+  }
+}
+
+async function saveEditPose() {
+  const p = orchStore.poses.find(item => item.name === editingName.value)
+  if (!p) return
+  const res = await saveOrchPoseFromCurrent(
+    p.name,
+    p.type,
+    editJoint.value,
+    { x: editPose.value.x, y: editPose.value.y, z: editPose.value.z, rx: editPose.value.rx, ry: editPose.value.ry, rz: editPose.value.rz }
+  )
+  if (!res.ok) {
+    toastRef.value?.error(res.error ?? '保存失败')
+    return
+  }
+  if (res.overwritten) {
+    toastRef.value?.error(`姿态 "${p.name}" 已更新`, {
+      duration: 10000,
+      action: { label: '撤销', handler: () => { void undoPoseOverwrite().then(ok => { if (ok) toastRef.value?.info('已恢复原姿态') }) } },
+    })
+  } else {
+    toastRef.value?.success(`姿态 "${p.name}" 已更新`)
+  }
+  cancelEditPose()
 }
 
 function canMove(p: OrchPose): boolean {
@@ -314,14 +455,23 @@ async function moveToPose(p: OrchPose) {
     }
     const pose = [p.pose.x, p.pose.y, p.pose.z, p.pose.rx, p.pose.ry, p.pose.rz]
     toastRef.value?.info(`正在运动到 ${p.name}...`)
-    await new Promise(r => setTimeout(r, 500))
-    manualMoveMotion(motionId, pose)
-    toastRef.value?.success(`已运动到 ${p.name}`)
+    const ok = await manualMoveMotion(motionId, pose)
+    if (ok) toastRef.value?.success(`已运动到 ${p.name}`)
+    else toastRef.value?.error('运动失败：Docat Motion 命令发送失败')
     return
   }
   const realId = targetRealId()
   if (!realId) return
-  if (!deviceStore.isConnected(realId)) {
+  // 编排页不订阅设备 WS，缓存的连接状态可能陈旧/为空：实时确认一次再运动
+  let online = deviceStore.isConnected(realId)
+  try {
+    const st = await api.getDeviceStatus(realId)
+    if (st.success && st.data) {
+      online = !!st.data.connected
+      deviceStore.setConnected(realId, online, st.data.mode)
+    }
+  } catch { /* 保留缓存值 */ }
+  if (!online) {
     toastRef.value?.error('设备未连接，无法运动')
     return
   }
@@ -427,6 +577,25 @@ function removePose(name: string) {
 .pose-type-badge--cart { color: var(--status-online); border: 1px solid var(--status-online-dim); background: var(--status-online-dim); }
 .pose-type-badge--joint { color: var(--text-muted); border: 1px solid var(--border); }
 .pose-values { font-family: var(--font-mono); font-size: 0.56rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pose-edit { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.pose-edit-grid { display: flex; gap: 5px; flex-wrap: wrap; }
+.pose-edit-field { display: flex; flex-direction: column; gap: 2px; }
+.pose-edit-field span { font-family: var(--font-mono); font-size: 0.52rem; color: var(--text-muted); }
+.pose-edit-input {
+  width: 58px; padding: 3px 5px; font-family: var(--font-mono); font-size: 0.66rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--cyan-300); outline: none;
+}
+.pose-edit-input:focus { border-color: var(--cyan-500); }
+.pose-edit-text-row { display: flex; gap: 5px; align-items: center; }
+.pose-edit-text {
+  flex: 1; min-width: 0; padding: 4px 7px; font-family: var(--font-mono); font-size: 0.62rem;
+  background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-primary); outline: none;
+}
+.pose-edit-text:focus { border-color: var(--cyan-500); }
+.pose-edit-paste { display: inline-flex; align-items: center; justify-content: center; }
+.pose-edit-paste svg { display: block; }
 .pose-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .btn-xs { padding: 3px 7px; font-size: 10px; }
 .btn-icon {

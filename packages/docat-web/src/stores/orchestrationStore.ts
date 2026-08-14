@@ -988,16 +988,27 @@ async function handleMotionCommand(device: OrchDevice, raw: string) {
   reply('error')
 }
 
-/** 读取 Docat Motion 当前位姿（设置-姿态 读取用） */
-export function getMotionPose(id: string): number[] | null {
+/** 读取 Docat Motion 当前位姿（设置-姿态 读取用；真实模式向服务端查询） */
+export async function getMotionPose(id: string): Promise<number[] | null> {
+  if (!orchMock) {
+    const res = await orchApi.orchGetMotionPose(id)
+    return res.success && res.data ? res.data.pose : null
+  }
   const st = motionState[id]
   return st ? [...st.pose] : null
 }
 
-/** 手动运动 Docat Motion 到目标位姿（设置-姿态 一键运动用） */
-export function manualMoveMotion(id: string, pose: number[]): boolean {
+/** 手动运动 Docat Motion 到目标位姿（设置-姿态 一键运动用；真实模式经服务端 MOVJ 执行） */
+export async function manualMoveMotion(id: string, pose: number[]): Promise<boolean> {
+  if (!orchMock) {
+    const d = orchStore.devices.find(item => item.id === id)
+    if (!d) return false
+    const res = await orchApi.orchSend(d.id, `MOVJ;${joinNumValues(pose, ';')};`)
+    return res.success
+  }
   const st = motionState[id]
   if (!st) return false
+  await sleep(400)
   st.pose = [...pose]
   addLog(orchStore.devices.find(d => d.id === id)?.name ?? 'Docat Motion', 'system', `手动运动到 (${pose.map(v => Number(v).toFixed(1)).join(', ')})`)
   return true

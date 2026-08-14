@@ -58,6 +58,11 @@ export class DocatMotionDevice implements OrchDeviceBackend {
     // 无资源
   }
 
+  /** 当前位姿（读取用；未连接时调用方不应持有实例，返回当前模拟位姿） */
+  getPose(): number[] {
+    return [...this.state.pose]
+  }
+
   // ─── 协议处理 ──────────────────────────────────────
 
   private splitFields(text: string): string[] {

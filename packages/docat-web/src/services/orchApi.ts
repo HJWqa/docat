@@ -48,6 +48,11 @@ export function orchSend(id: string, message: string): Promise<ApiResponse<null>
   return request('POST', `/api/orchestration/devices/${id}/send`, { message })
 }
 
+/** 读取 Docat Motion 当前位姿（真实模式；设置-姿态 读取用） */
+export function orchGetMotionPose(id: string): Promise<ApiResponse<{ pose: number[] }>> {
+  return request('GET', `/api/orchestration/devices/${id}/motion-pose`)
+}
+
 // ─── 姿态（独立于设备页姿态）────────────────────────
 
 export function orchListPoses(): Promise<ApiResponse<OrchPose[]>> {

@@ -501,6 +501,14 @@ export class OrchDeviceManager {
 
   // ─── Docat Motion 转发 ────────────────────────────
 
+  /** 读取 Docat Motion 当前位姿（真实模式；未连接或非 motion 设备返回 null） */
+  getMotionPose(id: string): number[] | null {
+    const entry = this.entries.get(id)
+    if (!entry || !entry.connected || entry.config.type !== 'docat-motion') return null
+    const backend = entry.backend as (OrchDeviceBackend & { getPose?: () => number[] }) | null
+    return backend?.getPose ? backend.getPose() : null
+  }
+
   private getTargetDevice(targetId: string) {
     if (!targetId) return null
     const entry = this.pool.getDevice(targetId)
