@@ -20,11 +20,15 @@ export class TcpClientDevice implements OrchDeviceBackend {
   /** 半行 flush：设备不回换行时（如应答 pong;），静默 120ms 后按整条处理 */
   private flushTimer: ReturnType<typeof setTimeout> | null = null
 
-  constructor(id: string, host: string, port: number, events: TcpClientEvents) {
+  /** 连接超时（ms）：黑洞 IP 等场景避免无限挂起，超时按失败处理 */
+  private readonly connectTimeoutMs: number
+
+  constructor(id: string, host: string, port: number, events: TcpClientEvents, connectTimeoutMs = 5000) {
     this.id = id
     this.host = host
     this.port = port
     this.events = events
+    this.connectTimeoutMs = connectTimeoutMs
   }
 
   connect(): Promise<{ ok: boolean; error?: string }> {
@@ -34,7 +38,14 @@ export class TcpClientDevice implements OrchDeviceBackend {
       let settled = false
       socket.setEncoding('utf-8')
       let buffer = ''
+      const timeoutTimer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        socket.destroy()
+        resolve({ ok: false, error: '连接超时' })
+      }, this.connectTimeoutMs)
       socket.on('connect', () => {
+        clearTimeout(timeoutTimer)
         settled = true
         this.socket = socket
         this.events.onClientChange(true)
@@ -62,6 +73,7 @@ export class TcpClientDevice implements OrchDeviceBackend {
         }
       })
       socket.on('error', (err) => {
+        clearTimeout(timeoutTimer)
         this.events.onError(err.message)
         if (!settled) {
           settled = true
@@ -69,6 +81,7 @@ export class TcpClientDevice implements OrchDeviceBackend {
         }
       })
       socket.on('close', () => {
+        clearTimeout(timeoutTimer)
         if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
         if (this.socket === socket) {
           this.socket = null

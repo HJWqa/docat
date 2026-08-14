@@ -63,8 +63,8 @@ export class OrchDeviceManager {
     eventBus.emit('orch:event', { ...payload, timestamp: Date.now() })
   }
 
-  private log(deviceName: string, direction: 'send' | 'recv' | 'system' | 'error', text: string) {
-    this.broadcast({ event: 'log', deviceName, direction, text })
+  private log(deviceName: string, direction: 'send' | 'recv' | 'system' | 'error', text: string, kind?: string) {
+    this.broadcast({ event: 'log', deviceName, direction, text, kind })
   }
 
   // ─── 持久化 ────────────────────────────────────────
@@ -212,8 +212,10 @@ export class OrchDeviceManager {
   /**
    * 连接设备。
    * auto = true（如"启动时自动连接"）：失败不进入自动重连，等同开关未打开。
+   * silent = true（快速恢复探测模式）：失败不记日志（对端未恢复属常态）。
+   * connectTimeoutMs：仅 tcp-client 生效，覆盖默认连接超时。
    */
-  async connect(id: string, auto = false): Promise<{ ok: boolean; error?: string }> {
+  async connect(id: string, auto = false, silent = false, connectTimeoutMs?: number): Promise<{ ok: boolean; error?: string }> {
     const entry = this.entries.get(id)
     if (!entry) return { ok: false, error: '设备不存在' }
     if (entry.connected) return { ok: true }
@@ -244,7 +246,7 @@ export class OrchDeviceManager {
         backend = new TcpClientDevice(cfg.id, cfg.ip, cfg.port, {
           onIncoming, onError,
           onClientChange: (c) => this.handleLinkChange(entry, c),
-        })
+        }, connectTimeoutMs)
         break
       case 'udp':
         backend = new UdpDevice(cfg.id, cfg.ip, cfg.port, { onIncoming, onError })
@@ -270,9 +272,9 @@ export class OrchDeviceManager {
     const result = await backend.connect()
     if (!result.ok) {
       backend.dispose()
-      // 首次失败记录；重试轮次静默（降噪）。auto 连接失败不进入重连。
-      if (entry.retryCount === 0) {
-        this.log(cfg.name, 'error', `连接失败：${result.error}`)
+      // 首次失败记录；重试轮次静默（降噪）。auto 连接失败不进入重连。silent 快速模式不记日志。
+      if (entry.retryCount === 0 && !silent) {
+        this.log(cfg.name, 'error', `连接失败：${result.error}`, 'connect')
       }
       if (!auto) this.scheduleReconnect(entry)
       return result
@@ -340,13 +342,32 @@ export class OrchDeviceManager {
     if (!entry.config.autoReconnect || entry.manualDisconnect || entry.connected) return
     if (entry.retryTimer) return
 
+    // 快速恢复（仅 tcp-client）：固定间隔直接重连，不探测、不打扰对端。
+    // 对端口关闭时 connect 瞬时失败（ECONNREFUSED，无副作用）；恢复后下一轮直接连上并保持。
+    // 不受次数/时长上限约束，开关不会自动关闭（手动断开仍取消循环）。
+    const rr = this.rapidRecoverySettings()
+    if (entry.config.type === 'tcp-client' && rr.enabled) {
+      entry.retryTimer = setTimeout(() => {
+        entry.retryTimer = null
+        if (entry.manualDisconnect || entry.connected) return
+        void this.connect(entry.config.id, false, true, rr.connectTimeout).then((r) => {
+          if (!r.ok && entry.config.autoReconnect && !entry.manualDisconnect && !entry.connected) {
+            this.scheduleReconnect(entry)
+          }
+        })
+      }, rr.interval)
+      return
+    }
+
     // 首次失败：记录重连循环起始
     if (entry.reconnectStartedAt === 0) entry.reconnectStartedAt = Date.now()
 
-    // 上限：次数 / 时长（通用设置可配）
+    // 上限：次数 / 时长（通用设置可配；maxAttempts=0 表示不限次数）
     const rc = this.reconnectSettings()
     if (entry.retryCount >= rc.maxAttempts || Date.now() - entry.reconnectStartedAt >= rc.maxSeconds * 1000) {
       this.log(entry.config.name, 'system', `已停止自动重连（达到上限：${entry.retryCount} 次 / ${rc.maxSeconds}s）`)
+      // 通知前端关闭连接意图开关（desired），避免下次断线继续重连
+      this.broadcast({ event: 'retry-stop', deviceId: entry.config.id, name: entry.config.name })
       entry.retryCount = 0
       entry.reconnectStartedAt = 0
       return
@@ -360,14 +381,34 @@ export class OrchDeviceManager {
     }, delay)
   }
 
-  /** 从「通用」设置读取重连上限 */
+  /** 从「通用」设置读取快速恢复参数（仅 tcp-client 生效） */
+  private rapidRecoverySettings(): { enabled: boolean; interval: number; connectTimeout: number } {
+    const num = (v: string, fallback: number) => {
+      const n = Number(v)
+      return Number.isFinite(n) && n > 0 ? n : fallback
+    }
+    const interval = Math.max(200, num(getSetting(`${SETTING_PREFIX}rapidRecoveryInterval`), 1000))
+    return {
+      enabled: getSetting(`${SETTING_PREFIX}rapidRecovery`) !== 'false',
+      interval,
+      // 黑洞 IP 时保持重试节奏：连接超时不超过间隔的 2 倍（封顶 3s）
+      connectTimeout: Math.min(3000, Math.max(500, interval * 2)),
+    }
+  }
+
+  /** 从「通用」设置读取重连上限（maxAttempts=0 表示不限次数） */
   private reconnectSettings(): { maxAttempts: number; maxSeconds: number } {
     const num = (v: string, fallback: number) => {
       const n = Number(v)
       return Number.isFinite(n) && n > 0 ? n : fallback
     }
+    const attempts = (v: string, fallback: number) => {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return fallback
+      return n > 0 ? n : Infinity // 0 = 不限次数
+    }
     return {
-      maxAttempts: num(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
+      maxAttempts: attempts(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
       maxSeconds: num(getSetting(`${SETTING_PREFIX}reconnectMaxSeconds`), 600),
     }
   }

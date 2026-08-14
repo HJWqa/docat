@@ -49,6 +49,12 @@ export interface OrchSettings {
   logLimit: number
   autoConnectOnLoad: boolean
   scriptFollow: boolean
+  /** 轮询对账：每 4s 与服务端设备状态对账（WS 异常时兜底），出问题可关闭 */
+  pollReconcile: boolean
+  /** 快速恢复（仅 tcp-client）：固定间隔直接重连（不探测、不打扰对端），恢复即连；不受重连上限约束 */
+  rapidRecovery: boolean
+  /** 快速恢复重连间隔（ms） */
+  rapidRecoveryInterval: number
   /** 心跳周期（ms，发送 ping 间隔） */
   heartbeatInterval: number
   /** 心跳超时（ms，超过无应答判定失活） */
@@ -59,7 +65,7 @@ export interface OrchSettings {
   heartbeatPing: string
   /** 心跳应答内容（支持 \n 换行） */
   heartbeatPong: string
-  /** 自动重连最大尝试次数（超过停止） */
+  /** 自动重连最大尝试次数（0 = 不限次数；超过停止） */
   reconnectMaxAttempts: number
   /** 自动重连最长持续时间（秒，超过停止） */
   reconnectMaxSeconds: number
@@ -68,6 +74,9 @@ export interface OrchSettings {
 }
 
 export type LogDirection = 'send' | 'recv' | 'system' | 'script' | 'error'
+
+/** 日志类别（独立于方向，供日志面板专项筛选） */
+export type OrchLogKind = 'connect'
 
 export interface OrchLogEntry {
   id: number
@@ -79,6 +88,8 @@ export interface OrchLogEntry {
   line?: number
   /** 脚本编译错误列 */
   column?: number
+  /** 日志类别：'connect' = 设备连接失败（脚本 send 未连接不归此类） */
+  kind?: OrchLogKind
 }
 
 export const ORCH_DEVICE_TYPES: Array<{ value: OrchDeviceType; label: string }> = [
@@ -159,6 +170,9 @@ export const orchStore = reactive({
     logLimit: 500,
     autoConnectOnLoad: false,
     scriptFollow: true,
+    pollReconcile: true,
+    rapidRecovery: true,
+    rapidRecoveryInterval: 1000,
     heartbeatInterval: 5000,
     heartbeatTimeout: 15000,
     heartbeatMissThreshold: 3,
@@ -178,8 +192,8 @@ export const orchStore = reactive({
 
 let logSeq = 0
 
-export function addLog(deviceName: string, direction: LogDirection, text: string, line?: number, column?: number) {
-  orchStore.logs.push({ id: ++logSeq, time: Date.now(), deviceName, direction, text, line, column })
+export function addLog(deviceName: string, direction: LogDirection, text: string, line?: number, column?: number, kind?: OrchLogKind) {
+  orchStore.logs.push({ id: ++logSeq, time: Date.now(), deviceName, direction, text, line, column, kind })
   const limit = orchStore.settings.logLimit || 500
   if (orchStore.logs.length > limit) {
     orchStore.logs = orchStore.logs.slice(orchStore.logs.length - limit)
@@ -288,6 +302,7 @@ interface OrchWsEvent {
   dir?: string
   line?: number
   column?: number
+  kind?: OrchLogKind
   [key: string]: unknown
 }
 
@@ -324,6 +339,10 @@ function handleOrchEvent(payload: unknown) {
         if (d) d.connected = !!ev.connected
       }
       break
+    case 'retry-stop':
+      // 重连达到上限：自动关闭连接意图开关
+      if (ev.deviceId) setDeviceDesired(String(ev.deviceId), false)
+      break
     case 'log':
       if (ev.text) {
         addLog(
@@ -332,6 +351,7 @@ function handleOrchEvent(payload: unknown) {
           String(ev.text),
           typeof ev.line === 'number' ? ev.line : undefined,
           typeof ev.column === 'number' ? ev.column : undefined,
+          ev.kind,
         )
       }
       break
@@ -367,9 +387,41 @@ export function initOrchWs() {
   unsubOrchEvent = wsClient.onOrchEvent(handleOrchEvent)
 }
 
+// ─── 轮询对账（真实模式兜底）────────────────────────
+// 每 4s 与服务端设备列表对账：WS 事件丢失/异常时也能及时反映连接状态
+// （含其他客户端增删改设备）。通用设置提供开关，出问题可关闭。
+
+const RECONCILE_POLL_MS = 4000
+let reconcileTimer: ReturnType<typeof setInterval> | null = null
+
+function reconcileDevices(list: OrchDevice[]) {
+  const cur = orchStore.devices
+  const key = (d: OrchDevice) =>
+    [d.id, d.connected, d.name, d.type, d.ip, d.port, d.serialPort, d.baudRate, d.targetDeviceId, d.autoReconnect, d.heartbeat].join('|')
+  const curKeys = new Set(cur.map(key))
+  const nextKeys = list.map(key)
+  if (cur.length !== nextKeys.length || nextKeys.some(k => !curKeys.has(k))) {
+    orchStore.devices = list
+  }
+}
+
+function startReconcilePoll() {
+  if (reconcileTimer || orchMock) return
+  reconcileTimer = setInterval(async () => {
+    if (!orchStore.settings.pollReconcile) return
+    try {
+      const res = await orchApi.orchListDevices()
+      if (res.success && res.data) reconcileDevices(res.data)
+    } catch {
+      // 服务端短暂不可达时忽略，下轮再试
+    }
+  }, RECONCILE_POLL_MS)
+}
+
 // ─── 设备连接意图开关（desired，持久化）───────────────
 // 开关 = 用户"想要连接"的意图（不随连接状态回弹）；绿点指示实际连接状态。
 // 自动重连前提：开关打开（desired）且设备配置 autoReconnect。
+// 重连达到次数/时长上限后自动关闭开关（服务端 retry-stop 事件 / mock 本地）。
 
 const DESIRED_KEY = 'docat.orchestration.device-desired'
 
@@ -383,7 +435,7 @@ function loadDesired(): Record<string, boolean> {
   }
 }
 
-const desiredMap: Record<string, boolean> = loadDesired()
+const desiredMap = reactive<Record<string, boolean>>(loadDesired())
 
 function persistDesired() {
   try {
@@ -426,6 +478,7 @@ export async function initOrchestration() {
     if (poseRes.success && poseRes.data) orchStore.poses = poseRes.data
     if (settingsRes.success && settingsRes.data) orchStore.settings = { ...orchStore.settings, ...settingsRes.data }
     initOrchWs()
+    startReconcilePoll()
     restoreDesiredConnections()
     return
   }
@@ -577,11 +630,26 @@ function scheduleReconnect(d: OrchDevice) {
   // 仅当连接意图开关打开才自动重连
   if (!d.autoReconnect || !isDeviceDesired(d.id) || d.connected) return
   stopRetry(d.id)
+
+  // 快速恢复（仅 tcp-client，与真实模式一致）：固定间隔直接重连，不探测、不打扰对端；
+  // 不受次数/时长上限约束，开关不会自动关闭
+  if (d.type === 'tcp-client' && orchStore.settings.rapidRecovery) {
+    retryTimers[d.id] = setTimeout(() => {
+      delete retryTimers[d.id]
+      void connectDevice(d.id, true)
+    }, Math.max(200, Number(orchStore.settings.rapidRecoveryInterval) || 1000))
+    return
+  }
+
+  const rawAttempts = Number(orchStore.settings.reconnectMaxAttempts)
+  // 0 = 不限次数
+  const maxAttempts = Number.isFinite(rawAttempts) ? Math.max(0, Math.floor(rawAttempts)) || Infinity : 8
   if (!retryStartedAt[d.id]) retryStartedAt[d.id] = Date.now()
-  const maxAttempts = Math.max(1, Number(orchStore.settings.reconnectMaxAttempts) || 8)
   const maxSeconds = Math.max(10, Number(orchStore.settings.reconnectMaxSeconds) || 600)
   if ((retryCounts[d.id] ?? 0) >= maxAttempts || Date.now() - retryStartedAt[d.id] >= maxSeconds * 1000) {
     addLog(d.name, 'system', `已停止自动重连（达到上限：${retryCounts[d.id] ?? 0} 次 / ${maxSeconds}s）`)
+    // 重连达到上限：自动关闭连接意图开关
+    setDeviceDesired(d.id, false)
     retryCounts[d.id] = 0
     retryStartedAt[d.id] = 0
     return
@@ -619,12 +687,14 @@ function markDisconnected(d: OrchDevice, reason: string) {
 export async function connectDevice(id: string, isRetry = false, auto = false): Promise<void> {
   const d = orchStore.devices.find(item => item.id === id)
   if (!d || d.connected) return
+  // 重试/恢复探测期间开关被关闭：放弃本次连接
+  if (isRetry && !isDeviceDesired(id)) return
   stopRetry(id)
 
   if (!orchMock) {
     const res = await orchApi.orchConnect(id, auto)
     if (!res.success) {
-      if (!isRetry) addLog(d.name, 'error', `连接失败：${res.error?.message ?? '未知错误'}`)
+      if (!isRetry) addLog(d.name, 'error', `连接失败：${res.error?.message ?? '未知错误'}`, undefined, undefined, 'connect')
       return
     }
     return
@@ -634,7 +704,7 @@ export async function connectDevice(id: string, isRetry = false, auto = false): 
     const server = findConnectedServer(d)
     if (!server) {
       if (!isRetry) {
-        addLog(d.name, 'error', `连接失败：未找到 TCP Server (${d.ip}:${d.port})${d.autoReconnect && !auto ? '，将自动重连' : ''}`)
+        addLog(d.name, 'error', `连接失败：未找到 TCP Server (${d.ip}:${d.port})${d.autoReconnect && !auto ? '，将自动重连' : ''}`, undefined, undefined, 'connect')
       }
       if (d.autoReconnect && !auto) scheduleReconnect(d)
       return

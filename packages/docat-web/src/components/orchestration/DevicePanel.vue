@@ -116,7 +116,7 @@
           <div class="device-meta">{{ deviceMeta(d) }}</div>
         </div>
         <span class="device-type-badge" :class="`device-type-badge--${d.type}`">{{ orchTypeLabel(d.type) }}</span>
-        <label class="toggle-label" title="连接意图开关（打开 = 想要连接并自动重连；实际状态看左侧圆点）" @click.stop>
+        <label class="toggle-label" title="连接意图开关（打开 = 想要连接并自动重连；重连达到上限自动关闭；实际状态看左侧圆点）" @click.stop>
           <input :checked="isDeviceDesired(d.id)" type="checkbox" class="toggle-input" @change="onToggle(d)" />
           <span class="toggle-track"><span class="toggle-thumb" /></span>
         </label>

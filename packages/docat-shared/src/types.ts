@@ -252,7 +252,7 @@ export type WSEventType =
   | 'jog-stop'
   | 'jog-ack'
   | 'error'
-  /** 编排（orchestration）事件通道：data.event ∈ device-status | log | pose | script-status */
+  /** 编排（orchestration）事件通道：data.event ∈ device-status | log | pose | script-status | retry-stop */
   | 'orch-event'
 
 export interface WSMessage {

@@ -27,6 +27,14 @@
           >
             {{ f.label }}<span class="filter-count">{{ countFor(f.key) }}</span>
           </button>
+          <button
+            class="filter-chip"
+            :class="{ 'filter-chip--active': showConnectFailures }"
+            @click="toggleConnectFailures"
+            title="设备连接失败提示（关闭后不显示；脚本发送未连接设备不归此类）"
+          >
+            连接失败<span class="filter-count">{{ connectFailureCount }}</span>
+          </button>
         </div>
         <button class="btn btn-secondary btn-sm log-clear" @click="clearLogs()">清空</button>
       </div>
@@ -48,6 +56,7 @@ const filters: Array<{ key: LogDirection; label: string }> = [
 
 const ALL_DIRECTIONS: LogDirection[] = ['send', 'recv', 'system', 'script', 'error']
 const FILTER_KEY = 'docat.orchestration.log-filters'
+const CONNECT_FILTER_KEY = 'docat.orchestration.log-filter-connect'
 
 /** 记住筛选项：从 localStorage 恢复，非法值过滤，空则全部 */
 function loadSavedFilters(): LogDirection[] {
@@ -63,7 +72,17 @@ function loadSavedFilters(): LogDirection[] {
   }
 }
 
+/** 连接失败提示默认显示；关闭后 kind='connect' 的日志不展示 */
+function loadConnectFilter(): boolean {
+  try {
+    return localStorage.getItem(CONNECT_FILTER_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 const activeFilters = ref<LogDirection[]>(loadSavedFilters())
+const showConnectFailures = ref(loadConnectFilter())
 const logListRef = ref<HTMLElement>()
 
 watch(activeFilters, (val) => {
@@ -74,9 +93,24 @@ watch(activeFilters, (val) => {
   }
 }, { deep: true })
 
+watch(showConnectFailures, (val) => {
+  try {
+    localStorage.setItem(CONNECT_FILTER_KEY, val ? '1' : '0')
+  } catch {
+    // ignore
+  }
+})
+
 /** 倒序：最新的在最上面 */
 const visibleLogs = computed(() =>
-  orchStore.logs.filter(e => activeFilters.value.includes(e.direction)).reverse()
+  orchStore.logs
+    .filter(e => activeFilters.value.includes(e.direction))
+    .filter(e => showConnectFailures.value || e.kind !== 'connect')
+    .reverse()
+)
+
+const connectFailureCount = computed(() =>
+  orchStore.logs.filter(e => e.kind === 'connect').length
 )
 
 function countFor(key: LogDirection): number {
@@ -89,6 +123,10 @@ function toggleFilter(key: LogDirection) {
   } else {
     activeFilters.value = [...activeFilters.value, key]
   }
+}
+
+function toggleConnectFailures() {
+  showConnectFailures.value = !showConnectFailures.value
 }
 
 function formatTime(t: number): string {

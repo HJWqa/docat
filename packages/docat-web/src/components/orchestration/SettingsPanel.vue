@@ -37,20 +37,45 @@
             <span class="toggle-track"><span class="toggle-thumb" /></span>
           </label>
         </div>
+        <div class="field-row field-row--toggle">
+          <span class="field-label">轮询对账</span>
+          <label class="toggle-label" title="每 4s 与服务端设备状态对账（WS 异常时兜底），出问题可关闭">
+            <input v-model="orchStore.settings.pollReconcile" type="checkbox" class="toggle-input" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+          <span class="field-hint">每 4s 与服务端设备状态对账（WS 异常时兜底）</span>
+        </div>
 
         <div class="heartbeat-settings">
           <span class="field-label">自动重连上限</span>
           <div class="field-row field-row--split">
             <div class="field-col">
               <label class="field-label">最大次数</label>
-              <input v-model.number="orchStore.settings.reconnectMaxAttempts" type="number" min="1" max="100" step="1" class="field-input" />
+              <input v-model.number="orchStore.settings.reconnectMaxAttempts" type="number" min="0" max="100" step="1" class="field-input" title="0 = 不限次数" />
             </div>
             <div class="field-col">
               <label class="field-label">最长时长 (s)</label>
               <input v-model.number="orchStore.settings.reconnectMaxSeconds" type="number" min="10" max="86400" step="10" class="field-input" />
             </div>
           </div>
-          <span class="field-hint">仅在设备列表连接开关打开时自动重连；达到次数或时长上限后停止</span>
+          <span class="field-hint">仅在设备列表连接开关打开时自动重连；最大次数设为 0 表示不限次数；达到次数或时长上限后停止，并自动关闭该设备连接开关</span>
+        </div>
+
+        <div class="heartbeat-settings">
+          <div class="field-row field-row--toggle">
+            <span class="field-label">端口恢复快速重连</span>
+            <label class="toggle-label" title="仅 TCP Client：固定间隔直接重连（不探测、不打扰对端），恢复即连；不受重连上限约束（开关不自动关闭），手动断开仍停止">
+              <input v-model="orchStore.settings.rapidRecovery" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb" /></span>
+            </label>
+          </div>
+          <div class="field-row field-row--split">
+            <div class="field-col">
+              <label class="field-label">重连间隔 (ms)</label>
+              <input v-model.number="orchStore.settings.rapidRecoveryInterval" type="number" min="200" max="60000" step="100" class="field-input" />
+            </div>
+          </div>
+          <span class="field-hint">仅 TCP Client；开启后每间隔直接重连一次（端口关闭时瞬时失败，不打扰对端），恢复即连；不受重连次数/时长上限约束（开关不会自动关闭）</span>
         </div>
 
         <div class="heartbeat-settings">

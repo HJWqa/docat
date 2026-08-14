@@ -71,6 +71,12 @@ export interface OrchSettingsPayload {
   logLimit: number
   autoConnectOnLoad: boolean
   scriptFollow: boolean
+  /** 前端轮询对账（每 4s 与服务端设备状态对账；WS 异常时兜底） */
+  pollReconcile: boolean
+  /** 快速恢复（仅 tcp-client）：固定间隔直接重连（不探测、不打扰对端），恢复即连；不受重连上限约束 */
+  rapidRecovery: boolean
+  /** 快速恢复重连间隔（ms） */
+  rapidRecoveryInterval: number
   /** 心跳周期（ms，发送 ping; 间隔） */
   heartbeatInterval: number
   /** 心跳超时（ms，超过无 pong 判定失活） */
@@ -81,7 +87,7 @@ export interface OrchSettingsPayload {
   heartbeatPing: string
   /** 心跳应答内容（默认 pong;） */
   heartbeatPong: string
-  /** 自动重连最大尝试次数（超过停止） */
+  /** 自动重连最大尝试次数（0 = 不限次数；超过停止） */
   reconnectMaxAttempts: number
   /** 自动重连最长持续时间（秒，超过停止） */
   reconnectMaxSeconds: number
@@ -99,17 +105,24 @@ function readOrchSettings(): OrchSettingsPayload {
     const n = Number(v)
     return Number.isFinite(n) && n > 0 ? n : fallback
   }
+  const numOrZero = (v: string, fallback: number) => {
+    const n = Number(v)
+    return Number.isFinite(n) && n >= 0 ? n : fallback
+  }
   return {
     defaultSeparator: getSetting(`${SETTING_PREFIX}defaultSeparator`) || ';',
     logLimit: num(getSetting(`${SETTING_PREFIX}logLimit`), 500),
     autoConnectOnLoad: getSetting(`${SETTING_PREFIX}autoConnectOnLoad`) === 'true',
     scriptFollow: getSetting(`${SETTING_PREFIX}scriptFollow`) !== 'false',
+    pollReconcile: getSetting(`${SETTING_PREFIX}pollReconcile`) !== 'false',
+    rapidRecovery: getSetting(`${SETTING_PREFIX}rapidRecovery`) !== 'false',
+    rapidRecoveryInterval: num(getSetting(`${SETTING_PREFIX}rapidRecoveryInterval`), 1000),
     heartbeatInterval: num(getSetting(`${SETTING_PREFIX}heartbeatInterval`), 5000),
     heartbeatTimeout: num(getSetting(`${SETTING_PREFIX}heartbeatTimeout`), 15000),
     heartbeatMissThreshold: num(getSetting(`${SETTING_PREFIX}heartbeatMissThreshold`), 3),
     heartbeatPing: getSetting(`${SETTING_PREFIX}heartbeatPing`) || 'ping;',
     heartbeatPong: getSetting(`${SETTING_PREFIX}heartbeatPong`) || 'pong;',
-    reconnectMaxAttempts: num(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
+    reconnectMaxAttempts: numOrZero(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
     reconnectMaxSeconds: num(getSetting(`${SETTING_PREFIX}reconnectMaxSeconds`), 600),
     scriptsDir: getSetting(SETTING_SCRIPTS_DIR) || currentScriptsDir,
   }
@@ -188,6 +201,15 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         if (body.scriptFollow !== undefined) {
           setSetting(`${SETTING_PREFIX}scriptFollow`, body.scriptFollow ? 'true' : 'false')
         }
+        if (body.pollReconcile !== undefined) {
+          setSetting(`${SETTING_PREFIX}pollReconcile`, body.pollReconcile ? 'true' : 'false')
+        }
+        if (body.rapidRecovery !== undefined) {
+          setSetting(`${SETTING_PREFIX}rapidRecovery`, body.rapidRecovery ? 'true' : 'false')
+        }
+        if (body.rapidRecoveryInterval !== undefined) {
+          setSetting(`${SETTING_PREFIX}rapidRecoveryInterval`, String(Math.min(60000, Math.max(200, Number(body.rapidRecoveryInterval) || 1000))))
+        }
         if (body.heartbeatInterval !== undefined) {
           setSetting(`${SETTING_PREFIX}heartbeatInterval`, String(Math.max(1000, Number(body.heartbeatInterval) || 5000)))
         }
@@ -204,7 +226,8 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
           setSetting(`${SETTING_PREFIX}heartbeatPong`, String(body.heartbeatPong || 'pong;'))
         }
         if (body.reconnectMaxAttempts !== undefined) {
-          setSetting(`${SETTING_PREFIX}reconnectMaxAttempts`, String(Math.max(1, Math.min(100, Number(body.reconnectMaxAttempts) || 8))))
+          const n = Number(body.reconnectMaxAttempts)
+          setSetting(`${SETTING_PREFIX}reconnectMaxAttempts`, String(Number.isFinite(n) ? Math.min(100, Math.max(0, Math.floor(n))) : 8))
         }
         if (body.reconnectMaxSeconds !== undefined) {
           setSetting(`${SETTING_PREFIX}reconnectMaxSeconds`, String(Math.max(10, Math.min(86400, Number(body.reconnectMaxSeconds) || 600))))
