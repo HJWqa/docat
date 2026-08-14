@@ -15,7 +15,7 @@ import { listSerialPorts } from '../../device/transport/MagicianSerialTransport.
 import { getSetting, setSetting } from './system.js'
 import { eventBus } from '../../event/EventBus.js'
 import type { OrchDeviceManager } from '../../orchestration/OrchDeviceManager.js'
-import type { RuntimeManager } from '../../runtime/RuntimeManager.js'
+import { pythonEnv, resolvePythonInterpreter, type RuntimeManager } from '../../runtime/RuntimeManager.js'
 import type { OrchDeviceConfig, OrchPose } from '../../orchestration/types.js'
 import type { ApiResponse } from 'docat-shared/types'
 
@@ -93,6 +93,8 @@ export interface OrchSettingsPayload {
   reconnectMaxSeconds: number
   /** 服务端脚本文件目录 */
   scriptsDir: string
+  /** 自定义 Python 命令/路径（留空自动探测 python3 / python / py -3） */
+  pythonCommand: string
 }
 
 let watcher: FSWatcher | null = null
@@ -125,6 +127,7 @@ function readOrchSettings(): OrchSettingsPayload {
     reconnectMaxAttempts: numOrZero(getSetting(`${SETTING_PREFIX}reconnectMaxAttempts`), 8),
     reconnectMaxSeconds: num(getSetting(`${SETTING_PREFIX}reconnectMaxSeconds`), 600),
     scriptsDir: getSetting(SETTING_SCRIPTS_DIR) || currentScriptsDir,
+    pythonCommand: getSetting(`${SETTING_PREFIX}pythonCommand`) || '',
   }
 }
 
@@ -158,6 +161,8 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
   const persisted = getSetting(SETTING_SCRIPTS_DIR)
   currentScriptsDir = persisted || scriptsDir
   ensureWatch(currentScriptsDir)
+  // 恢复自定义 Python 命令（清空探测缓存，使配置即时生效）
+  runtime.setPythonCommand(getSetting(`${SETTING_PREFIX}pythonCommand`) || '')
 
   // 每次启动把编排手册覆盖拷贝到脚本目录（手册随版本更新，以最新为准）
   try {
@@ -247,6 +252,11 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
             })
           }
         }
+        if (body.pythonCommand !== undefined) {
+          const cmd = String(body.pythonCommand || '').trim()
+          setSetting(`${SETTING_PREFIX}pythonCommand`, cmd)
+          runtime.setPythonCommand(cmd)
+        }
 
         return { success: true, data: readOrchSettings() }
       } catch (err) {
@@ -310,6 +320,77 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         const parsed = JSON.parse(probe.stdout) as { error?: string; members?: Array<{ name: string; type: string }> }
         if (parsed.error) return { success: false, error: { code: 50000, message: parsed.error } }
         return { success: true, data: { members: parsed.members ?? [] } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── Python 模块成员（自动补全用）：用配置的 Python 解释器列出模块导出 ──
+  app.post<{ Body: { name?: string } }>(
+    '/api/orchestration/scripts/python-module-members',
+    async (request, reply): Promise<ApiResponse<{ members: Array<{ name: string; type: string }> } | { error: string }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const moduleName = String(request.body?.name ?? '').trim()
+        if (!moduleName || !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(moduleName)) {
+          return { success: false, error: { code: 42200, message: '缺少模块名' } }
+        }
+
+        // 与脚本运行同一解释器解析逻辑（自定义命令优先），保证探测一致
+        const py = resolvePythonInterpreter()
+        if (!py) {
+          return { success: false, error: { code: 50000, message: '未找到 Python 解释器（python3 / python / py -3 均不可用）' } }
+        }
+
+        const probe = spawnSync(py.cmd, [...py.runArgs, '-c', `
+import importlib, json, sys
+try:
+    mod = importlib.import_module(sys.argv[1])
+except BaseException as e:
+    print(json.dumps({"error": "%s: %s" % (type(e).__name__, e)}))
+    raise SystemExit(0)
+out = []
+for k in dir(mod):
+    if k.startswith("_"):
+        continue
+    try:
+        v = getattr(mod, k)
+    except BaseException:
+        continue
+    if len(out) >= 300:
+        break
+    t = type(v).__name__
+    out.append({"name": k, "type": "function" if ("function" in t or "method" in t) else "variable"})
+print(json.dumps({"members": out}))
+`, moduleName], {
+          cwd: SERVER_PKG_ROOT,
+          timeout: 5000,
+          encoding: 'utf-8',
+          env: pythonEnv(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+
+        if (probe.error || probe.status !== 0 || !probe.stdout) {
+          return { success: false, error: { code: 50000, message: '模块加载失败或超时' } }
+        }
+        // 取最后一个可解析的 JSON 行（import 期间模块自身的 print 输出可忽略）
+        const lines = probe.stdout.split(/\r?\n/).filter(Boolean)
+        let payload: { error?: string; members?: Array<{ name: string; type: string }> } | null = null
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            payload = JSON.parse(lines[i]) as { error?: string; members?: Array<{ name: string; type: string }> }
+            break
+          } catch {
+            // 非 JSON 行（模块自身输出）跳过
+          }
+        }
+        if (!payload) {
+          return { success: false, error: { code: 50000, message: '模块探测无输出' } }
+        }
+        if (payload.error) return { success: false, error: { code: 50000, message: payload.error } }
+        return { success: true, data: { members: payload.members ?? [] } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }

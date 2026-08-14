@@ -125,3 +125,8 @@ export interface OrchModuleMember {
 export function orchListModuleMembers(moduleName: string): Promise<ApiResponse<{ members: OrchModuleMember[] } | { error: string }>> {
   return request('POST', '/api/orchestration/scripts/module-members', { name: moduleName })
 }
+
+/** Python 模块导出成员清单（import 自动补全用；用服务端配置的 Python 解释器探测） */
+export function orchListPythonModuleMembers(moduleName: string): Promise<ApiResponse<{ members: OrchModuleMember[] } | { error: string }>> {
+  return request('POST', '/api/orchestration/scripts/python-module-members', { name: moduleName })
+}

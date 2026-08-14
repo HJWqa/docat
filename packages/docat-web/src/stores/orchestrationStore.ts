@@ -71,6 +71,8 @@ export interface OrchSettings {
   reconnectMaxSeconds: number
   /** 服务端脚本文件目录（真实模式，通用设置可修改） */
   scriptsDir: string
+  /** 自定义 Python 命令/路径（服务端，留空自动探测 python3 / python / py -3） */
+  pythonCommand: string
 }
 
 export type LogDirection = 'send' | 'recv' | 'system' | 'script' | 'error'
@@ -181,6 +183,7 @@ export const orchStore = reactive({
     reconnectMaxAttempts: 8,
     reconnectMaxSeconds: 600,
     scriptsDir: '',
+    pythonCommand: '',
   } as OrchSettings,
   logs: [] as OrchLogEntry[],
   selectedDeviceId: '',

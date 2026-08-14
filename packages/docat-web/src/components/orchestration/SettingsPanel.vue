@@ -112,6 +112,11 @@
           <input v-model="orchStore.settings.scriptsDir" class="field-input" placeholder="./data/orch-scripts" spellcheck="false" />
           <span class="field-hint">服务端本地路径；脚本文件从此目录加载并监听变更，修改后保存即可生效</span>
         </div>
+        <div class="field-row">
+          <label class="field-label">Python 命令/路径（服务端）</label>
+          <input v-model="orchStore.settings.pythonCommand" class="field-input" placeholder="留空自动探测（python3 / python / py -3）" spellcheck="false" />
+          <span class="field-hint">自定义 Python 解释器命令或完整路径，可带参数（如 C:\Python311\python.exe -u、/usr/bin/python3.11）；不可用时自动回退自动探测并提示</span>
+        </div>
         <div class="field-actions">
           <button class="btn btn-primary btn-sm" @click="saveSettings">保存设置</button>
           <button class="btn btn-secondary btn-sm" @click="clearLogs()">清空日志</button>

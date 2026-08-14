@@ -31,7 +31,16 @@ import sys
 import threading
 import queue
 import time
+import traceback
 import xml.etree.ElementTree as ET
+
+# 强制 UTF-8 输出（与 Node 侧 StringDecoder('utf-8') 解码一致，避免 Windows GBK 乱码；
+# 即使服务端环境变量被剥离，协议仍保持 UTF-8）
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 state = {"poses": [], "devices": [], "exited": False, "base_dir": None}
 listeners = {"message": {}, "connect": {}, "disconnect": {}}
@@ -333,10 +342,50 @@ def _has_listeners():
     return any(listeners[k] for k in ("message", "connect", "disconnect"))
 
 
+USER_SCRIPT_NAME = "user-script.py"
+
+
+def _exc_line_info(exc):
+    """提取用户脚本异常的行号/列号（SyntaxError 用自带字段，运行时异常回溯取 user-script.py 帧）。"""
+    if isinstance(exc, SyntaxError):
+        line = getattr(exc, "lineno", None)
+        column = getattr(exc, "offset", None)
+        return (int(line), int(column)) if line else (None, None)
+    tb = getattr(exc, "__traceback__", None)
+    if tb is None:
+        return (None, None)
+    line = None
+    column = None
+    for frame in traceback.extract_tb(tb):
+        if frame.filename == USER_SCRIPT_NAME:
+            line = frame.lineno
+            # Python 3.11+ 提供位置信息（列号），旧版本无法获得
+            try:
+                col = frame.positions[1]
+                column = int(col) if col is not None else None
+            except Exception:
+                column = None
+    return (line, column)
+
+
+def _report_exception(exc):
+    """发送脚本异常日志（带用户脚本行号/列号，供编辑器波浪线定位）。"""
+    line, column = _exc_line_info(exc)
+    line_text = ""
+    if line:
+        line_text = "（第 %s 行%s）" % (line, "，第 %s 列" % column if column else "")
+    payload = {"type": "log", "level": "error", "text": "脚本异常: %s%s" % (exc, line_text)}
+    if line:
+        payload["line"] = int(line)
+    if column:
+        payload["column"] = int(column)
+    _send(payload)
+
+
 def run_user_script(code):
     try:
         g = {"docat": docat, "__name__": "__main__"}
-        exec(compile(code, "user-script.py", "exec"), g)
+        exec(compile(code, USER_SCRIPT_NAME, "exec"), g)
         if state["exited"]:
             return
         if not _has_listeners():
@@ -347,15 +396,7 @@ def run_user_script(code):
     except SystemExit:
         pass
     except Exception as exc:
-        line = getattr(exc, "lineno", None) if isinstance(exc, SyntaxError) else None
-        column = getattr(exc, "offset", None) if isinstance(exc, SyntaxError) else None
-        line_text = "（第 %s 行%s）" % (line, "，第 %s 列" % column if column else "") if line else ""
-        payload = {"type": "log", "level": "error", "text": "脚本异常: %s%s" % (exc, line_text)}
-        if line:
-            payload["line"] = int(line)
-        if column:
-            payload["column"] = int(column)
-        _send(payload)
+        _report_exception(exc)
         state["exited"] = True
         sys.exit(1)
 
@@ -390,7 +431,7 @@ def _worker():
                 except SystemExit:
                     raise
                 except Exception as exc:
-                    _send({"type": "log", "level": "error", "text": "脚本异常: %s" % exc})
+                    _report_exception(exc)
         elif etype == "message":
             if ran:
                 try:
@@ -398,7 +439,7 @@ def _worker():
                 except SystemExit:
                     raise
                 except Exception as exc:
-                    _send({"type": "log", "level": "error", "text": "脚本异常: %s" % exc})
+                    _report_exception(exc)
         elif etype == "script":
             ran = True
             run_user_script(str(ev.get("content", "")))

@@ -44,6 +44,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Embedded Python (pythoncore) runtime cache (machine-local install)
+packages/docat-server/Python/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

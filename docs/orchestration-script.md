@@ -19,6 +19,7 @@
 
 - JS 由 Node 子进程（vm 沙箱）执行；Python 由 Python 子进程执行（服务端需安装 Python）。
 - Python 解释器自动探测：Windows 依次尝试 `python3` → `python` → `py -3`（取第一个可用的并缓存），Linux/macOS 使用 `python3`。全失败时运行会报「未找到 Python 解释器」，请安装 Python 并加入 PATH。
+- 可在「设置 → 通用」配置**自定义 Python 命令/路径**（如 `C:\Python311\python.exe -u`、`/usr/bin/python3.11`，支持带参数）：优先使用配置的命令，探测失败会自动回退自动探测并在日志提示；Python 运行与模块成员探测（自动补全）使用同一解释器。
 - **JS 中可直接使用裸名** `devices` / `poses` / `utils` / `log`（等价 `docat.devices` 等，写法自由）；**Python 必须** `import docat`。
 
 ## 设备类型

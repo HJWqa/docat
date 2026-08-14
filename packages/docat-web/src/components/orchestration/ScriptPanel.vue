@@ -125,7 +125,7 @@ import * as jsMonarch from 'monaco-editor/languages/definitions/javascript/javas
 import * as pyMonarch from 'monaco-editor/languages/definitions/python/python'
 import { addLog, isOrchMockMode, onOrchScriptChange, onOrchScriptsDirChange, orchStore, orchTypeLabel } from '../../stores/orchestrationStore'
 import { pickScriptFile, runScript, watchScriptFile, type ScriptRunHandle } from '../../services/orchestration'
-import { orchCreateScript, orchGetScript, orchListModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
+import { orchCreateScript, orchGetScript, orchListModuleMembers, orchListPythonModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
 import Toast from '../Toast.vue'
 
 type ScriptLanguage = 'javascript' | 'python'
@@ -369,6 +369,8 @@ const DOCAT_API_JS: DocatCompletionItem[] = [
   { label: 'devices.onConnect', detail: '设备连接事件', documentation: 'devices.onConnect(设备名, () => {...})', insert: 'devices.onConnect(\'${1:设备名}\', () => {\n  $0\n})' },
   { label: 'devices.onDisconnect', detail: '设备断开事件', documentation: 'devices.onDisconnect(设备名, () => {...})', insert: 'devices.onDisconnect(\'${1:设备名}\', () => {\n  $0\n})' },
   { label: 'devices.isConnected', detail: '查询设备连接状态', documentation: 'devices.isConnected(设备名) → boolean', insert: 'devices.isConnected(\'${1:设备名}\')' },
+  { label: 'devices.waitFor', detail: '等待设备下一条匹配消息', documentation: 'devices.waitFor(设备名, 匹配前缀或函数, 超时ms=10000) → Promise<文本>，超时抛错', insert: 'devices.waitFor(\'${1:设备名}\', \'${2:匹配前缀}\')' },
+  { label: 'devices.sendAndWait', detail: '发送并等待匹配应答', documentation: "devices.sendAndWait(设备名, 文本, 匹配前缀, 超时ms=10000) → Promise<应答>", insert: 'devices.sendAndWait(\'${1:设备名}\', \'${2:消息}\', \'${3:应答前缀}\')' },
   { label: 'poses', detail: '姿态', documentation: '姿态对象：get / list', insert: 'poses' },
   { label: 'poses.get', detail: '按姿态名取坐标', documentation: 'poses.get(姿态名) → 数组；poses.get(姿态名, \';\') → 文本', insert: 'poses.get(\'${1:姿态名}\')' },
   { label: 'poses.list', detail: '姿态名列表', documentation: 'poses.list() → string[]', insert: 'poses.list()' },
@@ -412,6 +414,8 @@ const DOCAT_API_PY: DocatCompletionItem[] = [
   { label: 'docat.devices.on_connect', detail: '设备连接事件（装饰器）', documentation: '@docat.devices.on_connect(设备名)', insert: '@docat.devices.on_connect(\'${1:设备名}\')\ndef ${2:handler}():\n    $0' },
   { label: 'docat.devices.on_disconnect', detail: '设备断开事件（装饰器）', documentation: '@docat.devices.on_disconnect(设备名)', insert: '@docat.devices.on_disconnect(\'${1:设备名}\')\ndef ${2:handler}():\n    $0' },
   { label: 'docat.devices.is_connected', detail: '查询设备连接状态', documentation: 'docat.devices.is_connected(设备名) → bool', insert: 'docat.devices.is_connected(\'${1:设备名}\')' },
+  { label: 'docat.devices.wait_for', detail: '等待设备下一条匹配消息', documentation: 'docat.devices.wait_for(设备名, 匹配前缀或函数, timeout_ms=10000) → 文本，超时抛 TimeoutError', insert: 'docat.devices.wait_for(\'${1:设备名}\', \'${2:匹配前缀}\')' },
+  { label: 'docat.devices.send_and_wait', detail: '发送并等待匹配应答', documentation: "docat.devices.send_and_wait(设备名, 文本, 匹配前缀, timeout_ms=10000) → 应答", insert: 'docat.devices.send_and_wait(\'${1:设备名}\', \'${2:消息}\', \'${3:应答前缀}\')' },
   { label: 'docat.poses', detail: '姿态', documentation: 'docat.poses.get / list', insert: 'docat.poses' },
   { label: 'docat.poses.get', detail: '按姿态名取坐标', documentation: "docat.poses.get(姿态名) → 数组；docat.poses.get(姿态名, sep=';') → 文本", insert: 'docat.poses.get(\'${1:姿态名}\')' },
   { label: 'docat.poses.list', detail: '姿态名列表', documentation: 'docat.poses.list()', insert: 'docat.poses.list()' },
@@ -430,30 +434,45 @@ const DOCAT_API_PY: DocatCompletionItem[] = [
   { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.info(\'${1:文本}\')' },
   { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.warn(\'${1:文本}\')' },
   { label: 'docat.log.error', detail: '记录 error 日志', documentation: 'docat.log.error(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.error(\'${1:文本}\')' },
-  { label: 'math', detail: 'Python 标准库 math', documentation: 'import math 后使用：sqrt / pi / sin 等', insert: 'math' },
+  { label: 'math', detail: 'Python 标准库 math', documentation: 'import math 后使用：sqrt / pi / sin 等', insert: 'import math' },
+  { label: 'math.sqrt', detail: '平方根', documentation: 'math.sqrt(81) → 9.0', insert: 'math.sqrt(${1:x})' },
+  { label: 'math.pi', detail: '圆周率', documentation: 'math.pi ≈ 3.14159', insert: 'math.pi' },
+  { label: 'math.e', detail: '自然常数', documentation: 'math.e ≈ 2.71828', insert: 'math.e' },
+  { label: 'math.sin', detail: '正弦（弧度）', documentation: 'math.sin(x)', insert: 'math.sin(${1:x})' },
+  { label: 'math.cos', detail: '余弦（弧度）', documentation: 'math.cos(x)', insert: 'math.cos(${1:x})' },
+  { label: 'math.tan', detail: '正切（弧度）', documentation: 'math.tan(x)', insert: 'math.tan(${1:x})' },
+  { label: 'math.pow', detail: '幂', documentation: 'math.pow(2, 10) → 1024.0', insert: 'math.pow(${1:x}, ${2:y})' },
+  { label: 'math.floor', detail: '向下取整', documentation: 'math.floor(3.7) → 3', insert: 'math.floor(${1:x})' },
+  { label: 'math.ceil', detail: '向上取整', documentation: 'math.ceil(3.2) → 4', insert: 'math.ceil(${1:x})' },
+  { label: 'math.fabs', detail: '绝对值', documentation: 'math.fabs(-5) → 5.0', insert: 'math.fabs(${1:x})' },
+  { label: 'math.log', detail: '对数', documentation: 'math.log(8, 2) → 3.0（默认自然对数）', insert: 'math.log(${1:x}, ${2:底数})' },
+  { label: 'math.exp', detail: '指数', documentation: 'math.exp(1) → e ≈ 2.71828', insert: 'math.exp(${1:x})' },
+  { label: 'math.radians', detail: '角度 → 弧度', documentation: 'math.radians(180) → π', insert: 'math.radians(${1:度数})' },
+  { label: 'math.degrees', detail: '弧度 → 角度', documentation: 'math.degrees(math.pi) → 180.0', insert: 'math.degrees(${1:弧度})' },
 ]
 
 const IDENTIFIER_TRIGGERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'.split('')
 
-// ─── 动态模块成员补全（require('xxx') 的导出成员）──────
+// ─── 动态模块成员补全（require / import 的导出成员）──────
 
 const memberCache = new Map<string, Array<{ name: string; type: string }>>()
 const memberFetching = new Map<string, Promise<Array<{ name: string; type: string }> | null>>()
 
-function fetchModuleMembers(moduleName: string): Promise<Array<{ name: string; type: string }> | null> {
-  const cached = memberCache.get(moduleName)
+function fetchModuleMembers(moduleName: string, python: boolean): Promise<Array<{ name: string; type: string }> | null> {
+  const key = `${python ? 'py:' : 'js:'}${moduleName}`
+  const cached = memberCache.get(key)
   if (cached) return Promise.resolve(cached)
-  const inflight = memberFetching.get(moduleName)
+  const inflight = memberFetching.get(key)
   if (inflight) return inflight
-  const p = orchListModuleMembers(moduleName)
+  const p = (python ? orchListPythonModuleMembers(moduleName) : orchListModuleMembers(moduleName))
     .then(res => {
       const members = res.success && res.data && 'members' in res.data ? res.data.members : null
-      if (members) memberCache.set(moduleName, members)
+      if (members) memberCache.set(key, members)
       return members
     })
     .catch(() => null)
-    .finally(() => { memberFetching.delete(moduleName) })
-  memberFetching.set(moduleName, p)
+    .finally(() => { memberFetching.delete(key) })
+  memberFetching.set(key, p)
   return p
 }
 
@@ -463,6 +482,27 @@ function collectRequireVars(text: string): Map<string, string> {
   const RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*['"]([^'"]+)['"]\s*\)/g
   let m: RegExpExecArray | null
   while ((m = RE.exec(text))) map.set(m[1], m[2])
+  return map
+}
+
+/** 解析 Python import 语句：变量名 → 模块名（import math as m / import math / from math import sqrt as s） */
+function collectPythonImports(text: string): Map<string, string> {
+  const map = new Map<string, string>()
+  const RE_IMPORT = /\bimport\s+([A-Za-z_]\w*(?:\.\w+)*)(?:\s+as\s+([A-Za-z_]\w*))?/g
+  let m: RegExpExecArray | null
+  while ((m = RE_IMPORT.exec(text))) {
+    const module = m[1]
+    if (m[2]) map.set(m[2], module)
+    else map.set(module.split('.').pop()!, module)
+  }
+  const RE_FROM = /\bfrom\s+([A-Za-z_]\w*(?:\.\w+)*)\s+import\s+([^\n#]+)/g
+  while ((m = RE_FROM.exec(text))) {
+    const module = m[1]
+    for (const part of m[2].split(',')) {
+      const sm = /^\s*([A-Za-z_]\w*)(?:\s+as\s+([A-Za-z_]\w*))?\s*$/.exec(part)
+      if (sm) map.set(sm[2] ?? sm[1], module)
+    }
+  }
   return map
 }
 
@@ -524,17 +564,23 @@ function configureDocatCompletion() {
           })
         }
 
-        // 动态补全：require('模块') 的导出成员（如 math. → mathjs 成员）
-        if (language === 'javascript') {
-          const requireVars = collectRequireVars(model.getValue())
+        // 动态补全：require('模块') / import 模块的导出成员（如 math. → mathjs / math 成员）
+        {
           const lineText = model.getLineContent(position.lineNumber)
           const beforeCursor = lineText.slice(0, position.column - 1)
           const dotMatch = beforeCursor.match(/([A-Za-z_$][\w$]*)\.$/)
           if (dotMatch) {
-            // 全局 math 对应内置 mathjs（服务端包目录解析），与 require('mathjs') 同一对象
-            const moduleName = requireVars.get(dotMatch[1]) ?? (dotMatch[1] === 'math' ? 'mathjs' : null)
+            let moduleName: string | null = null
+            if (language === 'javascript') {
+              const requireVars = collectRequireVars(model.getValue())
+              // 全局 math 对应内置 mathjs（服务端包目录解析），与 require('mathjs') 同一对象
+              moduleName = requireVars.get(dotMatch[1]) ?? (dotMatch[1] === 'math' ? 'mathjs' : null)
+            } else {
+              const importVars = collectPythonImports(model.getValue())
+              moduleName = importVars.get(dotMatch[1]) ?? null
+            }
             if (moduleName) {
-              return fetchModuleMembers(moduleName).then(members => {
+              return fetchModuleMembers(moduleName, language === 'python').then(members => {
                 if (members) {
                   for (const member of members) {
                     suggestions.push({

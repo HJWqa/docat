@@ -6,6 +6,7 @@
  * 单实例：运行中再次 run 会先终止旧脚本
  */
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
 import { eventBus } from '../event/EventBus.js'
 import type { OrchDeviceManager } from '../orchestration/OrchDeviceManager.js'
@@ -24,7 +25,7 @@ interface OutgoingMessage {
 }
 
 /** Python 解释器候选（Windows 上 python3 常为商店空壳/缺失，需逐级回退） */
-interface PyCandidate {
+export interface PyCandidate {
   cmd: string
   /** 探测用参数（--version 等） */
   versionArgs: string[]
@@ -33,13 +34,87 @@ interface PyCandidate {
 }
 
 const PY_CANDIDATES: PyCandidate[] = [
-  { cmd: 'python3', versionArgs: ['--version'], runArgs: [] },
-  { cmd: 'python', versionArgs: ['--version'], runArgs: [] },
-  { cmd: 'py', versionArgs: ['-3', '--version'], runArgs: ['-3'] },
+  { cmd: 'python3', versionArgs: ['--version'], runArgs: ['-u'] },
+  { cmd: 'python', versionArgs: ['--version'], runArgs: ['-u'] },
+  { cmd: 'py', versionArgs: ['-3', '--version'], runArgs: ['-3', '-u'] },
 ]
 
 /** 已探测可用的 Python 解释器（缓存，避免每次运行都探测） */
 let pyAvailable: PyCandidate | null | undefined
+
+/** 用户配置的自定义 Python 命令（设置项 orch.pythonCommand，含可选参数，如 "C:\\Python311\\python.exe -u"） */
+let customPythonCommand = ''
+
+/** 切分自定义命令：命令 + 参数（支持双引号包裹的路径，如 "C:\\Program Files\\Python\\python.exe" -u） */
+function parseCommandLine(cmdLine: string): { cmd: string; args: string[] } {
+  const parts: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(cmdLine))) parts.push(m[1] ?? m[2] ?? m[3])
+  return { cmd: parts[0] ?? '', args: parts.slice(1) }
+}
+
+/** Python 子进程环境：强制 UTF-8 模式，避免 Windows 下按 ANSI 代码页（GBK）编码导致日志乱码 */
+export function pythonEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
+}
+
+/**
+ * 权威探测自定义 Python 命令：用与真实运行完全一致的命令/参数/环境启动运行时 shim，
+ * 检查是否发出 ready 握手。相比 `--version`，不受 launcher 语义差异影响
+ * （如 py 默认版本解析失败但 py -3 可用、Store 别名等），不会误判可用命令。
+ */
+function probePythonShim(py: PyCandidate): { ok: boolean; reason: string } {
+  const shim = fileURLToPath(new URL('./runtime-py.py', import.meta.url))
+  const r = spawnSync(py.cmd, [...py.runArgs, shim], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 4000,
+    encoding: 'utf-8',
+    env: pythonEnv(),
+  })
+  if (r.error) return { ok: false, reason: r.error.message }
+  if (r.status !== 0) return { ok: false, reason: `退出码 ${r.status ?? r.signal ?? 'unknown'}` }
+  if (!r.stdout?.includes('"ready"')) return { ok: false, reason: '运行时未返回 ready' }
+  return { ok: true, reason: '' }
+}
+
+/**
+ * 解析可用的 Python 解释器（平台自适应，结果缓存）：
+ * 优先使用自定义命令（orch.pythonCommand，shim 权威探测），探测失败回退自动候选并回调告警。
+ * 运行器与 module-members 探测共用，保证两端解释器一致。
+ */
+export function resolvePythonInterpreter(onFallbackWarn?: (msg: string) => void): PyCandidate | null {
+  if (pyAvailable !== undefined) return pyAvailable
+
+  if (customPythonCommand) {
+    const { cmd, args } = parseCommandLine(customPythonCommand)
+    const candidate: PyCandidate = { cmd, versionArgs: [...args, '--version'], runArgs: [...args, '-u'] }
+    const probe = cmd ? probePythonShim(candidate) : { ok: false, reason: '命令为空' }
+    if (probe.ok) {
+      pyAvailable = candidate
+      return pyAvailable
+    }
+    pyAvailable = null
+    onFallbackWarn?.(`自定义 Python 命令不可用（${customPythonCommand}）：${probe.reason}，已回退自动探测 python3 / python / py -3`)
+  }
+
+  if (pyAvailable === null || pyAvailable === undefined) {
+    pyAvailable = null
+    const candidates = process.platform === 'win32' ? PY_CANDIDATES : PY_CANDIDATES.slice(0, 1)
+    for (const c of candidates) {
+      try {
+        const r = spawnSync(c.cmd, c.versionArgs, { stdio: 'ignore', timeout: 5000, env: pythonEnv() })
+        if (!r.error && r.status === 0) {
+          pyAvailable = c
+          break
+        }
+      } catch {
+        // 继续下一个候选
+      }
+    }
+  }
+  return pyAvailable
+}
 
 export class RuntimeManager {
   private manager: OrchDeviceManager
@@ -80,23 +155,17 @@ export class RuntimeManager {
     return `${base}runtime-${language === 'python' ? 'py.py' : 'js.mjs'}`
   }
 
-  /** 探测可用的 Python 解释器（平台自适应，结果缓存） */
+  /** 设置自定义 Python 命令（设置变更时调用；清空探测缓存使配置即时生效） */
+  setPythonCommand(cmd: string) {
+    const next = String(cmd ?? '').trim()
+    if (next === customPythonCommand) return
+    customPythonCommand = next
+    pyAvailable = undefined
+  }
+
+  /** 探测可用的 Python 解释器（自定义命令优先，失败回退自动候选并告警） */
   private resolvePython(): PyCandidate | null {
-    if (pyAvailable !== undefined) return pyAvailable
-    pyAvailable = null
-    const candidates = process.platform === 'win32' ? PY_CANDIDATES : PY_CANDIDATES.slice(0, 1)
-    for (const c of candidates) {
-      try {
-        const r = spawnSync(c.cmd, c.versionArgs, { stdio: 'ignore', timeout: 5000 })
-        if (!r.error && r.status === 0) {
-          pyAvailable = c
-          break
-        }
-      } catch {
-        // 继续下一个候选
-      }
-    }
-    return pyAvailable
+    return resolvePythonInterpreter((msg) => this.broadcastLog('error', msg))
   }
 
   private sendToChild(msg: OutgoingMessage) {
@@ -129,7 +198,8 @@ export class RuntimeManager {
         if (!py) {
           return { ok: false, error: '未找到 Python 解释器（python3 / python / py -3 均不可用），请安装 Python 并加入 PATH 后重试' }
         }
-        child = spawn(py.cmd, [...py.runArgs, this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true })
+        // env 强制 UTF-8（避免 Windows GBK 管道编码导致日志乱码）
+        child = spawn(py.cmd, [...py.runArgs, this.shimPath('python')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, env: pythonEnv() })
       } else {
         child = spawn(process.execPath, [this.shimPath('javascript')], { stdio: ['pipe', 'pipe', 'pipe'], detached: true })
       }
@@ -144,8 +214,12 @@ export class RuntimeManager {
       this.broadcastLog('error', '脚本启动超时')
     }, 3000)
 
+    // StringDecoder 处理跨 chunk 的多字节字符，避免 UTF-8 字符被截断产生乱码（�）
+    const stdoutDecoder = new StringDecoder('utf-8')
+    const stderrDecoder = new StringDecoder('utf-8')
+
     child.stdout.on('data', (chunk: Buffer) => {
-      this.buffer += chunk.toString('utf-8')
+      this.buffer += stdoutDecoder.write(chunk)
       let idx: number
       while ((idx = this.buffer.indexOf('\n')) >= 0) {
         const line = this.buffer.slice(0, idx)
@@ -154,9 +228,15 @@ export class RuntimeManager {
       }
     })
 
+    let stderrBuffer = ''
     child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8').trim()
-      if (text) this.broadcastLog('error', text)
+      stderrBuffer += stderrDecoder.write(chunk)
+      let idx: number
+      while ((idx = stderrBuffer.indexOf('\n')) >= 0) {
+        const line = stderrBuffer.slice(0, idx).trim()
+        stderrBuffer = stderrBuffer.slice(idx + 1)
+        if (line) this.broadcastLog('error', line)
+      }
     })
 
     child.on('error', (err) => {
@@ -169,6 +249,11 @@ export class RuntimeManager {
 
     child.on('exit', (code) => {
       this.clearFailTimer()
+      // 冲刷剩余缓冲（无换行结尾的尾部输出）
+      const stdoutRest = this.buffer + stdoutDecoder.end()
+      if (stdoutRest.trim()) this.handleChildMessage(stdoutRest.trim())
+      const stderrRest = (stderrBuffer + stderrDecoder.end()).trim()
+      if (stderrRest) this.broadcastLog('error', stderrRest)
       this.child = null
       this.manager.setRuntimeBridge(null)
       if (!this.stoppedByUser) {
