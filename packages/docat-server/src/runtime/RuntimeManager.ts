@@ -80,6 +80,28 @@ function probePythonShim(py: PyCandidate): { ok: boolean; reason: string } {
 }
 
 /**
+ * 解析 Windows py 启动器背后的真实解释器路径。
+ * py.exe 会再派生子进程 python.exe（CREATE_NO_WINDOW 不向下传递），
+ * 该孙进程作为控制台程序无控制台可继承时会弹出可见命令提示符窗口；
+ * 直接解析出 sys.executable 后用 python.exe 本体运行即可避免。
+ */
+function resolvePyExecutable(py: PyCandidate): PyCandidate {
+  if (process.platform !== 'win32' || py.cmd !== 'py') return py
+  const r = spawnSync(py.cmd, [...py.runArgs, '-c', 'import sys; print(sys.executable)'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 5000,
+    encoding: 'utf-8',
+    env: pythonEnv(),
+    windowsHide: true,
+  })
+  const exe = r.status === 0 ? String(r.stdout ?? '').trim().split(/\r?\n/)[0] : ''
+  if (!exe) return py
+  // 已定位真实解释器，丢弃启动器专用版本参数（如 -3 / -3.12），保留解释器参数
+  const args = py.runArgs.filter(a => !/^-3(\.\d+)?$/.test(a))
+  return { cmd: exe, versionArgs: [], runArgs: args.length ? args : ['-u'] }
+}
+
+/**
  * 解析可用的 Python 解释器（平台自适应，结果缓存）：
  * 优先使用自定义命令（orch.pythonCommand，shim 权威探测），探测失败回退自动候选并回调告警。
  * 运行器与 module-members 探测共用，保证两端解释器一致。
@@ -92,7 +114,7 @@ export function resolvePythonInterpreter(onFallbackWarn?: (msg: string) => void)
     const candidate: PyCandidate = { cmd, versionArgs: [...args, '--version'], runArgs: [...args, '-u'] }
     const probe = cmd ? probePythonShim(candidate) : { ok: false, reason: '命令为空' }
     if (probe.ok) {
-      pyAvailable = candidate
+      pyAvailable = resolvePyExecutable(candidate)
       return pyAvailable
     }
     pyAvailable = null
@@ -106,7 +128,7 @@ export function resolvePythonInterpreter(onFallbackWarn?: (msg: string) => void)
       try {
         const r = spawnSync(c.cmd, c.versionArgs, { stdio: 'ignore', timeout: 5000, env: pythonEnv(), windowsHide: true })
         if (!r.error && r.status === 0) {
-          pyAvailable = c
+          pyAvailable = resolvePyExecutable(c)
           break
         }
       } catch {
