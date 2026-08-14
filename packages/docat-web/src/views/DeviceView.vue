@@ -2022,7 +2022,7 @@ const isAdminUser = computed(() => userStore.currentUser?.role === 'admin')
 
 /** 危险操作确认（复用 Toast actions，常驻直至用户选择） */
 function confirmAction(message: string, onConfirm: () => void | Promise<void>, confirmLabel = '确认删除') {
-  toastRef.value?.error(message, {
+  toastRef.value?.info(message, {
     duration: 0,
     actions: [
       { label: '取消', handler: () => {} },

@@ -362,7 +362,7 @@ function saveCurrent() {
     )
     if (!res.ok) { nameErr.value = res.error ?? '保存失败'; return }
     if (res.overwritten) {
-      toastRef.value?.error(`姿态 "${newName.value}" 已覆盖`, {
+      toastRef.value?.info(`姿态 "${newName.value}" 已覆盖`, {
         duration: 10000,
         action: { label: '撤销', handler: () => { void undoPoseOverwrite().then(ok => { if (ok) toastRef.value?.info('已恢复原姿态') }) } },
       })
@@ -442,7 +442,7 @@ async function saveEditPose() {
     return
   }
   if (res.overwritten) {
-    toastRef.value?.error(`姿态 "${p.name}" 已更新`, {
+    toastRef.value?.info(`姿态 "${p.name}" 已更新`, {
       duration: 10000,
       action: { label: '撤销', handler: () => { void undoPoseOverwrite().then(ok => { if (ok) toastRef.value?.info('已恢复原姿态') }) } },
     })
@@ -509,7 +509,7 @@ async function overwriteFromCurrent(p: OrchPose) {
     { x: currentPose.value[0], y: currentPose.value[1], z: currentPose.value[2], rx: currentPose.value[3], ry: currentPose.value[4], rz: currentPose.value[5] }
   )
   if (res.ok && res.overwritten) {
-    toastRef.value?.error(`姿态 "${p.name}" 已覆盖为当前姿态`, {
+    toastRef.value?.info(`姿态 "${p.name}" 已覆盖为当前姿态`, {
       duration: 10000,
       action: { label: '撤销', handler: () => { void undoPoseOverwrite().then(ok => { if (ok) toastRef.value?.info('已恢复原姿态') }) } },
     })
