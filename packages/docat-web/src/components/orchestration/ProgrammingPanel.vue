@@ -64,7 +64,7 @@ const MOCK_PROJECTS: Array<{ name: string; language: string }> = [
   { name: 'calibrate', language: 'python' },
 ]
 
-const deviceId = ref('')
+const deviceId = ref(loadSavedDevice())
 const projectName = ref('')
 const projects = ref<ControllerProjectSummary[]>([])
 const loadingProjects = ref(false)
@@ -78,7 +78,25 @@ const canRun = computed(() => Boolean(deviceId.value && projectName.value))
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-// ─── 记住上次选中的项目（按设备，前端 localStorage）──
+// ─── 记住上次选中的设备 + 项目（按设备，前端 localStorage）──
+
+const DEVICE_KEY = 'docat.orchestration.prog-device'
+
+function loadSavedDevice(): string {
+  try {
+    return localStorage.getItem(DEVICE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function saveDevice(id: string) {
+  try {
+    localStorage.setItem(DEVICE_KEY, id)
+  } catch {
+    // ignore
+  }
+}
 
 const SEL_KEY = 'docat.orchestration.prog-selection'
 
@@ -264,13 +282,24 @@ function stopPoll() {
   }
 }
 
-// 设备列表就绪（含刷新页面后异步加载完成）→ 自动选中第一个设备并加载缓存项目
+let devicesReady = false
+
+// 设备列表就绪（含刷新页面后异步加载完成）→ 恢复记住的设备（已删除则退回第一个）并加载缓存项目
 watch(() => devices.value.length, (len) => {
-  if (!deviceId.value && len > 0) {
-    deviceId.value = devices.value[0].id
-    void loadRecentProjects()
+  if (len === 0) { devicesReady = false; return }
+  if (devicesReady) return
+  devicesReady = true
+  if (deviceId.value && !devices.value.some(d => d.id === deviceId.value)) {
+    deviceId.value = '' // 记住的设备已删除，退回默认
   }
+  if (!deviceId.value) {
+    deviceId.value = devices.value[0]?.id ?? ''
+  }
+  void loadRecentProjects()
 }, { immediate: true })
+
+// 记住设备选择（含恢复/自动选中，user 手动切换经 onDeviceChange）
+watch(deviceId, (id) => saveDevice(id))
 
 onBeforeUnmount(stopPoll)</script>
 

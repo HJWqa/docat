@@ -95,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import * as api from '../../services/api'
 import { deviceStore } from '../../stores/deviceStore'
 import {
@@ -115,7 +115,47 @@ import Toast from '../Toast.vue'
 
 const toastRef = ref<InstanceType<typeof Toast>>()
 
-const target = ref('')
+// ─── 记住上次选中的目标设备（motion:/real: 前缀，localStorage）──
+
+const TARGET_KEY = 'docat.orchestration.pose-target'
+
+function loadSavedTarget(): string {
+  try {
+    return localStorage.getItem(TARGET_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+const target = ref(loadSavedTarget())
+
+watch(target, (v) => {
+  try {
+    localStorage.setItem(TARGET_KEY, v)
+  } catch {
+    // ignore
+  }
+})
+
+/** 校验记住的目标设备是否仍存在；列表未就绪时无法判断，等下一次变化再校验 */
+function validateTarget() {
+  if (!target.value) return
+  if (target.value.startsWith('motion:')) {
+    const id = target.value.slice(7)
+    if (!id || !orchStore.devices.some(d => d.id === id)) target.value = ''
+    return
+  }
+  if (target.value.startsWith('real:')) {
+    const id = target.value.slice(5)
+    if (!id || !(id in deviceStore.devices)) target.value = ''
+    return
+  }
+  target.value = ''
+}
+
+// 列表已就绪立即校验；异步加载时等首次变化（watch 在 computeds 声明后注册）
+validateTarget()
+
 const reading = ref(false)
 const hasRead = ref(false)
 const currentPose = ref<number[]>([0, 0, 0, 0, 0, 0])
@@ -137,6 +177,9 @@ const allRealDevices = computed(() => {
   }
   return out.sort((a, b) => Number(b.connected) - Number(a.connected))
 })
+
+// 记住的目标设备失效校验：列表变化时检查；先于 computeds 的立即校验在异步加载前为空表，等首次变化
+watch([motionDevices, allRealDevices], validateTarget)
 
 function targetMotionId(): string | null {
   return target.value.startsWith('motion:') ? target.value.slice(7) : null
