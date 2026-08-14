@@ -299,8 +299,10 @@ function initEditor() {
     lineHeight: 21,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
-    tabSize: 2,
+    tabSize: fileLanguage.value === 'python' ? 4 : 2,
     insertSpaces: true,
+    // 不随文件内容自动探测缩进：python 固定 4 格 / JS 固定 2 格，与补全 snippet 一致
+    detectIndentation: false,
     wordWrap: 'on',
     readOnly: false,
     quickSuggestions: { other: true, comments: false, strings: false },
@@ -515,7 +517,17 @@ function configureDocatCompletion() {
   monaco.languages.setMonarchTokensProvider('javascript', withDocatGlobals(jsMonarch.language))
   monaco.languages.setLanguageConfiguration('javascript', jsMonarch.conf)
   monaco.languages.setMonarchTokensProvider('python', withDocatGlobals(pyMonarch.language))
-  monaco.languages.setLanguageConfiguration('python', pyMonarch.conf)
+  // python 补全 onEnterRules：else/elif/except/finally 需先于默认 Indent 规则匹配（Outdent 取消缩进）
+  monaco.languages.setLanguageConfiguration('python', {
+    ...pyMonarch.conf,
+    onEnterRules: [
+      {
+        beforeText: /^\s*(?:elif|else|except|finally)\b.*:\s*(?:#.*)?$/,
+        action: { indentAction: monaco.languages.IndentAction.Outdent },
+      },
+      ...(pyMonarch.conf.onEnterRules ?? []),
+    ],
+  })
 
   for (const language of ['javascript', 'python'] as const) {
     const catalog = language === 'javascript' ? DOCAT_API_JS : DOCAT_API_PY
@@ -666,12 +678,23 @@ watch(() => orchStore.logs[orchStore.logs.length - 1], (last) => {
   markScriptError(last.line, last.column, last.text)
 })
 
+/** 按语言应用缩进宽度（python 4 格 / JS 2 格，与补全 snippet 及对齐线一致） */
+function applyLanguageTabSize() {
+  if (!editor) return
+  const tabSize = fileLanguage.value === 'python' ? 4 : 2
+  editor.updateOptions({ tabSize })
+  editor.getModel()?.updateOptions({ tabSize })
+}
+
 function syncEditor() {
   nextTick(() => {
     initEditor()
     if (!editor) return
     const model = editor.getModel()
-    if (model) monaco.editor.setModelLanguage(model, fileLanguage.value)
+    if (model) {
+      monaco.editor.setModelLanguage(model, fileLanguage.value)
+      applyLanguageTabSize()
+    }
     if (editor.getValue() !== fileContent.value) {
       syncing = true
       editor.setValue(fileContent.value)
