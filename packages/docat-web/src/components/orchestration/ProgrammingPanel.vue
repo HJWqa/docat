@@ -29,10 +29,10 @@
       </div>
 
       <div class="prog-actions">
-        <button class="btn btn-success btn-sm flex-1" :disabled="!canRun || running" @click="doRun">
+        <button class="btn btn-success btn-sm flex-1" :disabled="!canRun || starting || (running && !stopping)" @click="doRun" title="启动所选项目 (Ctrl+B)">
           {{ starting ? '启动中...' : '▶ 运行' }}
         </button>
-        <button class="btn btn-danger btn-sm flex-1" :disabled="!deviceId || stopping" @click="doStop">
+        <button class="btn btn-danger btn-sm flex-1" :disabled="!deviceId || stopping" @click="doStop" title="停止项目 (Ctrl+M)">
           {{ stopping ? '停止中...' : '⏹ 停止' }}
         </button>
       </div>
@@ -45,6 +45,8 @@
         <span v-if="runtime?.runningProject" class="running-project">{{ runtime.runningProject }}</span>
       </div>
     </div>
+
+    <Toast ref="toastRef" />
   </section>
 </template>
 
@@ -56,6 +58,7 @@ import { deviceStore } from '../../stores/deviceStore'
 import { runtimeStore } from '../../stores/runtimeStore'
 import { loadWorkspace } from '../../stores/workspaceState'
 import { addLog, isOrchMockMode } from '../../stores/orchestrationStore'
+import Toast from '../Toast.vue'
 
 const MOCK_PROJECTS: Array<{ name: string; language: string }> = [
   { name: 'robot_test', language: 'lua' },
@@ -70,6 +73,7 @@ const projects = ref<ControllerProjectSummary[]>([])
 const loadingProjects = ref(false)
 const starting = ref(false)
 const stopping = ref(false)
+const toastRef = ref<InstanceType<typeof Toast>>()
 
 const devices = computed(() => Object.values(deviceStore.devices))
 const runtime = computed(() => deviceId.value ? runtimeStore.getState(deviceId.value) : null)
@@ -219,8 +223,18 @@ async function refreshProjects() {
   }
 }
 
+/** 启动序号：停止按下时自增，作废在途的启动请求（响应回来不再置为运行） */
+let startSeq = 0
+/** 停止序号：运行按下时自增，作废在途的停止请求（响应回来不再置为停止） */
+let stopSeq = 0
+
 async function doRun() {
-  if (!deviceId.value || !projectName.value || running.value) return
+  if (!deviceId.value || !projectName.value) return
+  // 已在运行且无在途停止：不允许重复启动；「停止中」可打断（作废在途停止）
+  if (running.value && !stopping.value) return
+  stopSeq++
+  stopping.value = false
+  const seq = ++startSeq
   starting.value = true
   try {
     if (isOrchMockMode()) {
@@ -232,6 +246,8 @@ async function doRun() {
       return
     }
     const res = await api.runDeviceProject(deviceId.value, projectName.value)
+    // 启动期间被「停止」打断：忽略迟到的启动响应
+    if (seq !== startSeq) return
     if (res.success) {
       await runtimeStore.syncFromDevice(deviceId.value)
       addLog('编程', 'system', `已启动 ${projectName.value}`)
@@ -239,12 +255,16 @@ async function doRun() {
       addLog('编程', 'error', `运行失败：${res.error?.message}`)
     }
   } finally {
-    starting.value = false
+    if (seq === startSeq) starting.value = false
   }
 }
 
 async function doStop() {
   if (!deviceId.value) return
+  // 立即结束「启动中」状态，并作废在途的启动请求
+  startSeq++
+  starting.value = false
+  const seq = ++stopSeq
   stopping.value = true
   try {
     if (isOrchMockMode()) {
@@ -255,6 +275,8 @@ async function doStop() {
       return
     }
     const res = await api.debuggerStop(deviceId.value)
+    // 停止期间被「运行」打断：忽略迟到的停止响应，不把新启动的项目置为停止
+    if (seq !== stopSeq) return
     if (res.success) {
       runtimeStore.setRunning(deviceId.value, false)
       runtimeStore.clearLine(deviceId.value)
@@ -263,7 +285,7 @@ async function doStop() {
       addLog('编程', 'error', `停止失败：${res.error?.message}`)
     }
   } finally {
-    stopping.value = false
+    if (seq === stopSeq) stopping.value = false
   }
 }
 
@@ -274,6 +296,39 @@ function onProjectChange() {
     addLog('编程', 'system', `选中项目 ${projectName.value}（已记住选择）`)
   }
 }
+
+/** Ctrl+B / Cmd+B：启动最近项目（无设备/无项目/已在运行 → toast 反馈） */
+function runRecent() {
+  if (!deviceId.value) {
+    toastRef.value?.info('请先选择设备')
+    return
+  }
+  if (!projectName.value) {
+    toastRef.value?.info('暂无可用项目，请先在编程面板选择项目')
+    return
+  }
+  if (running.value && !stopping.value) {
+    toastRef.value?.info('项目已在运行')
+    return
+  }
+  void doRun()
+}
+
+/** Ctrl+M / Cmd+M：停止当前项目（无设备/未运行 → toast 反馈） */
+function stopCurrent() {
+  if (!deviceId.value) {
+    toastRef.value?.info('请先选择设备')
+    return
+  }
+  if (!running.value) {
+    toastRef.value?.info('项目未在运行')
+    return
+  }
+  void doStop()
+}
+
+// 快捷键由父组件 SettingsPanel 统一监听（tab 未打开时自动切换），此处仅提供动作
+defineExpose({ runRecent, stopCurrent })
 
 function stopPoll() {
   if (pollTimer) {

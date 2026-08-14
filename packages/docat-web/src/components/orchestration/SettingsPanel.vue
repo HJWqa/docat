@@ -212,19 +212,19 @@
 
       <!-- 姿态 -->
       <div v-else-if="orchStore.settingsTab === 'pose'" class="settings-section">
-        <PoseTab />
+        <PoseTab ref="poseTabRef" />
       </div>
 
       <!-- 编程 -->
       <div v-else class="settings-section">
-        <ProgrammingPanel />
+        <ProgrammingPanel ref="programmingTabRef" />
       </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deviceStore } from '../../stores/deviceStore'
 import { orchListSerialPorts } from '../../services/orchApi'
 import {
@@ -255,6 +255,8 @@ const realDevices = computed(() => Object.values(deviceStore.devices))
 const ipHistory = ref<string[]>([])
 const serialPorts = ref<string[]>([])
 const loadingPorts = ref(false)
+const poseTabRef = ref<InstanceType<typeof PoseTab>>()
+const programmingTabRef = ref<InstanceType<typeof ProgrammingPanel>>()
 
 const MOCK_SERIAL_PORTS = ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyACM0', '/dev/ttyS0', 'COM3', 'COM5']
 
@@ -277,7 +279,47 @@ async function loadSerialPorts() {
 onMounted(() => {
   ipHistory.value = getIpHistory()
   void loadSerialPorts()
+  window.addEventListener('keydown', onGlobalKeydown)
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
+
+/**
+ * 全局快捷键（window 级，姿态/编程 tab 未打开时自动切换）：
+ * Ctrl+Shift+. 切「姿态」tab + 添加当前姿态
+ * Ctrl+B      切「编程」tab + 启动最近项目
+ * Ctrl+M      切「编程」tab + 停止项目
+ * 注意按 Shift 后 e.key 为 '>'，须用 e.code 判断。
+ */
+async function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
+  const mod = e.ctrlKey || e.metaKey
+  if (!mod || e.altKey) return
+  if (e.shiftKey) {
+    if (e.code === 'Period') {
+      e.preventDefault()
+      orchStore.settingsTab = 'pose'
+      await nextTick()
+      await poseTabRef.value?.addCurrentPose()
+    }
+    return
+  }
+  if (e.code === 'KeyB') {
+    e.preventDefault()
+    orchStore.settingsTab = 'programming'
+    await nextTick()
+    programmingTabRef.value?.runRecent()
+    return
+  }
+  if (e.code === 'KeyM') {
+    e.preventDefault()
+    orchStore.settingsTab = 'programming'
+    await nextTick()
+    programmingTabRef.value?.stopCurrent()
+  }
+}
 
 const editForm = reactive({
   name: '',

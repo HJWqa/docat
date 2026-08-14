@@ -36,14 +36,14 @@
             连接失败<span class="filter-count">{{ connectFailureCount }}</span>
           </button>
         </div>
-        <button class="btn btn-secondary btn-sm log-clear" @click="clearLogs()">清空</button>
+        <button class="btn btn-secondary btn-sm log-clear" @click="clearLogs()" title="清空日志 (Ctrl+Shift+L)">清空</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { clearLogs, orchStore, type LogDirection } from '../../stores/orchestrationStore'
 
 const filters: Array<{ key: LogDirection; label: string }> = [
@@ -140,6 +140,25 @@ function arrow(dir: LogDirection): string {
   if (dir === 'recv') return '←'
   return '·'
 }
+
+/** Ctrl+Shift+L / Cmd+Shift+L：清空日志 */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
+  const mod = e.ctrlKey || e.metaKey
+  if (!mod || !e.shiftKey || e.altKey) return
+  if (e.key.toLowerCase() === 'l') {
+    e.preventDefault()
+    clearLogs()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
 </script>
 
 <style scoped>

@@ -1,17 +1,17 @@
 <template>
   <div class="script-panel">
     <div class="script-toolbar">
-      <button class="btn btn-success btn-sm" :disabled="!hasContent || running" @click="runScriptAction" title="运行脚本">
+      <button class="btn btn-success btn-sm" :disabled="!hasContent || running" @click="runScriptAction" title="运行脚本 (Ctrl+Enter / F9)">
         ▶ 运行
       </button>
-      <button class="btn btn-secondary btn-sm" :disabled="!hasContent" @click="rerunScript" title="终止当前并重新运行">
+      <button class="btn btn-secondary btn-sm" :disabled="!hasContent" @click="rerunScript" title="终止当前并重新运行 (Ctrl+Enter)">
         ↻ 重新运行
       </button>
-      <button class="btn btn-danger btn-sm" :disabled="!running" @click="stopScript" title="终止脚本">
+      <button class="btn btn-danger btn-sm" :disabled="!running" @click="stopScript" title="终止脚本 (Ctrl+Shift+Enter / F6)">
         ⏹ 终止
       </button>
       <span class="toolbar-sep" />
-      <button v-if="!isMock" class="btn btn-primary btn-sm" :disabled="!dirty || saving" @click="saveFile" title="保存到服务端">
+      <button v-if="!isMock" class="btn btn-primary btn-sm" :disabled="!dirty || saving" @click="saveFile" title="保存到服务端 (Ctrl+S)">
         {{ saving ? '保存中...' : '💾 保存' }}
       </button>
       <button class="btn btn-secondary btn-sm" :disabled="!fileName" @click="reloadFile" title="忽略当前修改，从文件重新读取">
@@ -47,6 +47,11 @@
           {{ openingEditor ? '…' : 'VSCode' }}
         </button>
       </template>
+      <span class="toolbar-hints" title="全局快捷键（编辑器内/外均生效）">
+        <span class="kbd-hint"><kbd>Ctrl+Enter</kbd> 运行</span>
+        <span class="kbd-hint"><kbd>Ctrl+Shift+Enter</kbd> 终止</span>
+        <span class="kbd-hint"><kbd>Ctrl+S</kbd> 保存</span>
+      </span>
     </div>
 
     <Transition name="fade">
@@ -311,11 +316,15 @@ function initEditor() {
   })
   // Ctrl+S / Cmd+S：保存（真实模式写回服务端）
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-    if (isMock) {
-      toastRef.value?.info('mock 模式无服务端，无需保存')
-      return
-    }
-    if (dirty.value) void saveFile()
+    handleSaveShortcut()
+  })
+  // Ctrl+Enter / Cmd+Enter：运行/重新运行（覆盖 Monaco 默认的 insertLineAfter）
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+    void rerunScript()
+  })
+  // Ctrl+Shift+Enter / Cmd+Shift+Enter：终止（覆盖 Monaco 默认的 insertLineBefore）
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
+    stopScript()
   })
   resizeObserver = new ResizeObserver(() => editor?.layout())
   resizeObserver.observe(editorContainer.value)
@@ -822,6 +831,39 @@ async function reloadFile() {
 
 // ─── 运行控制 ──────────────────────────────────────
 
+/** Ctrl+S / Cmd+S：保存（真实模式写回服务端；mock 模式提示） */
+function handleSaveShortcut() {
+  if (isMock) {
+    toastRef.value?.info('mock 模式无服务端，无需保存')
+    return
+  }
+  if (dirty.value) void saveFile()
+}
+
+/**
+ * 全局快捷键（window 级）：
+ * Ctrl+Enter 运行/重新运行 · Ctrl+Shift+Enter 终止 · Ctrl+S 保存 · F9 运行 · F6 终止
+ * 编辑器聚焦时 Ctrl+Enter / Ctrl+Shift+Enter / Ctrl+S 由 Monaco addCommand 处理（已 preventDefault），此处跳过；
+ * F9 / F6 在 Monaco 无默认绑定，冒泡到此统一处理。
+ */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
+  if (e.key === 'F9') { e.preventDefault(); void rerunScript(); return }
+  if (e.key === 'F6') { e.preventDefault(); stopScript(); return }
+  const mod = e.ctrlKey || e.metaKey
+  if (!mod || e.altKey) return
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    if (e.shiftKey) stopScript()
+    else void rerunScript()
+    return
+  }
+  if (e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    handleSaveShortcut()
+  }
+}
+
 async function runScriptAction() {
   if (running.value) return
   if (!fileName.value) {
@@ -986,6 +1028,7 @@ async function restoreLastScript() {
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown)
   initEditor()
   if (isMock) {
     void restoreLastScript()
@@ -995,6 +1038,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
   stopScript()
   stopFollow()
   unsubScriptChange?.()
@@ -1011,6 +1055,13 @@ onBeforeUnmount(() => {
 .script-panel { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .script-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .toolbar-sep { width: 1px; height: 18px; background: var(--border-bright); margin: 0 4px; }
+.toolbar-hints { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.kbd-hint { display: inline-flex; align-items: center; gap: 3px; font-size: 0.6rem; color: var(--text-muted); }
+.kbd-hint kbd {
+  font-family: var(--font-mono); font-size: 0.58rem; padding: 1px 5px;
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px;
+  background: var(--void-deep); color: var(--text-secondary); white-space: nowrap;
+}
 .file-select {
   min-width: 180px; padding: 5px 8px; font-family: var(--font-mono); font-size: 0.68rem;
   background: var(--void-deep); border: 1px solid var(--border); border-radius: var(--radius);

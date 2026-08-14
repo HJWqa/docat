@@ -25,7 +25,7 @@
     <div class="current-card">
       <div class="current-header">
         <span class="current-title">当前姿态</span>
-        <button class="btn btn-secondary btn-sm" :disabled="!target || reading" @click="readCurrent">
+        <button class="btn btn-secondary btn-sm" :disabled="!target || reading" @click="readCurrent" title="读取当前姿态 (Ctrl+Shift+.)">
           {{ reading ? '读取中...' : '读取' }}
         </button>
       </div>
@@ -35,8 +35,8 @@
         </span>
       </div>
       <div class="save-row">
-        <input v-model.trim="newName" class="save-name" placeholder="姿态名（变量命名规则）" spellcheck="false"
-          :class="{ 'save-name--error': nameErr }" @input="nameErr = ''" />
+        <input ref="nameInputRef" v-model.trim="newName" class="save-name" placeholder="姿态名（变量命名规则）" spellcheck="false"
+          :class="{ 'save-name--error': nameErr }" @input="nameErr = ''" @keyup.enter="saveCurrent" />
         <select v-model="newType" class="save-type">
           <option value="cartesian">位姿</option>
           <option value="joint">关节角</option>
@@ -55,7 +55,7 @@
         </div>
       </div>
       <p v-if="nameErr" class="save-error">{{ nameErr }}</p>
-      <p class="save-hint">同名再次保存将覆盖，10 秒内可撤销；名称供脚本 poses.get() 调用</p>
+      <p class="save-hint">同名再次保存将覆盖，10 秒内可撤销；名称供脚本 poses.get() 调用。快捷键 Ctrl+Shift+.：读取当前姿态并聚焦名称框，输入名称后回车保存</p>
     </div>
 
     <!-- 姿态列表 -->
@@ -95,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import * as api from '../../services/api'
 import { deviceStore } from '../../stores/deviceStore'
 import {
@@ -114,6 +114,7 @@ import {
 import Toast from '../Toast.vue'
 
 const toastRef = ref<InstanceType<typeof Toast>>()
+const nameInputRef = ref<HTMLInputElement | null>(null)
 
 // ─── 记住上次选中的目标设备（motion:/real: 前缀，localStorage）──
 
@@ -188,8 +189,9 @@ function targetRealId(): string | null {
   return target.value.startsWith('real:') ? target.value.slice(5) : null
 }
 
-async function readCurrent() {
-  if (!target.value) return
+/** 读取当前姿态；成功返回 true，失败返回 false（失败时已 toast 原因） */
+async function readCurrent(): Promise<boolean> {
+  if (!target.value) return false
   reading.value = true
   try {
     const motionId = targetMotionId()
@@ -197,22 +199,22 @@ async function readCurrent() {
       const pose = getMotionPose(motionId)
       if (!pose) {
         toastRef.value?.error('Docat Motion 未连接，无法读取')
-        return
+        return false
       }
       currentPose.value = [...pose]
       currentJoints.value = [0, 0, 0, 0, 0, 0]
     } else {
       const realId = targetRealId()
-      if (!realId) return
+      if (!realId) return false
       const res = await api.getDeviceStatus(realId)
       if (!res.data?.connected) {
         toastRef.value?.error('设备未连接，无法读取姿态')
-        return
+        return false
       }
       const state = res.data.state as { pose?: { x?: number; y?: number; z?: number; rx?: number; ry?: number; rz?: number }; joints?: Record<string, number> } | null
       if (!state || !state.pose) {
         toastRef.value?.error('读取姿态失败：无实时位姿')
-        return
+        return false
       }
       currentPose.value = [state.pose.x ?? 0, state.pose.y ?? 0, state.pose.z ?? 0, state.pose.rx ?? 0, state.pose.ry ?? 0, state.pose.rz ?? 0]
       const j = state.joints
@@ -220,10 +222,31 @@ async function readCurrent() {
     }
     hasRead.value = true
     addLog('姿态', 'system', '已读取当前姿态')
+    return true
   } finally {
     reading.value = false
   }
 }
+
+/**
+ * Ctrl+Shift+. / Cmd+Shift+.：添加当前姿态 —
+ * 读取目标设备当前姿态 → 聚焦名称输入框并全选 → 输入名称后回车保存。
+ * 快捷键由父组件 SettingsPanel 统一监听（姿态 tab 未打开时自动切换），此处仅提供动作。
+ */
+async function addCurrentPose() {
+  if (!target.value) {
+    toastRef.value?.info('请先选择目标设备')
+    return
+  }
+  const ok = await readCurrent()
+  if (!ok) return
+  await nextTick()
+  nameInputRef.value?.focus()
+  nameInputRef.value?.select()
+  toastRef.value?.info('已读取当前姿态 — 输入名称后回车保存')
+}
+
+defineExpose({ addCurrentPose })
 
 function saveCurrent() {
   const err = identifierError(newName.value, [])
