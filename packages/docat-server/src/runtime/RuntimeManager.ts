@@ -150,6 +150,8 @@ export class RuntimeManager {
   private buffer = ''
   private stoppedByUser = false
   private failTimer: ReturnType<typeof setTimeout> | null = null
+  /** 启动阶段（ready 前）子进程 stdout 缓冲，超时诊断用 */
+  private startupOutput = ''
   /** 脚本 require 的解析基准目录（服务端脚本目录，可被「通用」设置修改） */
   private requireBase = ''
   /** 浮点拼接小数位数（「通用」设置，init 时下发运行时） */
@@ -217,6 +219,7 @@ export class RuntimeManager {
     this.language = req.language
     this.fileName = req.fileName
     this.pendingContent = req.content
+    this.startupOutput = ''
     this.decimalDigits = Number.isFinite(Number(req.decimalDigits)) ? Math.min(12, Math.max(0, Math.floor(Number(req.decimalDigits)))) : 6
 
     let child: ChildProcessWithoutNullStreams
@@ -248,17 +251,19 @@ export class RuntimeManager {
     }
 
     this.failTimer = setTimeout(() => {
-      // 3s 内未 ready 视为启动失败
+      // 10s 内未 ready 视为启动失败（正常路径 <1s；慢盘/杀软环境下留足余量）
       this.failTimer = null
       this.killChild()
-      this.broadcastLog('error', '脚本启动超时')
-    }, 3000)
+      const out = this.startupOutput.trim().slice(-500)
+      this.broadcastLog('error', out ? `脚本启动超时（子进程输出：${out}）` : '脚本启动超时')
+    }, 10000)
 
     // StringDecoder 处理跨 chunk 的多字节字符，避免 UTF-8 字符被截断产生乱码（�）
     const stdoutDecoder = new StringDecoder('utf-8')
     const stderrDecoder = new StringDecoder('utf-8')
 
     child.stdout.on('data', (chunk: Buffer) => {
+      if (this.startupOutput.length < 4000) this.startupOutput += chunk.toString('utf8')
       this.buffer += stdoutDecoder.write(chunk)
       let idx: number
       while ((idx = this.buffer.indexOf('\n')) >= 0) {
@@ -326,6 +331,7 @@ export class RuntimeManager {
     switch (msg.type) {
       case 'ready': {
         this.clearFailTimer()
+        this.startupOutput = ''
         // 推送姿态/设备快照 + 脚本内容（init 先于 script，子进程按序处理）
         this.sendToChild({ type: 'init', poses: this.manager.listPoses(), devices: this.manager.list().map(d => ({ name: d.name, connected: d.connected })), requireBase: this.requireBase || undefined, decimalDigits: this.decimalDigits })
         this.sendToChild({ type: 'script', content: this.pendingContent })

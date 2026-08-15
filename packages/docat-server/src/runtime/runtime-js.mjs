@@ -39,12 +39,18 @@ let scriptBaseDir = null
 /** 回退基准：服务端包目录（docat-server 的 dependencies，如 mathjs） */
 const requireFromServer = createRequire(import.meta.url)
 
-/** 内置 mathjs：脚本可直接用全局 math（如 math.add(1,2)），无需 require */
-let mathjs = null
-try {
-  mathjs = requireFromServer('mathjs')
-} catch {
-  // mathjs 未安装时忽略，脚本使用 math 会得到明确的 undefined 错误
+/**
+ * 内置 mathjs：脚本可直接用全局 math（如 math.add(1,2)），无需 require。
+ * 懒加载（首次执行用户脚本时）：mathjs 导入耗时可达数秒，不能阻塞 ready 握手。
+ */
+let mathjsPromise = null
+function loadMathjs() {
+  if (!mathjsPromise) {
+    mathjsPromise = Promise.resolve()
+      .then(() => requireFromServer('mathjs'))
+      .catch(() => null)
+  }
+  return mathjsPromise
 }
 
 const listeners = { message: {}, connect: {}, disconnect: {} }
@@ -334,6 +340,8 @@ async function runUserScript(code) {
   try {
     const body = `(async () => {\n"use strict";\n${code}\n})()`
     const script = new vm.Script(`(docat) => ${body}`, { filename: 'user-script.js' })
+    // mathjs 懒加载：脚本实际执行前才同步就绪，不阻塞 ready 握手
+    const mathjs = await loadMathjs()
     const sandbox = {
       docat, console: scriptConsole, setInterval, clearInterval, setTimeout, clearTimeout, Promise,
       Math, JSON, Date, Number, String, Boolean, Array, Object, RegExp, Error, undefined,
