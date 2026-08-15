@@ -192,6 +192,24 @@ const docat = {
   },
 }
 
+// ─── 脚本 console：转发到日志面板 ──────────────────────
+// console.log/info/debug/trace → info；warn → warn；error → error；assert 失败 → error。
+// 输出不落进程 stdout，避免被父进程误当协议消息执行或报"非 JSON"错误。
+
+const scriptConsole = {
+  log(...args) { send({ type: 'log', level: 'info', text: args.map(toLogText).join(' ') }) },
+  info(...args) { send({ type: 'log', level: 'info', text: args.map(toLogText).join(' ') }) },
+  debug(...args) { send({ type: 'log', level: 'info', text: args.map(toLogText).join(' ') }) },
+  trace(...args) { send({ type: 'log', level: 'info', text: args.map(toLogText).join(' ') }) },
+  warn(...args) { send({ type: 'log', level: 'warn', text: args.map(toLogText).join(' ') }) },
+  error(...args) { send({ type: 'log', level: 'error', text: args.map(toLogText).join(' ') }) },
+  assert(cond, ...args) {
+    if (!cond) {
+      send({ type: 'log', level: 'error', text: args.map(toLogText).join(' ') || 'Assertion failed' })
+    }
+  },
+}
+
 // ─── 事件顺序处理 ────────────────────────────────────
 
 async function processNext() {
@@ -317,7 +335,7 @@ async function runUserScript(code) {
     const body = `(async () => {\n"use strict";\n${code}\n})()`
     const script = new vm.Script(`(docat) => ${body}`, { filename: 'user-script.js' })
     const sandbox = {
-      docat, console, setInterval, clearInterval, setTimeout, clearTimeout, Promise,
+      docat, console: scriptConsole, setInterval, clearInterval, setTimeout, clearTimeout, Promise,
       Math, JSON, Date, Number, String, Boolean, Array, Object, RegExp, Error, undefined,
       // 与前端 mock 语义一致：裸名可用
       devices: docat.devices,

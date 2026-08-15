@@ -278,6 +278,8 @@ ix, iy = docat.utils.calib.world_to_image(m2, wx, wy)          # 逆变换
 
 多参数空格拼接：JS 中对象自动 JSON 化（同 `console.log`），Python 同 `print`。
 
+**`console.log` / `print` 自动进日志面板**：JS 的 `console.log/info/debug/trace` 与 Python 的 `print` 自动转发为 info 日志，`console.warn` → warn，`console.error` / `console.assert(失败)` → error，格式与 `log.*` 完全一致；`print()` 空内容跳过。无需显式调用 `log.*` 即可在日志面板看到脚本输出（输出不落进程 stdout，不会污染通信协议）。
+
 **JS 示例**：
 
 ```js

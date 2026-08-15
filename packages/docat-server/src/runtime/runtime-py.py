@@ -396,9 +396,21 @@ def _report_exception(exc):
     _send(payload)
 
 
+def _print(*args, **kwargs):
+    """脚本内 print 转发到日志面板（info 级）。
+    输出不落进程 stdout，避免被父进程误当协议消息执行或报"非 JSON"错误。
+    仅注入用户脚本作用域（g['print']），不劫持 builtins.print / 第三方模块输出。
+    """
+    sep = kwargs.get("sep") or " "
+    text = sep.join(str(a) for a in args)
+    if not text:
+        return  # print() 裸换行/空内容跳过，避免日志刷屏
+    _send({"type": "log", "level": "info", "text": text})
+
+
 def run_user_script(code):
     try:
-        g = {"docat": docat, "__name__": "__main__"}
+        g = {"docat": docat, "__name__": "__main__", "print": _print}
         exec(compile(code, USER_SCRIPT_NAME, "exec"), g)
         if state["exited"]:
             return
