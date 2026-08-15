@@ -197,6 +197,7 @@ function readOrchSettings(): OrchSettingsPayload {
     return Number.isFinite(n) && n > 0 ? n : fallback
   }
   const numOrZero = (v: string, fallback: number) => {
+    if (v === '' || v == null) return fallback
     const n = Number(v)
     return Number.isFinite(n) && n >= 0 ? n : fallback
   }

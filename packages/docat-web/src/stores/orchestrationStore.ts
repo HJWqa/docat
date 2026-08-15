@@ -295,10 +295,14 @@ export function fmtNum(v: unknown, digits?: number): string {
   return s === '' || s === '-0' ? '0' : s
 }
 
-/** 小数位数规范化（undefined → 通用设置默认 6；越界钳位 0-12） */
+/** 小数位数规范化（undefined/空/非法 → 通用设置默认 6；越界钳位 0-12） */
 function clampDigits(digits?: number): number {
   let n = digits
-  if (n === undefined) n = Number(orchStore.settings.decimalDigits)
+  if (n === undefined) {
+    const s = orchStore.settings.decimalDigits
+    if (!Number.isFinite(s)) return 6
+    n = s
+  }
   const d = Math.floor(Number(n))
   return Number.isFinite(d) && d >= 0 ? Math.min(12, d) : 6
 }
@@ -1148,8 +1152,8 @@ export function hasUndoablePose(): boolean {
 /** 保存设置（mock 本地 / 真实模式同步服务端） */
 export async function saveOrchSettings(): Promise<void> {
   orchStore.settings.logLimit = Math.max(50, Number(orchStore.settings.logLimit) || 500)
-  const digits = Math.floor(Number(orchStore.settings.decimalDigits))
-  orchStore.settings.decimalDigits = Number.isFinite(digits) ? Math.min(12, Math.max(0, digits)) : 6
+  const raw = orchStore.settings.decimalDigits
+  orchStore.settings.decimalDigits = Number.isFinite(raw) ? Math.min(12, Math.max(0, Math.floor(raw))) : 6
   if (!orchStore.settings.defaultSeparator) orchStore.settings.defaultSeparator = ';'
   if (orchMock) {
     persistOrchestration()
