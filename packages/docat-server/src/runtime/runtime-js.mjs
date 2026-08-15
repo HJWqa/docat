@@ -13,8 +13,9 @@
  *
  * 用户 API（与前端 mock 语义一致）：
  *   devices.send(name, text) / onMessage(name, cb) / onConnect / onDisconnect / isConnected
- *   poses.get(name[, sep])   utils.toArray(text[, sep]) / utils.toString(arr[, sep]) / utils.sleep(ms)
+ *   poses.get(name[, sep[, digits]])   utils.toArray(text[, sep]) / utils.toString(arr[, sep[, digits]]) / utils.sleep(ms)
  *   log.info / warn / error
+ * 浮点拼接小数位数：init 下发（通用设置），API 可传 digits 覆盖。
  */
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
@@ -28,6 +29,8 @@ const state = {
   messages: [],
   processing: false,
   exited: false,
+  /** 浮点拼接小数位数（通用设置 init 下发，默认 6） */
+  decimalDigits: 6,
 }
 
 /** 脚本 require/文件解析的基准目录（服务端脚本目录），init 时下发 */
@@ -71,15 +74,17 @@ function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n')
 }
 
-/** 浮点数固定 6 位小数（去尾零），避免科学计数法（如 8.3e-17）；非 number 原样字符串化 */
-function fmtNumber(v) {
+/** 浮点固定小数位（去尾零），避免科学计数法（如 8.3e-17）；非 number 原样字符串化；digits 缺省用 init 下发值 */
+function fmtNumber(v, digits) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return String(v)
-  const s = v.toFixed(6).replace(/\.?0+$/, '')
+  const n = Math.floor(Number(digits))
+  const d = Number.isFinite(n) && n >= 0 ? Math.min(12, n) : state.decimalDigits
+  const s = v.toFixed(d).replace(/\.?0+$/, '')
   return s === '' || s === '-0' ? '0' : s
 }
 
-function joinValues(arr, sep) {
-  return (Array.isArray(arr) ? arr : []).map(fmtNumber).join(String(sep))
+function joinValues(arr, sep, digits) {
+  return (Array.isArray(arr) ? arr : []).map(v => fmtNumber(v, digits)).join(String(sep))
 }
 
 // ─── 用户 API ────────────────────────────────────────
@@ -120,13 +125,13 @@ const docat = {
     },
   },
   poses: {
-    get(name, sep) {
+    get(name, sep, digits) {
       const p = state.poses.find(x => x.name === name)
       if (!p) return undefined
       const arr = p.type === 'cartesian'
         ? [p.pose.x, p.pose.y, p.pose.z, p.pose.rx, p.pose.ry, p.pose.rz]
         : [...(p.joint || [])]
-      return sep !== undefined && sep !== null ? joinValues(arr, sep) : arr
+      return sep !== undefined && sep !== null ? joinValues(arr, sep, digits) : arr
     },
     list() {
       return state.poses.map(p => p.name)
@@ -136,8 +141,8 @@ const docat = {
     toArray(text, sep = ';') {
       return splitFields(text, sep)
     },
-    toString(arr, sep = ';') {
-      return joinValues(arr, sep)
+    toString(arr, sep = ';', digits) {
+      return joinValues(arr, sep, digits)
     },
     sleep(ms) {
       return new Promise((resolve) => {
@@ -172,11 +177,11 @@ const docat = {
       parseXml(path) {
         return parseXml(String(path ?? ''), scriptBaseDir || undefined)
       },
-      imageToWorld(m, x, y, sep) {
-        return imageToWorld(m, Number(x), Number(y), sep)
+      imageToWorld(m, x, y, sep, digits) {
+        return imageToWorld(m, Number(x), Number(y), sep, digits)
       },
-      worldToImage(m, wx, wy, sep) {
-        return worldToImage(m, Number(wx), Number(wy), sep)
+      worldToImage(m, wx, wy, sep, digits) {
+        return worldToImage(m, Number(wx), Number(wy), sep, digits)
       },
     },
   },
@@ -271,6 +276,11 @@ rl.on('line', (line) => {
     case 'init':
       state.poses = msg.poses || []
       state.devices = msg.devices || []
+      // 浮点拼接小数位数（通用设置；缺省 6）
+      if (msg.decimalDigits !== undefined) {
+        const n = Math.floor(Number(msg.decimalDigits))
+        state.decimalDigits = Number.isFinite(n) && n >= 0 ? Math.min(12, n) : 6
+      }
       // require 基准目录（服务端脚本目录，可解析其 node_modules 及上层依赖）
       if (msg.requireBase) {
         scriptBaseDir = String(msg.requireBase)

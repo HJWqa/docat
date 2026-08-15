@@ -20,6 +20,7 @@
 - JS 由 Node 子进程（vm 沙箱）执行；Python 由 Python 子进程执行（服务端需安装 Python）。
 - Python 解释器自动探测：Windows 依次尝试 `python3` → `python` → `py -3`（取第一个可用的并缓存），Linux/macOS 使用 `python3`。全失败时运行会报「未找到 Python 解释器」，请安装 Python 并加入 PATH。
 - 可在「设置 → 通用」配置**自定义 Python 命令/路径**（如 `C:\Python311\python.exe -u`、`/usr/bin/python3.11`，支持带参数）：优先使用配置的命令，探测失败会自动回退自动探测并在日志提示；Python 运行与模块成员探测（自动补全）使用同一解释器。
+- 「设置 → 通用」可配置**小数位数**（默认 6，范围 0-12）：控制浮点拼接为文本时保留的小数位数（`utils.toString` / `poses.get(sep)` / `utils.calib` 文本输出 / 协议拼接等）；脚本内也可传 `digits` 参数临时覆盖。
 - **JS 中可直接使用裸名** `devices` / `poses` / `utils` / `log`（等价 `docat.devices` 等，写法自由）；**Python 必须** `import docat`。
 
 ## 设备类型
@@ -149,7 +150,7 @@ except TimeoutError as e:
 | JS | Python | 说明 |
 |---|---|---|
 | `poses.get(姿态名)` | `docat.poses.get(姿态名)` | **返回数组**：位姿 → `[x,y,z,rx,ry,rz]`；关节角 → `[j1..j6]` |
-| `poses.get(姿态名, ';')` | `docat.poses.get(姿态名, sep=';')` | **传入分隔符返回文本**，如 `"100;0;50;0;0;0"` |
+| `poses.get(姿态名, ';', digits)` | `docat.poses.get(姿态名, sep=';', digits=None)` | **传入分隔符返回文本**，如 `"100;0;50;0;0;0"`；`digits` 覆盖小数位数（默认「通用」设置 6） |
 | `poses.list()` | `docat.poses.list()` | 姿态名列表 |
 
 不存在的姿态返回 `undefined` / `None`。脚本运行期间增删姿态会实时推送给运行中的脚本更新本地副本。
@@ -185,7 +186,7 @@ dock = docat.poses.get('home_pose', sep=';') or '0;0;0;0;0;0'   # None → 默�
 | JS | Python | 说明 |
 |---|---|---|
 | `utils.toArray(文本, sep=';')` | `docat.utils.to_array(文本, sep=';')` | 按分隔符解析字符串为数组（去空白/空字段，默认 `;`） |
-| `utils.toString(数组, sep=';')` | `docat.utils.to_string(数组, sep=';')` | 数组拼接为文本 |
+| `utils.toString(数组, sep=';', digits)` | `docat.utils.to_string(数组, sep=';', digits=None)` | 数组拼接为文本；浮点默认保留 6 位小数（「通用」设置可调），传 `digits` 可覆盖 |
 | `utils.sleep(ms)` | `docat.utils.sleep(ms)` | 等待（可被终止打断；脚本终止时抛 SystemExit） |
 | `utils.wslToWin(路径)` | `docat.utils.wsl_to_win(路径)` | WSL 路径转 Windows：`/mnt/d/foo` → `D:\foo`（不匹配原样返回） |
 | `utils.winToWsl(路径)` | `docat.utils.win_to_wsl(路径)` | Windows 路径转 WSL：`D:\foo` → `/mnt/d/foo`（不匹配原样返回） |

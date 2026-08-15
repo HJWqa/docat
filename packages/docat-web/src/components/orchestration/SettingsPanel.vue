@@ -20,6 +20,11 @@
           <input v-model="orchStore.settings.defaultSeparator" class="field-input field-input--sm" placeholder=";" spellcheck="false" />
         </div>
         <div class="field-row">
+          <label class="field-label">小数位数</label>
+          <input v-model.number="orchStore.settings.decimalDigits" type="number" min="0" max="12" step="1" class="field-input field-input--sm" />
+          <span class="field-hint">浮点拼接保留的小数位数（0-12，默认 6）；脚本可传参覆盖（如 utils.toString(数组, ';', 3)）</span>
+        </div>
+        <div class="field-row">
           <label class="field-label">日志保留条数</label>
           <input v-model.number="orchStore.settings.logLimit" type="number" min="50" max="5000" step="50" class="field-input field-input--sm" />
         </div>

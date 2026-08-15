@@ -17,6 +17,8 @@ export interface RunRequest {
   language: ScriptLanguage
   content: string
   fileName: string
+  /** 浮点拼接小数位数（通用设置，init 时下发运行时） */
+  decimalDigits?: number
 }
 
 interface OutgoingMessage {
@@ -150,6 +152,8 @@ export class RuntimeManager {
   private failTimer: ReturnType<typeof setTimeout> | null = null
   /** 脚本 require 的解析基准目录（服务端脚本目录，可被「通用」设置修改） */
   private requireBase = ''
+  /** 浮点拼接小数位数（「通用」设置，init 时下发运行时） */
+  private decimalDigits = 6
 
   constructor(manager: OrchDeviceManager) {
     this.manager = manager
@@ -213,6 +217,7 @@ export class RuntimeManager {
     this.language = req.language
     this.fileName = req.fileName
     this.pendingContent = req.content
+    this.decimalDigits = Number.isFinite(Number(req.decimalDigits)) ? Math.min(12, Math.max(0, Math.floor(Number(req.decimalDigits)))) : 6
 
     let child: ChildProcessWithoutNullStreams
     try {
@@ -322,7 +327,7 @@ export class RuntimeManager {
       case 'ready': {
         this.clearFailTimer()
         // 推送姿态/设备快照 + 脚本内容（init 先于 script，子进程按序处理）
-        this.sendToChild({ type: 'init', poses: this.manager.listPoses(), devices: this.manager.list().map(d => ({ name: d.name, connected: d.connected })), requireBase: this.requireBase || undefined })
+        this.sendToChild({ type: 'init', poses: this.manager.listPoses(), devices: this.manager.list().map(d => ({ name: d.name, connected: d.connected })), requireBase: this.requireBase || undefined, decimalDigits: this.decimalDigits })
         this.sendToChild({ type: 'script', content: this.pendingContent })
         this.broadcastLog('info', `脚本已启动（${this.fileName}）`)
         break

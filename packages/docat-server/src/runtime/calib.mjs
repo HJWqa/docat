@@ -107,30 +107,32 @@ function resolvePath(path, baseDir) {
 }
 
 /**
- * 图像坐标 → 物理坐标；sep 给定时返回文本
+ * 图像坐标 → 物理坐标；sep 给定时返回文本（digits 可覆盖小数位数，缺省 6）
  * @param {{m00:number,m01:number,m02:number,m10:number,m11:number,m12:number}} m
  */
-export function imageToWorld(m, x, y, sep) {
+export function imageToWorld(m, x, y, sep, digits) {
   const wx = m.m00 * x + m.m01 * y + m.m02
   const wy = m.m10 * x + m.m11 * y + m.m12
-  return sep !== undefined && sep !== null ? `${fmtNumber(wx)}${sep}${fmtNumber(wy)}` : [wx, wy]
+  return sep !== undefined && sep !== null ? `${fmtNumber(wx, digits)}${sep}${fmtNumber(wy, digits)}` : [wx, wy]
 }
 
 /**
- * 物理坐标 → 图像坐标（2×2 矩阵求逆）；sep 给定时返回文本
+ * 物理坐标 → 图像坐标（2×2 矩阵求逆）；sep 给定时返回文本（digits 可覆盖小数位数，缺省 6）
  * @param {{m00:number,m01:number,m02:number,m10:number,m11:number,m12:number}} m
  */
-export function worldToImage(m, wx, wy, sep) {
+export function worldToImage(m, wx, wy, sep, digits) {
   const det = m.m00 * m.m11 - m.m01 * m.m10
   if (Math.abs(det) < 1e-12) throw new Error('标定矩阵不可逆（行列式接近 0）')
   const ix = (m.m11 * (wx - m.m02) - m.m01 * (wy - m.m12)) / det
   const iy = (-m.m10 * (wx - m.m02) + m.m00 * (wy - m.m12)) / det
-  return sep !== undefined && sep !== null ? `${fmtNumber(ix)}${sep}${fmtNumber(iy)}` : [ix, iy]
+  return sep !== undefined && sep !== null ? `${fmtNumber(ix, digits)}${sep}${fmtNumber(iy, digits)}` : [ix, iy]
 }
 
-/** 浮点数固定 6 位小数（去尾零），避免科学计数法；非 number 原样字符串化 */
-function fmtNumber(v) {
+/** 浮点固定小数位（去尾零），避免科学计数法；非 number 原样字符串化；digits 缺省 6 */
+function fmtNumber(v, digits) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return String(v)
-  const s = v.toFixed(6).replace(/\.?0+$/, '')
+  const n = Math.floor(Number(digits))
+  const d = Number.isFinite(n) && n >= 0 ? Math.min(12, n) : 6
+  const s = v.toFixed(d).replace(/\.?0+$/, '')
   return s === '' || s === '-0' ? '0' : s
 }

@@ -46,6 +46,8 @@ export interface OrchPose {
 
 export interface OrchSettings {
   defaultSeparator: string
+  /** 浮点拼接保留的小数位数（0-12，默认 6），「通用」设置可调，脚本 API 可传参覆盖 */
+  decimalDigits: number
   logLimit: number
   autoConnectOnLoad: boolean
   scriptFollow: boolean
@@ -169,6 +171,7 @@ export const orchStore = reactive({
   poses: [] as OrchPose[],
   settings: {
     defaultSeparator: ';',
+    decimalDigits: 6,
     logLimit: 500,
     autoConnectOnLoad: false,
     scriptFollow: true,
@@ -284,21 +287,30 @@ export function poseArray(name: string): number[] | null {
   return [...(p.joint || [0, 0, 0, 0, 0, 0])]
 }
 
-/** 浮点数固定 6 位小数（去尾零），避免科学计数法（如 8.3e-17）；非 number 原样字符串化（与真实模式一致） */
-export function fmtNum(v: unknown): string {
+/** 浮点固定小数位（去尾零），避免科学计数法（如 8.3e-17）；非 number 原样字符串化（与真实模式一致） */
+export function fmtNum(v: unknown, digits?: number): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) return String(v)
-  const s = v.toFixed(6).replace(/\.?0+$/, '')
+  const d = clampDigits(digits)
+  const s = v.toFixed(d).replace(/\.?0+$/, '')
   return s === '' || s === '-0' ? '0' : s
 }
 
-export function joinNumValues(arr: unknown[], separator: string): string {
-  return (Array.isArray(arr) ? arr : []).map(fmtNum).join(separator)
+/** 小数位数规范化（undefined → 通用设置默认 6；越界钳位 0-12） */
+function clampDigits(digits?: number): number {
+  let n = digits
+  if (n === undefined) n = Number(orchStore.settings.decimalDigits)
+  const d = Math.floor(Number(n))
+  return Number.isFinite(d) && d >= 0 ? Math.min(12, d) : 6
+}
+
+export function joinNumValues(arr: unknown[], separator: string, digits?: number): string {
+  return (Array.isArray(arr) ? arr : []).map(v => fmtNum(v, digits)).join(separator)
 }
 
 /** 姿态 → 文本（默认分隔符 ;） */
-export function poseText(name: string, separator = ';'): string | null {
+export function poseText(name: string, separator = ';', digits?: number): string | null {
   const arr = poseArray(name)
-  return arr ? joinNumValues(arr, separator) : null
+  return arr ? joinNumValues(arr, separator, digits) : null
 }
 
 // ─── 真实模式 WS 事件 ─────────────────────────────────
@@ -1136,6 +1148,8 @@ export function hasUndoablePose(): boolean {
 /** 保存设置（mock 本地 / 真实模式同步服务端） */
 export async function saveOrchSettings(): Promise<void> {
   orchStore.settings.logLimit = Math.max(50, Number(orchStore.settings.logLimit) || 500)
+  const digits = Math.floor(Number(orchStore.settings.decimalDigits))
+  orchStore.settings.decimalDigits = Number.isFinite(digits) ? Math.min(12, Math.max(0, digits)) : 6
   if (!orchStore.settings.defaultSeparator) orchStore.settings.defaultSeparator = ';'
   if (orchMock) {
     persistOrchestration()
@@ -1184,16 +1198,16 @@ export function buildScriptContext() {
       },
     },
     poses: {
-      get: (name: string, separator?: string) =>
+      get: (name: string, separator?: string, digits?: number) =>
         separator !== undefined && separator !== null
-          ? poseText(name, String(separator))
+          ? poseText(name, String(separator), digits)
           : poseArray(name),
       list: () => orchStore.poses.map(p => p.name),
     },
     utils: {
       toArray: (text: string, separator = orchStore.settings.defaultSeparator || ';') => splitFields(String(text)),
-      toString: (arr: Array<number | string>, separator = orchStore.settings.defaultSeparator || ';') =>
-        joinNumValues(arr, String(separator)),
+      toString: (arr: Array<number | string>, separator = orchStore.settings.defaultSeparator || ';', digits?: number) =>
+        joinNumValues(arr, String(separator), digits),
       sleep: (ms: number) => sleep(Math.max(0, Number(ms) || 0)),
       // WSL 路径转换（/mnt/d/... ⇄ D:\...）
       wslToWin: (path: string) => wslToWinPath(String(path)),
@@ -1202,10 +1216,10 @@ export function buildScriptContext() {
       calib: {
         parseIwcaf: (path: string) => calibUnavailable(`parseIwcaf('${path}')`),
         parseXml: (path: string) => calibUnavailable(`parseXml('${path}')`),
-        imageToWorld: (m: CalibMatrixLike, x: number, y: number, sep?: string) =>
-          calibImageToWorld(m, Number(x), Number(y), sep),
-        worldToImage: (m: CalibMatrixLike, wx: number, wy: number, sep?: string) =>
-          calibWorldToImage(m, Number(wx), Number(wy), sep),
+        imageToWorld: (m: CalibMatrixLike, x: number, y: number, sep?: string, digits?: number) =>
+          calibImageToWorld(m, Number(x), Number(y), sep, digits),
+        worldToImage: (m: CalibMatrixLike, wx: number, wy: number, sep?: string, digits?: number) =>
+          calibWorldToImage(m, Number(wx), Number(wy), sep, digits),
       },
     },
     log: {
@@ -1247,18 +1261,18 @@ function calibUnavailable(call: string): never {
   throw new Error(`${call} 需在真实模式运行（读取服务端标定文件）；mock 模式仅支持转换函数`)
 }
 
-function calibImageToWorld(m: CalibMatrixLike, x: number, y: number, sep?: string): number[] | string {
+function calibImageToWorld(m: CalibMatrixLike, x: number, y: number, sep?: string, digits?: number): number[] | string {
   const wx = m.m00 * x + m.m01 * y + m.m02
   const wy = m.m10 * x + m.m11 * y + m.m12
-  return sep !== undefined && sep !== null ? `${fmtNum(wx)}${sep}${fmtNum(wy)}` : [wx, wy]
+  return sep !== undefined && sep !== null ? `${fmtNum(wx, digits)}${sep}${fmtNum(wy, digits)}` : [wx, wy]
 }
 
-function calibWorldToImage(m: CalibMatrixLike, wx: number, wy: number, sep?: string): number[] | string {
+function calibWorldToImage(m: CalibMatrixLike, wx: number, wy: number, sep?: string, digits?: number): number[] | string {
   const det = m.m00 * m.m11 - m.m01 * m.m10
   if (Math.abs(det) < 1e-12) throw new Error('标定矩阵不可逆（行列式接近 0）')
   const ix = (m.m11 * (wx - m.m02) - m.m01 * (wy - m.m12)) / det
   const iy = (-m.m10 * (wx - m.m02) + m.m00 * (wy - m.m12)) / det
-  return sep !== undefined && sep !== null ? `${fmtNum(ix)}${sep}${fmtNum(iy)}` : [ix, iy]
+  return sep !== undefined && sep !== null ? `${fmtNum(ix, digits)}${sep}${fmtNum(iy, digits)}` : [ix, iy]
 }
 
 export type ScriptContext = ReturnType<typeof buildScriptContext>

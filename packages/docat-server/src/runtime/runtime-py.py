@@ -16,8 +16,8 @@
   @docat.devices.on_connect('name')
   @docat.devices.on_disconnect('name')
   docat.devices.is_connected(name)
-  docat.poses.get(name, sep=None)          # None→数组；给 sep→字符串
-  docat.utils.to_array(text, sep=';') / to_string(arr, sep=';') / sleep(ms)
+  docat.poses.get(name, sep=None, digits=None)  # None→数组；给 sep→字符串（digits 覆盖小数位数）
+  docat.utils.to_array(text, sep=';') / to_string(arr, sep=';', digits=None) / sleep(ms)
   docat.log.info / warn / error
 
 执行模型：用户脚本（顶层代码 + 消息处理）在同一 worker 线程内顺序执行，
@@ -42,7 +42,7 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-state = {"poses": [], "devices": [], "exited": False, "base_dir": None}
+state = {"poses": [], "devices": [], "exited": False, "base_dir": None, "decimal_digits": 6}
 listeners = {"message": {}, "connect": {}, "disconnect": {}}
 # wait_for 轮询 inbox 时未匹配的消息暂存，稍后由 worker 顺序处理
 carryover = []
@@ -67,16 +67,18 @@ def _split_fields(text, sep=";"):
     return parts
 
 
-def _fmt_num(v):
-    """浮点数固定 6 位小数（去尾零），避免科学计数法（如 8.3e-17）；非 float 原样字符串化。"""
+def _fmt_num(v, digits=None):
+    """浮点固定小数位（去尾零），避免科学计数法（如 8.3e-17）；非 float 原样字符串化。
+    digits 缺省用通用设置（init 下发）。"""
     if isinstance(v, float):
-        s = format(v, ".6f").rstrip("0").rstrip(".")
+        d = int(digits) if digits is not None else state["decimal_digits"]
+        s = format(v, ".%df" % min(12, max(0, d))).rstrip("0").rstrip(".")
         return "0" if s in ("", "-0") else s
     return str(v)
 
 
-def _join_values(arr, sep):
-    return sep.join(_fmt_num(v) for v in arr)
+def _join_values(arr, sep, digits=None):
+    return sep.join(_fmt_num(v, digits) for v in arr)
 
 
 class _Devices:
@@ -118,7 +120,7 @@ class _Devices:
 
 
 class _Poses:
-    def get(self, name, sep=None):
+    def get(self, name, sep=None, digits=None):
         for p in state["poses"]:
             if p.get("name") == name:
                 if p.get("type") == "cartesian":
@@ -128,7 +130,7 @@ class _Poses:
                     arr = list(p.get("joint", []))
                 if sep is None:
                     return arr
-                return _join_values(arr, sep)
+                return _join_values(arr, sep, digits)
         return None
 
     def list(self):
@@ -211,18 +213,18 @@ class _Calib:
                     pass
         return out
 
-    def image_to_world(self, m, x, y, sep=None):
+    def image_to_world(self, m, x, y, sep=None, digits=None):
         wx = m["m00"] * x + m["m01"] * y + m["m02"]
         wy = m["m10"] * x + m["m11"] * y + m["m12"]
-        return _join_values([wx, wy], sep) if sep is not None else [wx, wy]
+        return _join_values([wx, wy], sep, digits) if sep is not None else [wx, wy]
 
-    def world_to_image(self, m, wx, wy, sep=None):
+    def world_to_image(self, m, wx, wy, sep=None, digits=None):
         det = m["m00"] * m["m11"] - m["m01"] * m["m10"]
         if abs(det) < 1e-12:
             raise ValueError("标定矩阵不可逆（行列式接近 0）")
         ix = (m["m11"] * (wx - m["m02"]) - m["m01"] * (wy - m["m12"])) / det
         iy = (-m["m10"] * (wx - m["m02"]) + m["m00"] * (wy - m["m12"])) / det
-        return _join_values([ix, iy], sep) if sep is not None else [ix, iy]
+        return _join_values([ix, iy], sep, digits) if sep is not None else [ix, iy]
 
 
 # ─── WSL 路径转换（/mnt/d/... ⇄ D:\...）─────────────
@@ -249,8 +251,8 @@ class _Utils:
     def to_array(self, text, sep=";"):
         return _split_fields(text, sep)
 
-    def to_string(self, arr, sep=";"):
-        return _join_values(arr, sep) if isinstance(arr, (list, tuple)) else ""
+    def to_string(self, arr, sep=";", digits=None):
+        return _join_values(arr, sep, digits) if isinstance(arr, (list, tuple)) else ""
 
     def sleep(self, ms):
         left = max(0, int(float(ms)))
@@ -429,6 +431,8 @@ def _worker():
         if etype == "init":
             state["poses"] = ev.get("poses", [])
             state["devices"] = ev.get("devices", [])
+            if "decimalDigits" in ev:
+                state["decimal_digits"] = max(0, min(12, int(ev.get("decimalDigits", 6))))
         elif etype == "poses":
             state["poses"] = ev.get("poses", [])
         elif etype == "device-status":

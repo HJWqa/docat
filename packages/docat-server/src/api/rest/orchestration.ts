@@ -68,6 +68,8 @@ export interface OrchScriptFileInfo {
 
 export interface OrchSettingsPayload {
   defaultSeparator: string
+  /** 浮点拼接保留的小数位数（0-12，默认 6），脚本运行时 init 下发 */
+  decimalDigits: number
   logLimit: number
   autoConnectOnLoad: boolean
   scriptFollow: boolean
@@ -111,8 +113,10 @@ function readOrchSettings(): OrchSettingsPayload {
     const n = Number(v)
     return Number.isFinite(n) && n >= 0 ? n : fallback
   }
+  const decimalDigits = numOrZero(getSetting(`${SETTING_PREFIX}decimalDigits`), 6)
   return {
     defaultSeparator: getSetting(`${SETTING_PREFIX}defaultSeparator`) || ';',
+    decimalDigits: Math.min(12, Math.floor(decimalDigits)),
     logLimit: num(getSetting(`${SETTING_PREFIX}logLimit`), 500),
     autoConnectOnLoad: getSetting(`${SETTING_PREFIX}autoConnectOnLoad`) === 'true',
     scriptFollow: getSetting(`${SETTING_PREFIX}scriptFollow`) !== 'false',
@@ -196,6 +200,10 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         const body = request.body ?? {}
         if (body.defaultSeparator !== undefined) {
           setSetting(`${SETTING_PREFIX}defaultSeparator`, String(body.defaultSeparator || ';'))
+        }
+        if (body.decimalDigits !== undefined) {
+          const n = Math.floor(Number(body.decimalDigits))
+          setSetting(`${SETTING_PREFIX}decimalDigits`, String(Number.isFinite(n) ? Math.min(12, Math.max(0, n)) : 6))
         }
         if (body.logLimit !== undefined) {
           setSetting(`${SETTING_PREFIX}logLimit`, String(Math.max(50, Number(body.logLimit) || 500)))
@@ -719,7 +727,7 @@ print(json.dumps({"members": out}))
         requireOperator(request, reply)
         if (reply.sent) return reply
         const language = String(request.body.language ?? 'javascript') === 'python' ? 'python' : 'javascript'
-        const result = await runtime.run({ language, content: String(request.body.content ?? ''), fileName: String(request.body.fileName ?? 'script.js') })
+        const result = await runtime.run({ language, content: String(request.body.content ?? ''), fileName: String(request.body.fileName ?? 'script.js'), decimalDigits: readOrchSettings().decimalDigits })
         if (!result.ok) return { success: false, error: { code: 50000, message: result.error ?? '启动失败' } }
         return { success: true, data: null }
       } catch (err) {
