@@ -329,14 +329,17 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import * as monaco from 'monaco-editor/editor/editor.api.js'
-import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
 import 'monaco-editor/features/register.all'
 import 'monaco-editor/languages/definitions/lua/register'
 import 'monaco-editor/languages/definitions/python/register'
 import 'monaco-editor/languages/features/json/register'
+import { setupMonacoWorkers } from '../orchestration/monacoWorkers'
+import { cancelPythonSyntaxCheck, schedulePythonSyntaxCheck } from '../orchestration/pythonLint'
+import { builtinItems, getPythonSnapshotOrFallback, loadPythonSnapshot, typeMethodItems } from '../orchestration/pythonCompletion'
 import * as api from '../services/api'
 import { wsClient } from '../services/ws'
 import { DOBOT_API_CATALOG } from '../services/dobotApiCatalog'
+import type { OrchPythonSyntaxCheckResult } from '../services/orchApi'
 import { deviceStore } from '../stores/deviceStore'
 import { runtimeStore } from '../stores/runtimeStore'
 import type { RuntimeLogEntry } from '../stores/runtimeStore'
@@ -351,12 +354,10 @@ type DialogKind = '' | 'rename-project' | 'delete-project' | 'delete-file'
 defineOptions({ name: 'ProgrammingView' })
 
 const workerScope = self as unknown as {
-  MonacoEnvironment?: monaco.Environment
   __docatMonacoCompletionDisposables?: Array<{ dispose: () => void }>
 }
-workerScope.MonacoEnvironment = {
-  getWorker: () => new EditorWorker(),
-}
+// 统一 Monaco worker 配置（编辑器 worker + TS worker），避免互相覆盖
+setupMonacoWorkers()
 
 const route = useRoute()
 const isMock = route.query.mock === '1'
@@ -668,6 +669,19 @@ function fileToMonacoLanguage(file: api.ControllerProjectFile | null): string {
   return 'plaintext'
 }
 
+/** Python 标准库补全条目：builtins 常显；常用类型方法仅在 `xxx.` 后展示 */
+function pythonStdlibItems(model: monaco.editor.ITextModel, position: monaco.Position, range: monaco.Range): monaco.languages.CompletionItem[] {
+  const snapshot = getPythonSnapshotOrFallback()
+  const items = builtinItems(snapshot, range)
+  const lineText = model.getLineContent(position.lineNumber)
+  const beforeCursor = lineText.slice(0, position.column - 1)
+  // 点后可带已输入的成员前缀（s.spl 也要走方法分支）
+  if (/([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)?$/.test(beforeCursor)) {
+    items.push(...typeMethodItems(snapshot, range))
+  }
+  return items
+}
+
 function configureMonaco() {
   monaco.editor.defineTheme('docat-dark', {
     base: 'vs-dark',
@@ -694,6 +708,9 @@ function configureMonaco() {
 
   workerScope.__docatMonacoCompletionDisposables?.forEach(disposable => disposable.dispose())
   completionDisposables = []
+
+  // Python 标准库快照（builtins/类型方法），首次输入即可用
+  void loadPythonSnapshot()
 
   for (const language of ['lua', 'python'] as MonacoLanguage[]) {
     completionDisposables.push(monaco.languages.registerCompletionItemProvider(language, {
@@ -738,7 +755,11 @@ function configureMonaco() {
           sortText: `1000${index.toString().padStart(3, '0')}_${keyword}`,
           range,
         }))
-        return { suggestions: [...symbolSuggestions, ...apiSuggestions, ...keywordSuggestions] }
+        // Python 内置函数/类型（enumerate( 等）+ 常用类型方法（`xxx.` 后，s.split( 场景）
+        const stdlibSuggestions = language === 'python'
+          ? pythonStdlibItems(model, position, range).filter(item => !usedLabels.has(String(item.label)))
+          : []
+        return { suggestions: [...symbolSuggestions, ...apiSuggestions, ...keywordSuggestions, ...stdlibSuggestions] }
       },
     }))
   }
@@ -811,7 +832,9 @@ function syncEditor() {
     const file = activeFile.value
     ensureFileBaseline(file?.name ?? '')
     const model = editor.getModel()
-    if (model) monaco.editor.setModelLanguage(model, fileToMonacoLanguage(file))
+    if (model) {
+      monaco.editor.setModelLanguage(model, fileToMonacoLanguage(file))
+    }
     editor.updateOptions({ readOnly: refreshing.value || !file?.editable })
     if (editor.getValue() !== (file?.content ?? '')) {
       syncingEditor = true
@@ -839,6 +862,47 @@ function clearEditorMarkers() {
   const model = editor?.getModel()
   if (model) monaco.editor.setModelMarkers(model, 'docat-precompile', [])
 }
+
+// ─── Python 实时语法检查（服务端 ast.parse，输入停顿后防抖）────
+
+const PY_LINT_OWNER = 'docat-python-syntax'
+
+/** 应用语法检查结果：错误打波浪线（带行列），通过则清空 */
+function applyPythonLintMarkers(result: OrchPythonSyntaxCheckResult) {
+  const model = editor?.getModel()
+  if (!model || model.getLanguageId() !== 'python') return
+  if (result.ok || !result.error) {
+    monaco.editor.setModelMarkers(model, PY_LINT_OWNER, [])
+    return
+  }
+  const { line, column, message } = result.error
+  const safeLine = Math.min(Math.max(line, 1), model.getLineCount())
+  const col = Math.min(Math.max(column, 1), model.getLineMaxColumn(safeLine))
+  monaco.editor.setModelMarkers(model, PY_LINT_OWNER, [{
+    severity: monaco.MarkerSeverity.Error,
+    message,
+    startLineNumber: safeLine,
+    startColumn: col,
+    endLineNumber: safeLine,
+    endColumn: model.getLineMaxColumn(safeLine),
+  }])
+}
+
+// Python 文件编辑停顿后请求服务端语法检查（mock/离线自动跳过）
+watch(
+  () => [activeFile.value?.name ?? '', activeFile.value?.content ?? ''] as const,
+  ([, content]) => {
+    cancelPythonSyntaxCheck()
+    const file = activeFile.value
+    if (!file || fileToMonacoLanguage(file) !== 'python') {
+      const model = editor?.getModel()
+      if (model) monaco.editor.setModelMarkers(model, PY_LINT_OWNER, [])
+      return
+    }
+    schedulePythonSyntaxCheck(content, 1200, applyPythonLintMarkers)
+  },
+  { immediate: true },
+)
 
 function markEditorError(message: string) {
   const model = editor?.getModel()
@@ -1699,11 +1763,13 @@ onActivated(() => {
 })
 onDeactivated(() => {
   stopRuntimePoll()
+  cancelPythonSyntaxCheck()
   savedEditorViewState = editor?.saveViewState() ?? null
   persistWorkspace(savedEditorViewState)
 })
 onBeforeUnmount(() => {
   stopRuntimePoll()
+  cancelPythonSyntaxCheck()
   window.removeEventListener('pagehide', handlePageHide)
   if (workspaceSaveTimer) clearTimeout(workspaceSaveTimer)
   editorCursorSub?.dispose()

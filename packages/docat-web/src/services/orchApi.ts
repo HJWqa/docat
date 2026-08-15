@@ -135,3 +135,34 @@ export function orchListModuleMembers(moduleName: string): Promise<ApiResponse<{
 export function orchListPythonModuleMembers(moduleName: string): Promise<ApiResponse<{ members: OrchModuleMember[] } | { error: string }>> {
   return request('POST', '/api/orchestration/scripts/python-module-members', { name: moduleName })
 }
+
+// ─── Python 标准库快照（补全用）────────────────────────
+
+export interface OrchStdlibMember {
+  name: string
+  type: string
+  doc: string
+}
+
+export interface OrchPythonStdlibSnapshot {
+  builtins: OrchStdlibMember[]
+  types: Record<string, OrchStdlibMember[]>
+  modules: Record<string, OrchStdlibMember[]>
+}
+
+/** Python 标准库快照：builtins + 常用类型方法 + 常用 stdlib 模块成员（带签名 doc） */
+export function orchListPythonStdlibSnapshot(): Promise<ApiResponse<OrchPythonStdlibSnapshot>> {
+  return request('POST', '/api/orchestration/scripts/python-stdlib-snapshot')
+}
+
+// ─── Python 语法检查（编辑时实时波浪线）──────────────
+
+export interface OrchPythonSyntaxCheckResult {
+  ok: boolean
+  error?: { line: number; column: number; message: string }
+}
+
+/** 用服务端配置的 Python 解释器 ast.parse 检查语法（内容经 stdin 传入） */
+export function orchPythonSyntaxCheck(content: string): Promise<ApiResponse<OrchPythonSyntaxCheckResult>> {
+  return request('POST', '/api/orchestration/scripts/python-syntax-check', { content })
+}

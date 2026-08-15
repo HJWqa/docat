@@ -151,16 +151,27 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as monaco from 'monaco-editor/editor/editor.api.js'
-import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
 import 'monaco-editor/features/register.all'
 import 'monaco-editor/languages/definitions/javascript/register'
 import 'monaco-editor/languages/definitions/python/register'
+// TS/JS 语言服务（IntelliSense：补全/签名/悬停/语法检查）；注册与命名导入共用同一模块
+import { javascriptDefaults } from 'monaco-editor/languages/features/typescript/register'
 // 直接导入 Monarch 定义并主动注册（绕过懒加载器，避免补全/高亮挂起）
 import * as jsMonarch from 'monaco-editor/languages/definitions/javascript/javascript'
 import * as pyMonarch from 'monaco-editor/languages/definitions/python/python'
+import { setupMonacoWorkers } from '../../orchestration/monacoWorkers'
+import { cancelPythonSyntaxCheck, schedulePythonSyntaxCheck } from '../../orchestration/pythonLint'
+import {
+  builtinItems,
+  getPythonSnapshotOrFallback,
+  loadPythonSnapshot,
+  moduleMemberItems,
+  PYTHON_KEYWORDS,
+  typeMethodItems,
+} from '../../orchestration/pythonCompletion'
 import { addLog, isOrchMockMode, onOrchScriptChange, onOrchScriptsDirChange, orchStore, orchTypeLabel } from '../../stores/orchestrationStore'
 import { pickScriptFile, runScript, watchScriptFile, type ScriptRunHandle } from '../../services/orchestration'
-import { orchCreateScript, orchGetScript, orchListModuleMembers, orchListPythonModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchScriptFileInfo } from '../../services/orchApi'
+import { orchCreateScript, orchGetScript, orchListModuleMembers, orchListPythonModuleMembers, orchListScripts, orchOpenScriptsInEditor, orchSaveScript, type OrchPythonSyntaxCheckResult, type OrchScriptFileInfo } from '../../services/orchApi'
 import Toast from '../Toast.vue'
 
 type ScriptLanguage = 'javascript' | 'python'
@@ -495,22 +506,65 @@ const IDENTIFIER_TRIGGERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY
 const memberCache = new Map<string, Array<{ name: string; type: string }>>()
 const memberFetching = new Map<string, Promise<Array<{ name: string; type: string }> | null>>()
 
+/** 模块成员持久缓存（localStorage，TTL 7 天）：本地第三方库（如 meth）探测一次后零延迟可用，mock/离线也可见 */
+const MEMBER_CACHE_KEY = 'docat.orchestration.module-members.v1'
+const MEMBER_CACHE_TTL = 7 * 24 * 60 * 60 * 1000
+
+function readMemberCache(key: string): Array<{ name: string; type: string }> | null {
+  try {
+    const raw = localStorage.getItem(MEMBER_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Record<string, { at: number; members: Array<{ name: string; type: string }> }>
+    const entry = parsed[key]
+    if (!entry || !Array.isArray(entry.members) || Date.now() - entry.at > MEMBER_CACHE_TTL) return null
+    return entry.members
+  } catch {
+    return null
+  }
+}
+
+function writeMemberCache(key: string, members: Array<{ name: string; type: string }>) {
+  try {
+    const raw = localStorage.getItem(MEMBER_CACHE_KEY)
+    const parsed = (raw ? JSON.parse(raw) : {}) as Record<string, { at: number; members: Array<{ name: string; type: string }> }>
+    parsed[key] = { at: Date.now(), members }
+    localStorage.setItem(MEMBER_CACHE_KEY, JSON.stringify(parsed))
+  } catch {
+    // 缓存不可用则忽略（内存缓存仍生效）
+  }
+}
+
 function fetchModuleMembers(moduleName: string, python: boolean): Promise<Array<{ name: string; type: string }> | null> {
   const key = `${python ? 'py:' : 'js:'}${moduleName}`
   const cached = memberCache.get(key)
   if (cached) return Promise.resolve(cached)
+  // 本地持久缓存（上次探测结果；失败探测不缓存，保证重试机会）
+  const persisted = readMemberCache(key)
+  if (persisted) {
+    memberCache.set(key, persisted)
+    return Promise.resolve(persisted)
+  }
   const inflight = memberFetching.get(key)
   if (inflight) return inflight
   const p = (python ? orchListPythonModuleMembers(moduleName) : orchListModuleMembers(moduleName))
     .then(res => {
       const members = res.success && res.data && 'members' in res.data ? res.data.members : null
-      if (members) memberCache.set(key, members)
+      if (members && members.length) {
+        memberCache.set(key, members)
+        writeMemberCache(key, members)
+      }
       return members
     })
     .catch(() => null)
     .finally(() => { memberFetching.delete(key) })
-  memberFetching.set(key, p)
-  return p
+  // 超时兜底：服务端探测慢（首次解释器探测 / Defender 扫描）时返回 null，
+  // 静态目录/快照补全照常展示；下次输入会重试（成功后入本地缓存）
+  const guarded = Promise.race([
+    p,
+    new Promise<Array<{ name: string; type: string }> | null>(resolve => setTimeout(() => resolve(null), 4000)),
+  ])
+  memberFetching.set(key, guarded)
+  return guarded
 }
 
 /** 解析脚本中的 require 语句：变量名 → 模块名 */
@@ -543,9 +597,95 @@ function collectPythonImports(text: string): Map<string, string> {
   return map
 }
 
+// ─── JS 语言服务（TS worker IntelliSense + docat 全局类型声明）────────
+
+/**
+ * TS 异步诊断竞态兜底：monaco 的 DiagnosticsAdapter._doValidate 在 await 之后
+ * 只检查模型是否 dispose、不检查语言是否已切换——若 JS 校验请求发出后模型切到
+ * Python，worker 响应会把 TS 标记写回非 JS 模型（如 py 上的 TS8002 假报错）。
+ * 这里在标记落地时按模型语言守卫：非 JS 模型上的 TS 标记立即清除。
+ */
+let tsMarkerGuard: { dispose(): void } | null = null
+
+function setupTsMarkerGuard() {
+  if (tsMarkerGuard) return
+  tsMarkerGuard = monaco.editor.onDidChangeMarkers(uris => {
+    for (const uri of uris) {
+      const model = monaco.editor.getModel(uri)
+      if (!model) continue
+      const language = model.getLanguageId()
+      if (language === 'javascript' || language === 'typescript') continue
+      for (const owner of ['javascript', 'typescript'] as const) {
+        const markers = monaco.editor.getModelMarkers({ resource: uri, owner })
+        if (markers.length) monaco.editor.setModelMarkers(model, owner, [])
+      }
+    }
+  })
+}
+
+function disposeTsMarkerGuard() {
+  tsMarkerGuard?.dispose()
+  tsMarkerGuard = null
+}
+
+/** 编排脚本运行时全局对象的类型声明（注入 TS 语言服务的 extraLib） */
+const DOCAT_GLOBALS_DTS = `
+declare const devices: {
+  send(name: string, text: string): void
+  onMessage(name: string, cb: (msg: string) => void): void
+  onConnect(name: string, cb: () => void): void
+  onDisconnect(name: string, cb: () => void): void
+  isConnected(name: string): boolean
+  waitFor(name: string, match: string | ((msg: string) => boolean), timeoutMs?: number): Promise<string>
+  sendAndWait(name: string, text: string, match?: string, timeoutMs?: number): Promise<string>
+}
+declare const poses: {
+  get(name: string, sep?: string): number[] | string
+  list(): string[]
+}
+declare const utils: {
+  toArray(text: string, sep?: string): string[]
+  toString(arr: unknown[], sep?: string): string
+  sleep(ms: number): Promise<void>
+  wslToWin(path: string): string
+  winToWsl(path: string): string
+  calib: {
+    parseIwcaf(path: string): unknown
+    parseXml(path: string): unknown
+    imageToWorld(m: unknown, x: number, y: number, sep?: string): number[] | string
+    worldToImage(m: unknown, wx: number, wy: number, sep?: string): number[] | string
+  }
+}
+declare const log: {
+  info(...args: unknown[]): void
+  warn(...args: unknown[]): void
+  error(...args: unknown[]): void
+}
+// math 为全局 mathjs，成员由服务端动态探测补全（避免 any 吞掉补全）
+declare const math: any
+declare const docat: any
+declare function require(id: string): any
+`
+
+function setupTsLanguageService() {
+  try {
+    // 语义检查关闭：脚本内未声明的全局（devices 等）已由 extraLib 声明，require 路径不做解析
+    javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false })
+    javascriptDefaults.addExtraLib(DOCAT_GLOBALS_DTS, 'docat://globals.d.ts')
+  } catch {
+    // 语言服务不可用时忽略（不影响其余补全）
+  }
+}
+
 function configureDocatCompletion() {
   if (completionConfigured) return
   completionConfigured = true
+
+  setupMonacoWorkers()
+  setupTsLanguageService()
+  setupTsMarkerGuard()
+  // 预取 Python 标准库快照（builtins/类型方法/模块成员），首次输入即可用
+  void loadPythonSnapshot()
 
   // 主动注册 Monarch tokenizer 与语言配置（不受懒加载影响，保证高亮与补全即时可用）
   // 全局名（devices/poses/utils/log/math/docat）高亮为 docat-global
@@ -615,8 +755,10 @@ function configureDocatCompletion() {
         {
           const lineText = model.getLineContent(position.lineNumber)
           const beforeCursor = lineText.slice(0, position.column - 1)
-          const dotMatch = beforeCursor.match(/([A-Za-z_$][\w$]*)\.$/)
+          // 点后可带已输入的成员前缀：meth.e 也要走成员分支（否则退回裸词分支看不到成员）
+          const dotMatch = beforeCursor.match(/([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)?$/)
           if (dotMatch) {
+            const snapshot = getPythonSnapshotOrFallback()
             let moduleName: string | null = null
             if (language === 'javascript') {
               const requireVars = collectRequireVars(model.getValue())
@@ -626,7 +768,18 @@ function configureDocatCompletion() {
               const importVars = collectPythonImports(model.getValue())
               moduleName = importVars.get(dotMatch[1]) ?? null
             }
+
+            // 快照内模块成员（import math 后 math. 零延迟命中，含 doc 签名）
             if (moduleName) {
+              for (const item of moduleMemberItems(snapshot, moduleName, range)) suggestions.push(item)
+            }
+            // 未解析为模块的标识符 → 兜底展示常用类型方法（s.split( 场景）
+            if (language === 'python' && !moduleName) {
+              for (const item of typeMethodItems(snapshot, range)) suggestions.push(item)
+            }
+
+            // 动态探测模块成员（快照未覆盖的模块；超时兜底避免补全转圈）
+            if (moduleName && !snapshot.modules[moduleName]) {
               return fetchModuleMembers(moduleName, language === 'python').then(members => {
                 if (members) {
                   for (const member of members) {
@@ -637,12 +790,40 @@ function configureDocatCompletion() {
                         : monaco.languages.CompletionItemKind.Variable,
                       detail: `${moduleName}.${member.name} · ${member.type}`,
                       insertText: member.type === 'function' ? `${member.name}(` : member.name,
-                      sortText: `0500_${member.name}`,
+                      sortText: `0000_${member.name}`,
                       range,
                     })
                   }
                 }
                 return { suggestions: dedupe(suggestions) }
+              })
+            }
+          } else if (language === 'python') {
+            // Python 内置函数/类型 + 关键字（裸标识符即可命中，如 enumerate( / def）
+            const snapshot = getPythonSnapshotOrFallback()
+            for (const item of builtinItems(snapshot, range)) suggestions.push(item)
+            for (const keyword of PYTHON_KEYWORDS) {
+              suggestions.push({
+                label: keyword,
+                kind: monaco.languages.CompletionItemKind.Keyword,
+                insertText: keyword,
+                sortText: `4000_${keyword}`,
+                range,
+              })
+            }
+            // 已导入/可用的模块名（输入 meth 即可见；import 后打 . 出成员）
+            const moduleNames = new Set<string>(Object.keys(snapshot.modules))
+            for (const [alias] of collectPythonImports(model.getValue())) {
+              if (/^[A-Za-z_]\w*$/.test(alias)) moduleNames.add(alias)
+            }
+            for (const moduleName of moduleNames) {
+              suggestions.push({
+                label: moduleName,
+                kind: monaco.languages.CompletionItemKind.Module,
+                detail: `Python 模块 · import ${moduleName}`,
+                insertText: moduleName,
+                sortText: `3500_${moduleName}`,
+                range,
               })
             }
           }
@@ -674,6 +855,7 @@ if (import.meta.hot) {
     }
     completionDisposables = []
     completionConfigured = false
+    disposeTsMarkerGuard()
   })
 }
 
@@ -681,6 +863,43 @@ if (import.meta.hot) {
 
 const MARKER_OWNER = 'docat-script-error'
 
+// ─── Python 实时语法检查（服务端 ast.parse，输入停顿后防抖）────
+
+const PY_LINT_OWNER = 'docat-python-syntax'
+
+/** 应用语法检查结果：错误打波浪线（带行列），通过则清空 */
+function applyPythonLintMarkers(result: OrchPythonSyntaxCheckResult) {
+  const model = editor?.getModel()
+  if (!model || model.getLanguageId() !== 'python') return
+  if (result.ok || !result.error) {
+    monaco.editor.setModelMarkers(model, PY_LINT_OWNER, [])
+    return
+  }
+  const { line, column, message } = result.error
+  const safeLine = Math.min(Math.max(line, 1), model.getLineCount())
+  const col = Math.min(Math.max(column, 1), model.getLineMaxColumn(safeLine))
+  monaco.editor.setModelMarkers(model, PY_LINT_OWNER, [{
+    severity: monaco.MarkerSeverity.Error,
+    message,
+    startLineNumber: safeLine,
+    startColumn: col,
+    endLineNumber: safeLine,
+    endColumn: model.getLineMaxColumn(safeLine),
+  }])
+}
+
+// 真实模式：py 文件编辑停顿后请求服务端语法检查（mock 无服务端，跳过）
+if (!isMock) {
+  watch([fileContent, fileLanguage], () => {
+    cancelPythonSyntaxCheck()
+    if (fileLanguage.value !== 'python') {
+      const model = editor?.getModel()
+      if (model) monaco.editor.setModelMarkers(model, PY_LINT_OWNER, [])
+      return
+    }
+    schedulePythonSyntaxCheck(fileContent.value, 1200, applyPythonLintMarkers)
+  })
+}
 /** 清除脚本错误标记（加载文件/编辑内容/成功运行时调用） */
 function clearScriptMarkers() {
   const model = editor?.getModel()
@@ -1145,6 +1364,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  cancelPythonSyntaxCheck()
+  disposeTsMarkerGuard()
   stopScript()
   stopFollow()
   unsubScriptChange?.()

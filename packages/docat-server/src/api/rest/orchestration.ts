@@ -104,6 +104,93 @@ let watcher: FSWatcher | null = null
 let currentScriptsDir = ''
 let notifyTimer: ReturnType<typeof setTimeout> | null = null
 
+// ─── Python 标准库快照（前端自动补全用）────────────────
+
+/** 快照条目：模块成员 / builtins / 类型方法 */
+export interface StdlibMember {
+  name: string
+  type: string
+  doc: string
+}
+
+export interface PythonStdlibSnapshot {
+  builtins: StdlibMember[]
+  types: Record<string, StdlibMember[]>
+  modules: Record<string, StdlibMember[]>
+}
+
+/** 快照覆盖的常用类型方法（dir(builtins.T) 生成） */
+const STDLIB_SNAPSHOT_TYPES = ['str', 'list', 'dict', 'set', 'tuple', 'bytes']
+
+/** 快照覆盖的常用标准库模块（importlib.import_module 生成） */
+const STDLIB_SNAPSHOT_MODULES = [
+  'math', 'os', 'json', 'time', 'random', 're', 'collections', 'itertools',
+  'functools', 'datetime', 'pathlib', 'sys', 'string', 'statistics',
+]
+
+let stdlibSnapshotCache: { key: string; at: number; data: PythonStdlibSnapshot } | null = null
+/** 快照缓存有效期（解释器固定时成员不变；防止每次打开脚本面板都探测） */
+const STDLIB_SNAPSHOT_TTL = 60 * 60 * 1000
+
+// ─── 模块成员探测缓存（内存）：避免每次输入都启动子进程探测 ──
+// 成功缓存 1h；失败仅缓存 10s（给重试机会，且避免反复慢探测）
+
+type MemberProbeResult = { ok: true; members: Array<{ name: string; type: string }> } | { ok: false; message: string }
+
+const memberProbeCache = new Map<string, { at: number; result: MemberProbeResult }>()
+const MEMBER_PROBE_OK_TTL = 60 * 60 * 1000
+const MEMBER_PROBE_FAIL_TTL = 10 * 1000
+
+function readProbeCache(key: string): MemberProbeResult | null {
+  const entry = memberProbeCache.get(key)
+  if (!entry) return null
+  const ttl = entry.result.ok ? MEMBER_PROBE_OK_TTL : MEMBER_PROBE_FAIL_TTL
+  if (Date.now() - entry.at > ttl) {
+    memberProbeCache.delete(key)
+    return null
+  }
+  return entry.result
+}
+
+function writeProbeCache(key: string, result: MemberProbeResult): void {
+  memberProbeCache.set(key, { at: Date.now(), result })
+}
+
+/** 生成快照的 Python 脚本：sys.argv[1]=类型列表，sys.argv[2]=模块列表 */
+const STDLIB_SNAPSHOT_SCRIPT = `
+import builtins, importlib, json, sys
+MAXN = 300
+def members(obj):
+    out = []
+    for k in dir(obj):
+        if k.startswith("_"):
+            continue
+        try:
+            v = getattr(obj, k)
+            doc = ""
+            d = getattr(v, "__doc__", None)
+            if d:
+                doc = str(d).strip().splitlines()[0].strip()[:200]
+        except BaseException:
+            continue
+        if len(out) >= MAXN:
+            break
+        out.append({"name": k, "type": "function" if callable(v) else "variable", "doc": doc})
+    return out
+payload = {"builtins": members(builtins), "types": {}, "modules": {}}
+for t in sys.argv[1].split(","):
+    try:
+        payload["types"][t] = members(getattr(builtins, t))
+    except BaseException:
+        pass
+for m in sys.argv[2].split(","):
+    try:
+        payload["modules"][m] = members(importlib.import_module(m))
+    except BaseException:
+        pass
+print(json.dumps(payload))
+`
+
 function readOrchSettings(): OrchSettingsPayload {
   const num = (v: string, fallback: number) => {
     const n = Number(v)
@@ -285,13 +372,28 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
           return { success: false, error: { code: 42200, message: '缺少模块名' } }
         }
 
+        // 缓存命中直接返回（key 含脚本目录：require 解析基准影响成员）
+        const cacheKey = `js:${moduleName}|${currentScriptsDir}`
+        const cached = readProbeCache(cacheKey)
+        if (cached) {
+          return cached.ok
+            ? { success: true, data: { members: cached.members } }
+            : { success: false, error: { code: 50000, message: cached.message } }
+        }
+
         const probe = spawnSync(process.execPath, ['-e', `
           const { createRequire } = require('node:module')
           const path = require('node:path')
           const name = process.argv[1]
-          const scriptDir = process.argv[2]
+          // 脚本目录统一转绝对路径（createRequire 要求绝对路径，相对路径会直接抛错）
+          const scriptDir = process.argv[2] ? path.resolve(process.argv[2]) : ''
           // 与脚本运行时一致：先脚本目录解析，回退服务端包目录
-          const scriptRequire = scriptDir ? createRequire(path.join(scriptDir, '__docat_members__.js')) : null
+          let scriptRequire = null
+          try {
+            scriptRequire = scriptDir ? createRequire(path.join(scriptDir, '__docat_members__.js')) : null
+          } catch (e) {
+            scriptRequire = null
+          }
           let mod = null
           let lastError = null
           if (scriptRequire) {
@@ -324,11 +426,17 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         })
 
         if (probe.error || probe.status !== 0 || !probe.stdout) {
+          writeProbeCache(cacheKey, { ok: false, message: '模块加载失败或超时' })
           return { success: false, error: { code: 50000, message: '模块加载失败或超时' } }
         }
         const parsed = JSON.parse(probe.stdout) as { error?: string; members?: Array<{ name: string; type: string }> }
-        if (parsed.error) return { success: false, error: { code: 50000, message: parsed.error } }
-        return { success: true, data: { members: parsed.members ?? [] } }
+        if (parsed.error) {
+          writeProbeCache(cacheKey, { ok: false, message: parsed.error })
+          return { success: false, error: { code: 50000, message: parsed.error } }
+        }
+        const jsMembers = parsed.members ?? []
+        writeProbeCache(cacheKey, { ok: true, members: jsMembers })
+        return { success: true, data: { members: jsMembers } }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
@@ -351,6 +459,15 @@ export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, or
         const py = resolvePythonInterpreter()
         if (!py) {
           return { success: false, error: { code: 50000, message: '未找到 Python 解释器（python3 / python / py -3 均不可用）' } }
+        }
+
+        // 缓存命中直接返回（key 含解释器：自定义 Python 命令变更后自动失效）
+        const cacheKey = `py:${py.cmd}|${moduleName}`
+        const cached = readProbeCache(cacheKey)
+        if (cached) {
+          return cached.ok
+            ? { success: true, data: { members: cached.members } }
+            : { success: false, error: { code: 50000, message: cached.message } }
         }
 
         const probe = spawnSync(py.cmd, [...py.runArgs, '-c', `
@@ -383,6 +500,7 @@ print(json.dumps({"members": out}))
         })
 
         if (probe.error || probe.status !== 0 || !probe.stdout) {
+          writeProbeCache(cacheKey, { ok: false, message: '模块加载失败或超时' })
           return { success: false, error: { code: 50000, message: '模块加载失败或超时' } }
         }
         // 取最后一个可解析的 JSON 行（import 期间模块自身的 print 输出可忽略）
@@ -397,10 +515,126 @@ print(json.dumps({"members": out}))
           }
         }
         if (!payload) {
+          writeProbeCache(cacheKey, { ok: false, message: '模块探测无输出' })
           return { success: false, error: { code: 50000, message: '模块探测无输出' } }
         }
-        if (payload.error) return { success: false, error: { code: 50000, message: payload.error } }
-        return { success: true, data: { members: payload.members ?? [] } }
+        if (payload.error) {
+          writeProbeCache(cacheKey, { ok: false, message: payload.error })
+          return { success: false, error: { code: 50000, message: payload.error } }
+        }
+        const pyMembers = payload.members ?? []
+        writeProbeCache(cacheKey, { ok: true, members: pyMembers })
+        return { success: true, data: { members: pyMembers } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── Python 标准库快照（自动补全用）：builtins + 类型方法 + 常用 stdlib 成员 ──
+  app.post(
+    '/api/orchestration/scripts/python-stdlib-snapshot',
+    async (request, reply): Promise<ApiResponse<PythonStdlibSnapshot>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+
+        // 与脚本运行同一解释器解析逻辑（自定义命令优先），保证成员与运行环境一致
+        const py = resolvePythonInterpreter()
+        if (!py) {
+          return { success: false, error: { code: 50000, message: '未找到 Python 解释器（python3 / python / py -3 均不可用）' } }
+        }
+
+        const key = `${py.cmd}|${py.runArgs.join(' ')}`
+        if (stdlibSnapshotCache && stdlibSnapshotCache.key === key && Date.now() - stdlibSnapshotCache.at < STDLIB_SNAPSHOT_TTL) {
+          return { success: true, data: stdlibSnapshotCache.data }
+        }
+
+        const probe = spawnSync(py.cmd, [...py.runArgs, '-c', STDLIB_SNAPSHOT_SCRIPT, STDLIB_SNAPSHOT_TYPES.join(','), STDLIB_SNAPSHOT_MODULES.join(',')], {
+          cwd: SERVER_PKG_ROOT,
+          timeout: 8000,
+          encoding: 'utf-8',
+          env: pythonEnv(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+
+        if (probe.error || probe.status !== 0 || !probe.stdout) {
+          return { success: false, error: { code: 50000, message: '标准库快照生成失败或超时' } }
+        }
+        // 取最后一个可解析的 JSON 行（import 期间模块自身的 print 输出可忽略）
+        const lines = probe.stdout.split(/\r?\n/).filter(Boolean)
+        let payload: PythonStdlibSnapshot | null = null
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            payload = JSON.parse(lines[i]) as PythonStdlibSnapshot
+            break
+          } catch {
+            // 非 JSON 行（模块自身输出）跳过
+          }
+        }
+        if (!payload) {
+          return { success: false, error: { code: 50000, message: '标准库快照探测无输出' } }
+        }
+        stdlibSnapshotCache = { key, at: Date.now(), data: payload }
+        return { success: true, data: payload }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  // ─── Python 语法检查（编辑时实时波浪线）：用与运行一致的解释器 ast.parse ──
+  app.post<{ Body: { content?: string } }>(
+    '/api/orchestration/scripts/python-syntax-check',
+    async (request, reply): Promise<ApiResponse<{ ok: boolean; error?: { line: number; column: number; message: string } }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const content = String(request.body?.content ?? '')
+        if (content.length > 2 * 1024 * 1024) {
+          return { success: false, error: { code: 42200, message: '内容过大' } }
+        }
+        const py = resolvePythonInterpreter()
+        if (!py) {
+          return { success: false, error: { code: 50000, message: '未找到 Python 解释器（python3 / python / py -3 均不可用）' } }
+        }
+        const probe = spawnSync(py.cmd, [...py.runArgs, '-c', `
+import ast, json, sys
+src = sys.stdin.read()
+try:
+    ast.parse(src)
+    print(json.dumps({"ok": True}))
+except SyntaxError as e:
+    print(json.dumps({"ok": False, "error": {"line": e.lineno or 1, "column": e.offset or 1, "message": e.msg}}))
+except BaseException as e:
+    print(json.dumps({"ok": False, "error": {"line": 1, "column": 1, "message": "%s: %s" % (type(e).__name__, e)}}))
+`], {
+          input: content,
+          timeout: 5000,
+          encoding: 'utf-8',
+          env: pythonEnv(),
+          // stdin 必须 pipe：input 内容经 stdin 传入脚本（'ignore' 会吞掉 input）
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+        if (probe.error || probe.status !== 0 || !probe.stdout) {
+          return { success: false, error: { code: 50000, message: '语法检查失败或超时' } }
+        }
+        const lines = probe.stdout.split(/\r?\n/).filter(Boolean)
+        let payload: { ok: boolean; error?: { line: number; column: number; message: string } } | null = null
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            payload = JSON.parse(lines[i]) as { ok: boolean; error?: { line: number; column: number; message: string } }
+            break
+          } catch {
+            // 非 JSON 行跳过
+          }
+        }
+        if (!payload) {
+          return { success: false, error: { code: 50000, message: '语法检查无输出' } }
+        }
+        return { success: true, data: payload }
       } catch (err) {
         return { success: false, error: { code: 50000, message: (err as Error).message } }
       }
