@@ -1646,6 +1646,17 @@
                   </div>
                 </div>
                 <div class="settings-section">
+                  <div class="settings-section-header"><h4>移动 / 预设 限位</h4></div>
+                  <label class="toggle-switch" style="justify-content:space-between">
+                    <span class="toggle-label" style="min-width:0">开启限位</span>
+                    <input type="checkbox" v-model="movePoseLimitEnabled" :disabled="!isAdminUser" @change="persistMovePoseLimit" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                  <div class="text-muted" style="margin-top:8px;font-size:0.68rem;line-height:1.6">
+                    关闭后「移动 / 预设」板块的位姿移动不再校验坐标范围（如 X/Y/Z ±550mm、姿态角 ±180°）；急停、碰撞检测等安全保护仍生效。
+                  </div>
+                </div>
+                <div class="settings-section">
                   <div class="settings-section-header"><h4>时间提醒</h4></div>
                   <label class="toggle-switch" style="justify-content:space-between">
                     <span class="toggle-label" style="min-width:0">检查设备时间</span>
@@ -3100,7 +3111,7 @@ async function moveToPose() {
         ry: Number(targetPose.ry || 0),
         rz: Number(targetPose.rz || 0),
       }
-  const check = checkPoseLegal(pt)
+  const check = checkPoseLegal(pt, !movePoseLimitEnabled.value)
   if (!check.legal) {
     toastRef.value?.error(`安全校验失败: ${check.reason}`)
     return
@@ -3563,10 +3574,25 @@ async function exportCalibrationXmlToServer() {
   }
 }
 
-async function loadCalibExportDir() {
+/** 移动/预设板块限位开关（服务端全局设置：'1' = 开启，'0' = 关闭），缺省开启 */
+const movePoseLimitEnabled = ref(true)
+
+async function loadDocatSettings() {
   const res = await api.getSystemSettings()
   if (res.success && res.data) {
     calibExportDir.value = res.data.calibExportDir ?? ''
+    movePoseLimitEnabled.value = res.data.movePoseLimit !== '0'
+  }
+}
+
+async function persistMovePoseLimit() {
+  const target = movePoseLimitEnabled.value
+  const res = await api.saveSystemSettings({ movePoseLimit: target ? '1' : '0' })
+  if (res.success) {
+    toastRef.value?.success(target ? '移动 / 预设限位已开启' : '移动 / 预设限位已关闭')
+  } else {
+    movePoseLimitEnabled.value = !target
+    toastRef.value?.error(`保存失败: ${res.error?.message}`)
   }
 }
 
@@ -3741,6 +3767,7 @@ async function load() {
     device.value = deviceStore.getDevice(deviceId)
     enabled.value = true
     loadPostures()
+    void loadDocatSettings()
     return
   }
   const res = await api.listDevices()
@@ -3776,6 +3803,8 @@ async function load() {
   } catch { /* ignore */ }
   loadPostures()
   loadDobotPlusList()
+  // 限位开关为服务端全局设置：进页即加载，保证「移动/预设」板块立即按开关生效
+  void loadDocatSettings()
 }
 
 async function doConnect(mode: 'exclusive' | 'virtual' = 'exclusive') {
@@ -6471,26 +6500,28 @@ function getCurrentCartesian() {
   }
 }
 
-function checkPoseLegal(pt: TrajPoint): { legal: boolean; reason?: string } {
-  if (isMagician.value) {
-    // Magician 只校验 XYZR（R 由调用方写入 rz 槽位）
-    const r = pt.rz ?? pt.rx ?? 0
-    const limits: Array<{ key: keyof typeof MAGICIAN_WORKSPACE_LIMITS; value: number }> = [
-      { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
-      { key: 'r', value: r },
-    ]
-    for (const { key, value } of limits) {
-      const lim = MAGICIAN_WORKSPACE_LIMITS[key]
-      if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
-    }
-  } else {
-    const limits: Array<{ key: keyof typeof WORKSPACE_LIMITS; value: number }> = [
-      { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
-      { key: 'rx', value: pt.rx }, { key: 'ry', value: pt.ry }, { key: 'rz', value: pt.rz },
-    ]
-    for (const { key, value } of limits) {
-      const lim = WORKSPACE_LIMITS[key]
-      if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+function checkPoseLegal(pt: TrajPoint, ignoreRange = false): { legal: boolean; reason?: string } {
+  if (!ignoreRange) {
+    if (isMagician.value) {
+      // Magician 只校验 XYZR（R 由调用方写入 rz 槽位）
+      const r = pt.rz ?? pt.rx ?? 0
+      const limits: Array<{ key: keyof typeof MAGICIAN_WORKSPACE_LIMITS; value: number }> = [
+        { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
+        { key: 'r', value: r },
+      ]
+      for (const { key, value } of limits) {
+        const lim = MAGICIAN_WORKSPACE_LIMITS[key]
+        if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+      }
+    } else {
+      const limits: Array<{ key: keyof typeof WORKSPACE_LIMITS; value: number }> = [
+        { key: 'x', value: pt.x }, { key: 'y', value: pt.y }, { key: 'z', value: pt.z },
+        { key: 'rx', value: pt.rx }, { key: 'ry', value: pt.ry }, { key: 'rz', value: pt.rz },
+      ]
+      for (const { key, value } of limits) {
+        const lim = WORKSPACE_LIMITS[key]
+        if (value < lim.min || value > lim.max) return { legal: false, reason: `${key.toUpperCase()} = ${value.toFixed(2)} 超出范围 [${lim.min}, ${lim.max}]` }
+      }
     }
   }
   if (emergencyStop.value) return { legal: false, reason: '急停中' }
@@ -6815,7 +6846,7 @@ function loadSettingsTabData(tab: string) {
   else if (tab === 'remote') { loadRemoteIO(); loadRemoteModbus(); loadButtonProjects() }
   else if (tab === 'drag') loadDragSensivity()
   else if (tab === 'dobotplus') { loadDobotPlusList(); loadDobotPlusCatalog(); loadDobotPlusLocal() }
-  else if (tab === 'docat') loadCalibExportDir()
+  else if (tab === 'docat') loadDocatSettings()
   resetSettingsEditState()
 }
 

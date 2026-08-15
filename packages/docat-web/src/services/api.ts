@@ -645,11 +645,17 @@ export async function exportCalibrationXml(
   return request('POST', `/api/devices/${id}/calibration/exportXml`, { content, name })
 }
 
-export async function getSystemSettings(): Promise<ApiResponse<{ calibExportDir: string }>> {
+export interface SystemSettings {
+  calibExportDir: string
+  /** 移动/预设板块限位：'1' = 开启，'0' = 关闭 */
+  movePoseLimit: string
+}
+
+export async function getSystemSettings(): Promise<ApiResponse<SystemSettings>> {
   return request('GET', `/api/system/settings`)
 }
 
-export async function saveSystemSettings(settings: { calibExportDir: string }): Promise<ApiResponse<null>> {
+export async function saveSystemSettings(settings: Partial<SystemSettings>): Promise<ApiResponse<null>> {
   return request('POST', `/api/system/settings`, settings)
 }
 
