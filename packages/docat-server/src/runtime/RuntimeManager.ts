@@ -170,6 +170,11 @@ export class RuntimeManager {
     return this.child !== null
   }
 
+  /** 当前运行的脚本文件名（供 WS 连接建立时推送状态快照） */
+  get scriptFileName(): string {
+    return this.fileName
+  }
+
   private broadcastScriptStatus() {
     eventBus.emit('orch:event', {
       event: 'script-status',

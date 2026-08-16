@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   systemRoutes(app, pool)
   userRoutes(app)
   orchestrationRoutes(app, config.orchScriptsDir, orchDevices, orchRuntime)
-  websocketRoutes(app, pool)
+  websocketRoutes(app, pool, orchRuntime)
 
   // 7. 健康检查
   app.get('/api/health', async () => ({ status: 'ok', timestamp: Date.now() }))

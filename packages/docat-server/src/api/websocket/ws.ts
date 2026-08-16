@@ -11,6 +11,7 @@ import { getDb } from '../../db/index.js'
 import { ensureRuntimeTcp } from '../../device/runtimeTcp.js'
 import type { DevicePool } from '../../device/DevicePool.js'
 import { eventBus } from '../../event/EventBus.js'
+import type { RuntimeManager } from '../../runtime/RuntimeManager.js'
 import type { WSMessage } from 'docat-shared/types'
 
 interface WsClient {
@@ -24,7 +25,8 @@ interface WsClient {
 
 export function websocketRoutes(
   app: FastifyInstance,
-  pool: DevicePool
+  pool: DevicePool,
+  orchRuntime: RuntimeManager
 ): void {
   const clients: Map<WebSocket, WsClient> = new Map()
 
@@ -71,6 +73,17 @@ export function websocketRoutes(
           clients.set(ws, client)
           authenticated = true
           console.log(`[WS] Client connected: ${session.username} (${session.userId})`)
+          // 推送编排脚本运行状态快照：script-status 只在状态变化时广播，
+          // 页面刷新/重连后需主动补发，否则 UI 无法显示「运行中」/启用终止按钮
+          ws.send(JSON.stringify({
+            type: 'orch-event',
+            data: {
+              event: 'script-status',
+              running: orchRuntime.running,
+              fileName: orchRuntime.running ? orchRuntime.scriptFileName : '',
+              timestamp: Date.now(),
+            },
+          }))
           return
         }
 
