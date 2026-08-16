@@ -597,6 +597,49 @@ function collectPythonImports(text: string): Map<string, string> {
   return map
 }
 
+/** 解析脚本内已定义的局部变量/函数：赋值/元组解包/for/with-as/def/class（逐行扫，先截掉 # 注释） */
+function collectPythonLocals(text: string): Array<{ name: string; kind: 'variable' | 'function' | 'class'; line: number }> {
+  const out: Array<{ name: string; kind: 'variable' | 'function' | 'class'; line: number }> = []
+  const seen = new Set<string>()
+  const push = (name: string, kind: 'variable' | 'function' | 'class', line: number) => {
+    if (seen.has(name)) return
+    seen.add(name)
+    out.push({ name, kind, line })
+  }
+  // 行首赋值（普通/带类型/链式）：(?!=) 排除 ==，`=` 前必须紧跟标识符排除 += 等
+  const RE_ASSIGN = /^[ \t]*([A-Za-z_]\w*)(?:[ \t]*:[ \t]*[A-Za-z_]\w*)?[ \t]*=[ \t]*(?!=)/
+  const RE_TUPLE = /^[ \t]*([A-Za-z_]\w*)(?:[ \t]*,[ \t]*([A-Za-z_]\w*))+[ \t]*=[ \t]*(?!=)/
+  const RE_FOR = /\bfor\s+([A-Za-z_]\w*)(?:[ \t]*,[ \t]*([A-Za-z_]\w*))?\s+in\b/
+  const RE_AS = /\bas\s+([A-Za-z_]\w*)/
+  const RE_DEF = /\bdef\s+([A-Za-z_]\w*)/
+  const RE_CLASS = /\bclass\s+([A-Za-z_]\w*)/
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const hash = lines[i].indexOf('#')
+    const code = hash >= 0 ? lines[i].slice(0, hash) : lines[i]
+    const lineNo = i + 1
+    let m = RE_TUPLE.exec(code)
+    if (m) {
+      for (const g of m.slice(1)) if (g) push(g, 'variable', lineNo)
+    } else {
+      // 链式 a = b = 5：逐个截断前缀连续匹配
+      let rest = code
+      while ((m = RE_ASSIGN.exec(rest))) {
+        push(m[1], 'variable', lineNo)
+        rest = rest.slice(m[0].length)
+      }
+    }
+    if ((m = RE_FOR.exec(code))) {
+      if (m[1]) push(m[1], 'variable', lineNo)
+      if (m[2]) push(m[2], 'variable', lineNo)
+    }
+    if ((m = RE_AS.exec(code)) && m[1]) push(m[1], 'variable', lineNo)
+    if ((m = RE_DEF.exec(code)) && m[1]) push(m[1], 'function', lineNo)
+    if ((m = RE_CLASS.exec(code)) && m[1]) push(m[1], 'class', lineNo)
+  }
+  return out
+}
+
 // ─── JS 语言服务（TS worker IntelliSense + docat 全局类型声明）────────
 
 /**
@@ -799,8 +842,30 @@ function configureDocatCompletion() {
               })
             }
           } else if (language === 'python') {
-            // Python 内置函数/类型 + 关键字（裸标识符即可命中，如 enumerate( / def）
             const snapshot = getPythonSnapshotOrFallback()
+            // 已定义的局部变量/函数（赋值/for/with-as/def/class）；先于内置 push，同名用户变量优先
+            {
+              const docatGlobals = new Set(['devices', 'poses', 'utils', 'log', 'math', 'docat'])
+              const builtinNames = new Set(snapshot.builtins.map(b => b.name))
+              const importAliases = new Set(collectPythonImports(model.getValue()).keys())
+              for (const { name, kind, line } of collectPythonLocals(model.getValue())) {
+                if (PYTHON_KEYWORDS.includes(name) || builtinNames.has(name)
+                    || importAliases.has(name) || docatGlobals.has(name)) continue
+                suggestions.push({
+                  label: name,
+                  kind: kind === 'function'
+                    ? monaco.languages.CompletionItemKind.Function
+                    : kind === 'class'
+                      ? monaco.languages.CompletionItemKind.Class
+                      : monaco.languages.CompletionItemKind.Variable,
+                  detail: `脚本${kind === 'function' ? '函数' : kind === 'class' ? '类' : '变量'} · 第 ${line} 行`,
+                  insertText: name,
+                  sortText: `1500_${name}`,
+                  range,
+                })
+              }
+            }
+            // Python 内置函数/类型 + 关键字（裸标识符即可命中，如 enumerate( / def
             for (const item of builtinItems(snapshot, range)) suggestions.push(item)
             for (const keyword of PYTHON_KEYWORDS) {
               suggestions.push({
