@@ -433,6 +433,8 @@ const DOCAT_API_JS: DocatCompletionItem[] = [
   { label: 'utils.calib.parseXml', detail: '解析 .xml 标定文件', documentation: 'utils.calib.parseXml(路径) → 矩阵对象（附 precision）；路径错误自动转换重试', insert: 'utils.calib.parseXml(\'${1:路径}\')' },
   { label: 'utils.calib.imageToWorld', detail: '图像坐标 → 物理坐标', documentation: 'utils.calib.imageToWorld(m, x, y[, 分隔符, digits]) → [wx, wy] 或文本（digits 覆盖小数位数）', insert: 'utils.calib.imageToWorld(${1:m}, ${2:x}, ${3:y})' },
   { label: 'utils.calib.worldToImage', detail: '物理坐标 → 图像坐标', documentation: 'utils.calib.worldToImage(m, wx, wy[, 分隔符, digits]) → [ix, iy]（矩阵求逆；digits 覆盖小数位数）', insert: 'utils.calib.worldToImage(${1:m}, ${2:wx}, ${3:wy})' },
+  { label: 'utils.barcode', detail: '二维码/条码识别', documentation: '识别图片中的二维码/一维条码 → [{format, text, corners}]', insert: 'utils.barcode' },
+  { label: 'utils.barcode.decode', detail: '识别图片中的码', documentation: "utils.barcode.decode(路径) → [{format, text, corners}]；无码返回 []；路径支持 WSL⇄Windows 自动转换；corners 四角像素坐标可接 utils.calib.imageToWorld 转物理坐标", insert: "utils.barcode.decode('${1:路径}')" },
   { label: 'log', detail: '日志', documentation: '日志对象：info / warn / error（进编排日志面板），支持多参数（空格拼接，同 console.log）', insert: 'log' },
   { label: 'log.info', detail: '记录 info 日志', documentation: 'log.info(文本, ...)，多参数空格拼接，对象自动 JSON', insert: 'log.info(\'${1:文本}\')' },
   { label: 'log.warn', detail: '记录 warn 日志', documentation: 'log.warn(文本, ...)，多参数空格拼接，对象自动 JSON', insert: 'log.warn(\'${1:文本}\')' },
@@ -478,6 +480,8 @@ const DOCAT_API_PY: DocatCompletionItem[] = [
   { label: 'docat.utils.calib.parse_xml', detail: '解析 .xml 标定文件', documentation: 'docat.utils.calib.parse_xml(路径) → 矩阵字典（附 precision）', insert: 'docat.utils.calib.parse_xml(\'${1:路径}\')' },
   { label: 'docat.utils.calib.image_to_world', detail: '图像坐标 → 物理坐标', documentation: 'docat.utils.calib.image_to_world(m, x, y, sep=None, digits=None) → [wx, wy] 或文本（digits 覆盖小数位数）', insert: 'docat.utils.calib.image_to_world(${1:m}, ${2:x}, ${3:y})' },
   { label: 'docat.utils.calib.world_to_image', detail: '物理坐标 → 图像坐标', documentation: 'docat.utils.calib.world_to_image(m, wx, wy, sep=None, digits=None) → [ix, iy]（digits 覆盖小数位数）', insert: 'docat.utils.calib.world_to_image(${1:m}, ${2:wx}, ${3:wy})' },
+  { label: 'docat.utils.barcode', detail: '二维码/条码识别', documentation: '识别图片中的二维码/一维条码 → [{format, text, corners}]', insert: 'docat.utils.barcode' },
+  { label: 'docat.utils.barcode.decode', detail: '识别图片中的码', documentation: "docat.utils.barcode.decode(路径) → [{'format','text','corners'}]；无码返回 []；依赖服务端 Python 环境（pip install zxing-cpp opencv-contrib-python 一次）", insert: "docat.utils.barcode.decode('${1:路径}')" },
   { label: 'docat.log', detail: '日志', documentation: 'docat.log.info / warn / error（进编排日志面板），支持多参数（空格拼接）', insert: 'docat.log' },
   { label: 'docat.log.info', detail: '记录 info 日志', documentation: 'docat.log.info(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.info(\'${1:文本}\')' },
   { label: 'docat.log.warn', detail: '记录 warn 日志', documentation: 'docat.log.warn(文本, ...)，多参数空格拼接（同 print）', insert: 'docat.log.warn(\'${1:文本}\')' },
@@ -697,6 +701,9 @@ declare const utils: {
     parseXml(path: string): unknown
     imageToWorld(m: unknown, x: number, y: number, sep?: string): number[] | string
     worldToImage(m: unknown, wx: number, wy: number, sep?: string): number[] | string
+  }
+  barcode: {
+    decode(path: string): Promise<Array<{ format: string; text: string; corners: Array<{ x: number; y: number }> }>>
   }
 }
 declare const log: {

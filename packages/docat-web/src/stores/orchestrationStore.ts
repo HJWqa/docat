@@ -1225,6 +1225,10 @@ export function buildScriptContext() {
         worldToImage: (m: CalibMatrixLike, wx: number, wy: number, sep?: string, digits?: number) =>
           calibWorldToImage(m, Number(wx), Number(wy), sep, digits),
       },
+      // 二维码/条码识别（真实模式读取服务端图片并解码；mock 不支持）
+      barcode: {
+        decode: (path: string) => barcodeUnavailable(`decode('${path}')`),
+      },
     },
     log: {
       info: (text: string) => addLog('脚本', 'script', String(text)),
@@ -1263,6 +1267,10 @@ export interface CalibMatrixLike {
 
 function calibUnavailable(call: string): never {
   throw new Error(`${call} 需在真实模式运行（读取服务端标定文件）；mock 模式仅支持转换函数`)
+}
+
+function barcodeUnavailable(call: string): never {
+  throw new Error(`${call} 需在真实模式运行（图片解码依赖服务端环境）；mock 模式不支持识别`)
 }
 
 function calibImageToWorld(m: CalibMatrixLike, x: number, y: number, sep?: string, digits?: number): number[] | string {

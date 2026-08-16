@@ -18,6 +18,7 @@
   docat.devices.is_connected(name)
   docat.poses.get(name, sep=None, digits=None)  # None→数组；给 sep→字符串（digits 覆盖小数位数）
   docat.utils.to_array(text, sep=';') / to_string(arr, sep=';', digits=None) / sleep(ms)
+  docat.utils.barcode.decode(path)   # 二维码/条码识别（zxing-cpp 可选依赖，懒加载）
   docat.log.info / warn / error
 
 执行模型：用户脚本（顶层代码 + 消息处理）在同一 worker 线程内顺序执行，
@@ -159,7 +160,7 @@ def _convert_path(path):
     return None
 
 
-def _read_file(path):
+def _read_file(path, what="标定文件"):
     """读取文件：原路径失败（不存在）时自动做 WSL⇄Windows 路径转换后再试一次。"""
     p = _resolve(path)
     try:
@@ -171,11 +172,11 @@ def _read_file(path):
             # Windows 路径常见坑：字符串里反斜杠被转义吞掉（如 "D:\Users" → "D:Users"）
             if "\\" in p and not re.search(r":[\\/]", p):
                 hint = "（提示：Windows 路径字符串请用双反斜杠 \"D:\\\\...\" 或正斜杠 \"D:/...\"，推荐正斜杠）"
-            raise FileNotFoundError("标定文件不存在：%s%s" % (p, hint))
+            raise FileNotFoundError("%s不存在：%s%s" % (what, p, hint))
         try:
             return open(converted, "rb").read()
         except FileNotFoundError:
-            raise FileNotFoundError("标定文件不存在：%s（已尝试转换路径：%s）" % (p, converted))
+            raise FileNotFoundError("%s不存在：%s（已尝试转换路径：%s）" % (what, p, converted))
 
 
 class _Calib:
@@ -247,6 +248,61 @@ def _win_to_wsl(path):
     return "/mnt/%s/%s" % (m.group(1).lower(), rest)
 
 
+class _Barcode:
+    """utils.barcode：二维码 / 一维条码识别（zxing-cpp，可选依赖）。
+
+    依赖首次调用时懒加载（不阻塞 ready 握手）；缺失时抛错并给出安装命令。
+    解码核心 zxing-cpp（pip install zxing-cpp），读图用 opencv（imdecode 支持 BMP/中文路径）。
+    """
+
+    _deps = None
+
+    @classmethod
+    def _load_deps(cls):
+        if cls._deps is None:
+            try:
+                import zxingcpp
+            except ImportError:
+                raise RuntimeError(
+                    "识别需要 zxing-cpp：请在服务端 Python 环境安装 `pip install zxing-cpp opencv-contrib-python`"
+                )
+            try:
+                import cv2
+                import numpy as np
+            except ImportError:
+                raise RuntimeError(
+                    "识别需要 opencv（读图）：请在服务端 Python 环境安装 `pip install opencv-contrib-python`"
+                )
+            cls._deps = (zxingcpp, cv2, np)
+        return cls._deps
+
+    def decode(self, path):
+        """识别图片中的二维码/条码，返回 [{'format', 'text', 'corners'}]（无码返回 []）。
+
+        corners 为四角像素坐标 [(TL), (TR), (BR), (BL)]，可接 utils.calib 转物理坐标。
+        路径支持 WSL⇄Windows 自动转换（同 utils.calib）。
+        """
+        zxingcpp, cv2, np = self._load_deps()
+        data = _read_file(path, "图片文件")  # 原路径失败时自动 WSL⇄Windows 转换重试
+        img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("无法解析图片（格式不支持或文件损坏）：%s" % path)
+        results = []
+        for r in zxingcpp.read_barcodes(img):
+            p = r.position
+            results.append({
+                "format": r.format.name,
+                "text": r.text,
+                "corners": [
+                    (round(p.top_left.x), round(p.top_left.y)),
+                    (round(p.top_right.x), round(p.top_right.y)),
+                    (round(p.bottom_right.x), round(p.bottom_right.y)),
+                    (round(p.bottom_left.x), round(p.bottom_left.y)),
+                ],
+            })
+        return results
+
+
 class _Utils:
     def to_array(self, text, sep=";"):
         return _split_fields(text, sep)
@@ -270,6 +326,7 @@ class _Utils:
         return _win_to_wsl(path)
 
     calib = _Calib()
+    barcode = _Barcode()
 
 
 class _Log:
@@ -297,18 +354,52 @@ docat = type("docat", (), {
 sys.modules["docat"] = docat
 
 # ─── 输入线程：stdin → 队列 ──────────────────────────
+# stdin 优先设为非阻塞（管道）：若读取线程阻塞在管道读上，Windows 下脚本里
+# `import numpy`（及 cv2/pandas 等依赖 numpy 的库）会死锁（实测复现）。
+# 非阻塞设置失败（如手动终端运行）时回退为阻塞逐行读取。
+# 非阻塞语义：无数据返回 None；父进程关闭 stdin 返回 b''（EOF）。
 
 inbox = queue.Queue()
 
+_stdin_nonblocking = False
+try:
+    os.set_blocking(sys.stdin.fileno(), False)
+    _stdin_nonblocking = True
+except OSError:
+    pass
+
 
 def _reader():
-    for line in sys.stdin:
-        line = line.strip()
-        if line:
-            try:
-                inbox.put(json.loads(line))
-            except Exception:
-                pass
+    if not _stdin_nonblocking:
+        for line in sys.stdin:
+            line = line.strip()
+            if line:
+                try:
+                    inbox.put(json.loads(line))
+                except Exception:
+                    pass
+        state["exited"] = True
+        return
+    buf = b""
+    while not state["exited"]:
+        try:
+            chunk = sys.stdin.buffer.read(65536)
+        except (BlockingIOError, OSError):
+            chunk = None
+        if chunk is None:
+            time.sleep(0.01)
+            continue
+        if not chunk:
+            break  # EOF：父进程关闭了 stdin
+        buf += chunk
+        while b"\n" in buf:
+            raw, buf = buf.split(b"\n", 1)
+            raw = raw.strip()
+            if raw:
+                try:
+                    inbox.put(json.loads(raw.decode("utf-8", errors="replace")))
+                except Exception:
+                    pass
     state["exited"] = True
 
 

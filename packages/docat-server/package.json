@@ -20,10 +20,12 @@
     "commander": "^15.0.0",
     "docat-shared": "workspace:*",
     "fastify": "^5.11.2",
+    "jimp": "^1.6.1",
     "mathjs": "^15.2.0",
     "serialport": "^13.0.0",
     "ssh2-sftp-client": "^12.1.1",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "zxing-wasm": "^3.1.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

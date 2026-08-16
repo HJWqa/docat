@@ -250,8 +250,10 @@ function ensureWatch(dir: string): void {
 
 export function orchestrationRoutes(app: FastifyInstance, scriptsDir: string, orchDevices: OrchDeviceManager, runtime: RuntimeManager): void {
   // 启动时恢复用户配置的目录（有则用之），并建立监听
+  // 注意：配置可能是相对路径（如 "data\\orch-scripts"），需按服务端 CWD 解析为绝对路径，
+  // 否则脚本的 require 基准（createRequire）与文件监听会解析失败
   const persisted = getSetting(SETTING_SCRIPTS_DIR)
-  currentScriptsDir = persisted || scriptsDir
+  currentScriptsDir = resolve(persisted || scriptsDir)
   ensureWatch(currentScriptsDir)
   // 恢复自定义 Python 命令（清空探测缓存，使配置即时生效）
   runtime.setPythonCommand(getSetting(`${SETTING_PREFIX}pythonCommand`) || '')

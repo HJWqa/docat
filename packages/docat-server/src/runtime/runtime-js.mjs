@@ -19,7 +19,8 @@
  */
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import vm from 'node:vm'
 import { imageToWorld, parseIwcaf, parseXml, worldToImage } from './calib.mjs'
 
@@ -93,6 +94,73 @@ function joinValues(arr, sep, digits) {
   return (Array.isArray(arr) ? arr : []).map(v => fmtNumber(v, digits)).join(String(sep))
 }
 
+// ─── WSL 路径转换（/mnt/d/... ⇄ D:\...）──────────
+
+function wslToWinPath(path) {
+  const p = String(path ?? '')
+  const m = /^\/mnt\/([a-zA-Z])(\/.*)?$/.exec(p)
+  if (!m) return p
+  const drive = m[1].toUpperCase()
+  const rest = (m[2] || '').replace(/\//g, '\\')
+  return `${drive}:${rest || '\\'}`
+}
+
+function winToWslPath(path) {
+  const p = String(path ?? '')
+  const m = /^([a-zA-Z]):[\\/](.*)$/.exec(p)
+  if (!m) return p
+  const drive = m[1].toLowerCase()
+  const rest = (m[2] || '').replace(/[\\/]/g, '/')
+  return `/mnt/${drive}/${rest}`
+}
+
+// ─── 内置 barcode：二维码/条码识别（zxing-wasm + jimp）──────────
+// 依赖懒加载（首次 decode 调用才加载，不阻塞 ready 握手——mathjs 教训）；
+// 由 docat-server 的 dependencies 解析（pnpm --filter docat-server add zxing-wasm jimp）。
+
+let barcodeDepsPromise = null
+
+function loadBarcodeDeps() {
+  if (!barcodeDepsPromise) {
+    barcodeDepsPromise = Promise.resolve()
+      .then(() => {
+        const zxingWasm = requireFromServer('zxing-wasm')
+        // 本地加载 wasm 字节：zxing-wasm 默认 locateFile 指向 jsdelivr CDN，
+        // Node 环境无网/内网会挂起或偶发失败——改为本地字节彻底离线可用
+        try {
+          const wasmBinary = readFileSync(requireFromServer.resolve('zxing-wasm/full/zxing_full.wasm'))
+          zxingWasm.setZXingModuleOverrides({ wasmBinary })
+        } catch {
+          // 覆盖失败时保持默认行为（可能走 CDN），不阻断使用
+        }
+        // jimp v1 与 v0.22 的 require 形态不同，两种都兼容
+        let Jimp
+        try {
+          ;({ Jimp } = requireFromServer('jimp'))
+        } catch {
+          Jimp = requireFromServer('jimp')
+        }
+        return { zxingWasm, Jimp }
+      })
+      .catch((err) => {
+        barcodeDepsPromise = null // 允许下次重试
+        throw new Error(`识别依赖加载失败（docat-server 需安装 zxing-wasm / jimp）：${err.message}`)
+      })
+  }
+  return barcodeDepsPromise
+}
+
+/** 解析图片路径：原路径 + WSL⇄Windows 自动转换（同 utils.calib 语义），不存在则报错 */
+function resolveImageFile(path) {
+  const candidates = [path, wslToWinPath(path), winToWslPath(path)]
+    .filter((p, i, arr) => p && arr.indexOf(p) === i)
+  for (const c of candidates) {
+    if (existsSync(c)) return c
+  }
+  const tried = candidates.length > 1 ? `（已尝试：${candidates.slice(1).join(' / ')}）` : ''
+  throw new Error(`图片文件不存在：${path}${tried}`)
+}
+
 // ─── 用户 API ────────────────────────────────────────
 
 const docat = {
@@ -160,20 +228,10 @@ const docat = {
     },
     // ─── WSL 路径转换（/mnt/d/... ⇄ D:\...）──────────
     wslToWin(path) {
-      const p = String(path ?? '')
-      const m = /^\/mnt\/([a-zA-Z])(\/.*)?$/.exec(p)
-      if (!m) return p
-      const drive = m[1].toUpperCase()
-      const rest = (m[2] || '').replace(/\//g, '\\')
-      return `${drive}:${rest || '\\'}`
+      return wslToWinPath(path)
     },
     winToWsl(path) {
-      const p = String(path ?? '')
-      const m = /^([a-zA-Z]):[\\/](.*)$/.exec(p)
-      if (!m) return p
-      const drive = m[1].toLowerCase()
-      const rest = (m[2] || '').replace(/[\\/]/g, '/')
-      return `/mnt/${drive}/${rest}`
+      return winToWslPath(path)
     },
     // ─── 标定转换（图像坐标 ⇄ 物理坐标）──────────────
     calib: {
@@ -188,6 +246,37 @@ const docat = {
       },
       worldToImage(m, wx, wy, sep, digits) {
         return worldToImage(m, Number(wx), Number(wy), sep, digits)
+      },
+    },
+    // ─── 二维码/条码识别 ─────────────────────────────
+    barcode: {
+      /**
+       * 识别图片中的二维码/条码 → [{ format, text, corners }]（无码返回 []）
+       * corners 为四角像素坐标 [{x,y}×4]，可接 utils.calib.imageToWorld 转物理坐标。
+       * 路径支持 WSL⇄Windows 自动转换（同 utils.calib）。
+       */
+      async decode(path) {
+        const { zxingWasm, Jimp } = await loadBarcodeDeps()
+        const file = resolveImageFile(String(path ?? ''))
+        const img = await Jimp.read(file)
+        const { width, height, data } = img.bitmap   // RGBA 像素
+        const results = await zxingWasm.readBarcodes({
+          data: new Uint8ClampedArray(data),
+          width,
+          height,
+        })
+        return results
+          .filter((r) => r.isValid)
+          .map((r) => ({
+            format: r.format,
+            text: r.text,
+            corners: [
+              { x: r.position.topLeft.x, y: r.position.topLeft.y },
+              { x: r.position.topRight.x, y: r.position.topRight.y },
+              { x: r.position.bottomRight.x, y: r.position.bottomRight.y },
+              { x: r.position.bottomLeft.x, y: r.position.bottomLeft.y },
+            ],
+          }))
       },
     },
   },
@@ -309,7 +398,9 @@ rl.on('line', (line) => {
       if (msg.requireBase) {
         scriptBaseDir = String(msg.requireBase)
         try {
-          requireFromScriptDir = createRequire(join(scriptBaseDir, '__docat_require__.js'))
+          // 相对路径（如 "data\\orch-scripts"）需先按服务端 CWD 解析为绝对路径，
+          // 否则 createRequire 解析不到脚本目录的 node_modules
+          requireFromScriptDir = createRequire(join(resolve(scriptBaseDir), '__docat_require__.js'))
         } catch {
           requireFromScriptDir = null
         }

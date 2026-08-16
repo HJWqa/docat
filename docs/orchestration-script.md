@@ -268,6 +268,56 @@ w_text = docat.utils.calib.image_to_world(m2, 320, 240, sep=';')  # "wx;wy"
 ix, iy = docat.utils.calib.world_to_image(m2, wx, wy)          # 逆变换
 ```
 
+### utils.barcode — 二维码/条码识别（内置）
+
+识别图片中的**二维码与一维条码**（QRCode / Code128 / EAN-13 / EAN-8 / ITF / UPCA / UPCE / DataMatrix 等），**无需在脚本目录安装任何包**。
+
+| JS | Python | 说明 |
+|---|---|---|
+| `await utils.barcode.decode(路径)` | `docat.utils.barcode.decode(路径)` | 识别图片 → **数组** `[{ format, text, corners }]`；无码返回 `[]` |
+
+- `format`：`'QRCode'` / `'Code128'` / `'EAN-13'` ...（zxing 格式名）
+- `text`：解码内容
+- `corners`：四角**像素坐标** `[左上, 右上, 右下, 左下]`（JS 为 `{x,y}` 对象、Python 为 `(x,y)` 元组），可接 `utils.calib.imageToWorld` 转物理坐标
+- 路径支持**绝对路径**（WSL `/mnt/d/...` 与 Windows `D:\...`）与 WSL⇄Windows 自动转换（同 `utils.calib`）；路径写法警告见「utils.calib」（用正斜杠或双反斜杠）
+- 文件不存在 / 格式不支持 → 抛错（错误信息带已尝试路径）
+
+**实现说明**（了解即可）：
+- **JS**：内置 `zxing-wasm` + `jimp`（docat-server 依赖），wasm 从本地加载（不依赖 CDN，离线可用）；懒加载，首次调用才初始化
+- **Python**：依赖服务端 Python 环境的 `zxing-cpp` + `opencv-contrib-python`（一次性 `pip install`），缺失时抛错并提示安装命令；懒加载
+- **仅真实模式**：mock 模式调用会抛「需在真实模式运行」
+
+**JS 示例**（识别 → 日志 → 发送）：
+
+```js
+const results = await utils.barcode.decode('D:/camera_imgs/aaa_1.bmp')
+for (const r of results) {
+  log.info(r.format + ' → ' + r.text)              // QRCode → Circle
+  devices.send('motion_arm', r.format + ';' + r.text)
+}
+```
+
+**Python 示例**（同语义）：
+
+```python
+results = docat.utils.barcode.decode('D:/camera_imgs/aaa_1.bmp')
+for r in results:
+    docat.log.info(r['format'] + ' → ' + r['text'])
+    docat.devices.send('motion_arm', r['format'] + ';' + r['text'])
+```
+
+**与标定联动**（码中心 → 物理坐标 → 机械臂）：
+
+```js
+const results = await utils.barcode.decode('D:/camera_imgs/aaa_1.bmp')
+if (!results.length) return
+const c = results[0].corners
+const cx = (c[0].x + c[2].x) / 2, cy = (c[0].y + c[2].y) / 2
+const m = utils.calib.parseXml('D:/标定/calib.xml')
+const [wx, wy] = utils.calib.imageToWorld(m, cx, cy)
+devices.send('motion_arm', 'MovL;' + utils.toString([wx, wy, 60, 0, 0, 0], ';'))
+```
+
 ### log — 日志（进编排日志面板）
 
 | JS | Python |
@@ -472,6 +522,45 @@ def on_msg(msg):
     docat.log.info('一轮取放完成')
 ```
 
+## 二维码 / 条码识别（场景示例）
+
+内置 `utils.barcode`（API 详见「utils.barcode」章节）：相机把图片存到服务端目录 → 脚本轮询新图 → 识别 → 记日志/发设备（可经 `utils.calib` 转物理坐标后驱动机械臂）。
+
+> **图像来源建议**：设备通道（TCP/UDP/串口）按 UTF-8 文本收发，不适合传大图；相机把图片保存到目录、脚本轮询是最实用的路径。
+
+完整可运行示例（默认放 `./data/orch-scripts`，脚本页选择文件运行）：
+
+- `packages/docat-server/data/orch-scripts/qr-barcode-scan.py`
+- `packages/docat-server/data/orch-scripts/qr-barcode-scan.js`
+
+使用前改脚本顶部两个配置：`IMAGE_DIR`（相机存图目录）、`TARGET_DEV`（识别结果要发往的设备名，留空仅记日志）。
+
+**核心逻辑**（JS / Python 同语义，无需安装任何脚本级依赖）：
+
+```js
+// 轮询新图并识别
+const results = await utils.barcode.decode('D:/camera_imgs/aaa_1.bmp')
+for (const r of results) {
+  log.info(r.format + ' → ' + r.text)                 // QRCode → Circle
+  devices.send('motion_arm', r.format + ';' + r.text)
+}
+```
+
+```python
+results = docat.utils.barcode.decode('D:/camera_imgs/aaa_1.bmp')
+for r in results:
+    docat.log.info(r['format'] + ' → ' + r['text'])
+    docat.devices.send('motion_arm', r['format'] + ';' + r['text'])
+```
+
+识别结果与 `utils.calib` 联动（码中心 → 物理坐标 → 发机械臂）见「utils.barcode」章节示例。
+
+**注意事项**：
+- **仅真实模式**：mock 模式（`?mock=1`）在浏览器内运行，无服务端解码环境，调用 `utils.barcode.decode` 会抛「需在真实模式运行」。
+- **Python 轮询 vs 事件驱动**：顶层轮询循环会持续占住 worker 线程，期间 `on_message` 回调不会触发——「纯轮询识别 → 发送」用循环写法；需要同时响应设备消息时改成事件驱动：收到触发消息后再调用 `scan_folder(seen)`（示例脚本同款函数）。
+- **Python 依赖**：服务端 Python 环境一次性 `pip install zxing-cpp opencv-contrib-python`；缺失时调用会抛错并提示安装命令。
+- **Windows 路径**：用正斜杠 `"D:/..."` 或双反斜杠（见「utils.calib」的路径警告）。
+
 ## Docat Motion 协议（内置虚拟设备）
 
 模拟 `pick_place_tcp.py` 行为，目标真实设备已连接时指令转发执行（`moveCartesian` / 吸盘），未连接则内部模拟并回复应答：
@@ -506,6 +595,8 @@ log.info('取放完成')
 
 | 问题 | 说明 |
 |---|---|
+| JS 脚本 `require` 报 Cannot find module | 在脚本目录下 `npm install <包> --prefix <脚本目录>`；若「设置 → 通用」的脚本目录填的是**相对路径**（如 `data\orch-scripts`），旧版服务端会把它原样传给脚本运行时导致解析失败——新版已按服务端启动目录解析为绝对路径，请更新 docat-server |
+| `utils.barcode.decode` 报依赖缺失 | Python：服务端 `pip install zxing-cpp opencv-contrib-python` 一次即可（JS 无此问题，wasm 已内置本地加载） |
 | 设备未连接时 send | 记错误日志（`发送失败：设备未连接 → ...`），脚本继续执行；可用 `isConnected` 先行判断 |
 | waitFor/sendAndWait 超时 | 默认 10s，传第 4 个参数调整；超时抛错需捕获（JS try/catch、Python try/except） |
 | Windows 路径报错 | 见「utils.calib」的路径写法警告：用正斜杠或双反斜杠 |
