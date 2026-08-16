@@ -645,6 +645,24 @@ export async function exportCalibrationXml(
   return request('POST', `/api/devices/${id}/calibration/exportXml`, { content, name })
 }
 
+export interface CalibrationSaveData {
+  rows: CalibrationExportRow[]
+  rowCount: number
+  model: string
+  weightFn: string
+  ransacThresh: number
+}
+
+export async function getDeviceCalibration(
+  id: string,
+): Promise<ApiResponse<{ data: string | null; updatedAt: string | null }>> {
+  return request('GET', `/api/devices/${id}/calibration`)
+}
+
+export async function saveDeviceCalibration(id: string, data: CalibrationSaveData): Promise<ApiResponse<null>> {
+  return request('PUT', `/api/devices/${id}/calibration`, { data: JSON.stringify(data) })
+}
+
 export interface SystemSettings {
   calibExportDir: string
   /** 移动/预设板块限位：'1' = 开启，'0' = 关闭 */

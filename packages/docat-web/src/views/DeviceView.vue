@@ -210,6 +210,9 @@
             <button class="btn-icon btn-icon--toolbar" @click="exportCalibrationXmlToServer" @contextmenu.prevent="downloadCalibrationXml" title="导出 xml（左键：服务端写入导出目录；右键：下载 xml 文件）">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5 4l-3 4 3 4M11 4l3 4-3 4M9.5 3l-3 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
+            <button class="btn-icon btn-icon--toolbar" :disabled="calibServerBusy" @click="saveCalibToServer" @contextmenu.prevent="loadCalibFromServer" title="同步标定数据（左键：保存到服务器；右键：从服务器获取）">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5 2.5V6h6V2.5" stroke="currentColor" stroke-width="1.3"/><rect x="5" y="9" width="6" height="4.5" stroke="currentColor" stroke-width="1.3"/></svg>
+            </button>
             <input ref="calibFileInputRef" type="file" accept=".txt,.text,.xml" style="display:none" @change="onCalibFileChange" />
           </div>
 
@@ -3731,30 +3734,84 @@ function persistCalib() {
   }
 }
 
+interface CalibStorageData {
+  rows?: CalibPoint[]
+  rowCount?: number
+  model?: CalibModel
+  weightFn?: WeightFn
+  ransacThresh?: number
+}
+
+function applyCalibData(data: CalibStorageData) {
+  if (Array.isArray(data.rows)) {
+    calibRows.value = data.rows.map(r => ({ imgX: r.imgX, imgY: r.imgY, physX: r.physX, physY: r.physY, angle: r.angle ?? 0 }))
+    calibRowCount.value = Math.max(1, calibRows.value.length)
+  }
+  if (data.model === 'affine' || data.model === 'homography') calibModel.value = data.model
+  if (data.weightFn === 'lsq' || data.weightFn === 'huber' || data.weightFn === 'tukey' || data.weightFn === 'ransac') calibWeightFn.value = data.weightFn
+  if (typeof data.ransacThresh === 'number' && Number.isFinite(data.ransacThresh) && data.ransacThresh > 0) calibRansacThresh.value = data.ransacThresh
+}
+
 function loadCalib() {
   try {
     const raw = localStorage.getItem(CALIB_STORAGE_KEY)
     if (raw) {
-      const data = JSON.parse(raw) as {
-        rows?: CalibPoint[]
-        rowCount?: number
-        model?: CalibModel
-        weightFn?: WeightFn
-        ransacThresh?: number
-      }
-      if (Array.isArray(data.rows)) {
-        calibRows.value = data.rows.map(r => ({ imgX: r.imgX, imgY: r.imgY, physX: r.physX, physY: r.physY, angle: r.angle ?? 0 }))
-        calibRowCount.value = Math.max(1, calibRows.value.length)
-      }
-      if (data.model === 'affine' || data.model === 'homography') calibModel.value = data.model
-      if (data.weightFn === 'lsq' || data.weightFn === 'huber' || data.weightFn === 'tukey' || data.weightFn === 'ransac') calibWeightFn.value = data.weightFn
-      if (typeof data.ransacThresh === 'number' && Number.isFinite(data.ransacThresh) && data.ransacThresh > 0) calibRansacThresh.value = data.ransacThresh
+      applyCalibData(JSON.parse(raw) as CalibStorageData)
     }
   } catch {
     // 解析失败时使用默认值
   }
   syncCalibRows()
   refitCalib()
+}
+
+// ─── 标定数据服务端同步（多端共享）──────────────
+
+const calibServerBusy = ref(false)
+
+async function saveCalibToServer() {
+  if (calibServerBusy.value) return
+  calibServerBusy.value = true
+  try {
+    const res = await api.saveDeviceCalibration(deviceId, {
+      rows: calibExportRows(),
+      rowCount: calibRowCount.value,
+      model: calibModel.value,
+      weightFn: calibWeightFn.value,
+      ransacThresh: calibRansacThresh.value,
+    })
+    if (res.success) {
+      toastRef.value?.success('已保存到服务器')
+    } else {
+      toastRef.value?.error(`保存失败: ${apiErrorText(res)}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`保存失败: ${(err as Error).message}`)
+  } finally {
+    calibServerBusy.value = false
+  }
+}
+
+async function loadCalibFromServer() {
+  if (calibServerBusy.value) return
+  calibServerBusy.value = true
+  try {
+    const res = await api.getDeviceCalibration(deviceId)
+    if (res.success && res.data?.data) {
+      applyCalibData(JSON.parse(res.data.data) as CalibStorageData)
+      syncCalibRows()
+      refitCalib()
+      toastRef.value?.success(`已从服务器获取标定数据${res.data.updatedAt ? `（${res.data.updatedAt}）` : ''}`)
+    } else if (res.success) {
+      toastRef.value?.info('服务器上没有标定数据')
+    } else {
+      toastRef.value?.error(`获取失败: ${apiErrorText(res)}`)
+    }
+  } catch (err) {
+    toastRef.value?.error(`获取失败: ${(err as Error).message}`)
+  } finally {
+    calibServerBusy.value = false
+  }
 }
 
 watch([calibRows, calibModel, calibWeightFn, calibRansacThresh], () => refitCalib(), { deep: true })

@@ -1252,6 +1252,45 @@ export function deviceRoutes(app: FastifyInstance, pool: DevicePool): void {
     }
   )
 
+  // ─── 标定数据服务端同步（整存整取 JSON）───────────────
+
+  app.get<{ Params: { id: string } }>(
+    '/api/devices/:id/calibration',
+    async (request, reply): Promise<ApiResponse<{ data: string | null; updatedAt: string | null }>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        const row = getDb().prepare('SELECT data, updatedAt FROM device_calibration WHERE deviceId = ?')
+          .get(request.params.id) as { data?: string; updatedAt?: string } | undefined
+        return { success: true, data: { data: row?.data ?? null, updatedAt: row?.updatedAt ?? null } }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
+  app.put<{ Params: { id: string }; Body: { data?: string } }>(
+    '/api/devices/:id/calibration',
+    async (request, reply): Promise<ApiResponse<null>> => {
+      try {
+        await authMiddleware(request, reply)
+        if (reply.sent) return reply
+        requireOperator(request, reply)
+        const data = request.body?.data ?? ''
+        if (data.length > 1024 * 1024) {
+          return { success: false, error: { code: 40000, message: '标定数据过大' } }
+        }
+        getDb().prepare(`
+          INSERT INTO device_calibration (deviceId, data, updatedAt) VALUES (?, ?, datetime('now'))
+          ON CONFLICT(deviceId) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(request.params.id, data)
+        return { success: true, data: null }
+      } catch (err) {
+        return { success: false, error: { code: 50000, message: (err as Error).message } }
+      }
+    }
+  )
+
   // ─── 用户管理 ──────────────────────────────────
 
   app.get<{ Params: { id: string } }>(

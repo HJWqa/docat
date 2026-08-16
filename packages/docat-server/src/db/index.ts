@@ -278,6 +278,20 @@ function runMigrations(db: Database.Database): void {
     console.log('[DB] Migration 011_device_serial applied')
   }
 
+  // ─── 012: 标定辅助数据（设备级，服务端同步）────
+  if (!applied.has('012_device_calibration')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS device_calibration (
+        deviceId TEXT PRIMARY KEY,
+        data TEXT NOT NULL DEFAULT '',
+        updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+
+    db.prepare("INSERT INTO _migrations (name) VALUES ('012_device_calibration')").run()
+    console.log('[DB] Migration 012_device_calibration applied')
+  }
+
   console.log(`[DB] Database ready at ${db.name}`)
 }
 
