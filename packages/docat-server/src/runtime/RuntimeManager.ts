@@ -203,9 +203,11 @@ export class RuntimeManager {
   }
 
   private sendToChild(msg: OutgoingMessage) {
-    if (!this.child) return
+    const child = this.child
+    // 子进程可能已退出（exit 回调尚未执行）：管道已断则直接丢弃
+    if (!child || child.stdin.destroyed || !child.stdin.writable) return
     try {
-      this.child.stdin.write(`${JSON.stringify(msg)}\n`)
+      child.stdin.write(`${JSON.stringify(msg)}\n`)
     } catch {
       // 子进程可能已退出
     }
@@ -262,6 +264,13 @@ export class RuntimeManager {
       const out = this.startupOutput.trim().slice(-500)
       this.broadcastLog('error', out ? `脚本启动超时（子进程输出：${out}）` : '脚本启动超时')
     }, 10000)
+
+    // 管道断开（EPIPE/ECONNRESET）是异步 'error' 事件，try/catch 接不住；
+    // 若不挂监听会触发 Unhandled 'error' event 拖垮整个进程。子进程退出时管道必然断开，
+    // 但 this.child 要等 exit 回调才置 null，窗口期内仍可能写入已死管道。
+    child.stdin.on('error', () => {})
+    child.stdout.on('error', () => {})
+    child.stderr.on('error', () => {})
 
     // StringDecoder 处理跨 chunk 的多字节字符，避免 UTF-8 字符被截断产生乱码（�）
     const stdoutDecoder = new StringDecoder('utf-8')
